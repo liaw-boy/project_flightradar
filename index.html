@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>暗黑全球航空雷達 - 終極精準版</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+    <style>
+        body { margin: 0; padding: 0; background-color: #000; font-family: 'Share Tech Mono', monospace; user-select: none; overflow: hidden; }
+        #map { width: 100vw; height: 100vh; }
+        .leaflet-control-attribution, .leaflet-control-zoom { display: none; }
+        
+        .plane-icon { display: flex; justify-content: center; align-items: center; }
+        .emergency-glow { filter: drop-shadow(0 0 15px #FF4136) !important; }
+        .ground-glow { filter: drop-shadow(0 0 3px #666) !important; opacity: 0.7; }
+
+        #dashboard { position: absolute; top: 20px; right: 20px; z-index: 1000; background: rgba(10, 15, 20, 0.85); border: 1px solid rgba(1, 255, 112, 0.3); border-radius: 8px; padding: 15px 20px; color: #fff; box-shadow: 0 0 20px rgba(0,0,0,0.8), inset 0 0 10px rgba(1, 255, 112, 0.1); backdrop-filter: blur(10px); min-width: 200px; }
+        .title-container { display: flex; align-items: center; margin-bottom: 15px; }
+        .live-dot { width: 10px; height: 10px; background-color: #01FF70; border-radius: 50%; margin-right: 12px; box-shadow: 0 0 8px #01FF70; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
+        #dashboard h2 { margin: 0; font-size: 18px; color: #01FF70; letter-spacing: 2px; }
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; color: #aaa; }
+        .stat-value { font-weight: bold; color: #01FF70; font-size: 16px; }
+
+        .cyber-label { background: rgba(10, 15, 20, 0.8) !important; border: 1px solid rgba(1, 255, 112, 0.4) !important; border-radius: 4px !important; color: #01FF70 !important; font-family: 'Share Tech Mono', monospace; font-size: 11px !important; padding: 2px 5px !important; backdrop-filter: blur(4px); display: flex; align-items: center; gap: 6px; }
+        .cyber-label::before, .cyber-label::after { display: none !important; }
+        .cyber-label img { max-height: 12px; width: auto; filter: brightness(1.2); }
+
+        #sidebar { position: absolute; top: 0; left: 0; width: 320px; height: 100vh; z-index: 2000; background: rgba(15, 20, 25, 0.95); border-right: 1px solid #FFDC00; box-shadow: 5px 0 25px rgba(0,0,0,0.9); backdrop-filter: blur(10px); transform: translateX(-100%); transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); display: flex; flex-direction: column; color: #fff; }
+        #sidebar.active { transform: translateX(0); }
+        .sb-header { padding: 15px 20px; background: rgba(0,0,0,0.5); border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
+        .sb-title { font-size: 24px; font-weight: bold; color: #FFDC00; margin: 0;}
+        .sb-close { cursor: pointer; color: #aaa; font-size: 24px; line-height: 1; transition: 0.2s; }
+        .sb-close:hover { color: #FF4136; }
+        .sb-content { padding: 20px; overflow-y: auto; flex-grow: 1; }
+        .sb-logo-container { text-align: center; margin-bottom: 20px; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px; }
+        .sb-logo-container img { max-width: 100%; max-height: 60px; object-fit: contain; }
+        .sb-section-title { font-size: 12px; color: #888; border-bottom: 1px solid #333; padding-bottom: 5px; margin: 15px 0 10px 0; }
+        .sb-data-row { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 15px; }
+        .sb-data-label { color: #aaa; }
+        .sb-data-value { font-weight: bold; color: #fff; text-align: right; }
+        .route-btn { display: block; margin-top: 25px; padding: 12px; background: rgba(255, 220, 0, 0.1); border: 1px solid #FFDC00; color: #FFDC00; text-decoration: none; border-radius: 4px; font-size: 14px; text-align: center; transition: 0.3s; }
+        .route-btn:hover { background: #FFDC00; color: #000; font-weight: bold; }
+        .alert-box { color: #FF4136; border: 1px solid #FF4136; padding: 8px; text-align: center; margin-bottom: 15px; border-radius: 4px; animation: pulse 1s infinite; display: none; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <div class="sb-header"><h2 class="sb-title" id="sb-callsign">------</h2><div class="sb-close" onclick="closeSidebar()">×</div></div>
+    <div class="sb-content">
+        <div class="alert-box" id="sb-alert">🚨 EMERGENCY DETECTED</div>
+        <div class="sb-logo-container"><img id="sb-logo" src="" alt="Logo" onerror="this.style.display='none'"></div>
+        <div class="sb-section-title">FLIGHT IDENTITY</div>
+        <div class="sb-data-row"><span class="sb-data-label">Registration</span><span class="sb-data-value" id="sb-reg">--</span></div>
+        <div class="sb-data-row"><span class="sb-data-label">Country</span><span class="sb-data-value" id="sb-country">--</span></div>
+        <div class="sb-section-title">SPATIAL DATA</div>
+        <div class="sb-data-row"><span class="sb-data-label">Altitude</span><span class="sb-data-value" id="sb-alt">--</span></div>
+        <div class="sb-data-row"><span class="sb-data-label">Speed</span><span class="sb-data-value" id="sb-spd">--</span></div>
+        <div class="sb-data-row"><span class="sb-data-label">Heading</span><span class="sb-data-value" id="sb-hdg">--</span></div>
+        <div class="sb-data-row"><span class="sb-data-label">Vert. Rate</span><span class="sb-data-value" id="sb-vrate">--</span></div>
+        <a id="sb-route-btn" href="#" target="_blank" class="route-btn">Track on Flightradar24 ↗</a>
+    </div>
+</div>
+
+<div id="dashboard">
+    <div class="title-container"><div class="live-dot" id="status-dot"></div><h2>RADAR SYSTEM</h2></div>
+    <div class="stat-row"><span>SYS.TIME</span><span id="sys-time" class="stat-value">--:--:--</span></div>
+    <div class="stat-row"><span>AIRCRAFT</span><span id="plane-count" class="stat-value">SCANNING</span></div>
+</div>
+
+<div id="map"></div>
+
+<script>
+    const map = L.map('map', { zoomControl: false }).setView([25.17, 121.44], 10);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+    const planeLayer = L.layerGroup().addTo(map);
+
+    const planesDict = {}; 
+    const flightHistory = {}; 
+    let selectedIcao24 = null; 
+    let trackLine = null;      
+
+    function getAltitudeColor(altitude, onGround, isEmergency) {
+        if (isEmergency) return '#FF4136'; 
+        if (onGround) return '#888888';    
+        if (altitude === 'N/A' || altitude === 'GROUND') return '#888';
+        if (altitude < 1500) return '#FF4136'; 
+        if (altitude < 5000) return '#FFDC00'; 
+        return '#01FF70';                      
+    }
+
+    function createPlaneIcon(heading, altitude, isSelected, onGround, isEmergency) {
+        const color = getAltitudeColor(altitude, onGround, isEmergency);
+        let extraClass = isEmergency ? 'emergency-glow' : (onGround ? 'ground-glow' : '');
+        const glow = isSelected ? `drop-shadow(0 0 12px #FFDC00)` : `drop-shadow(0 0 5px ${color})`;
+        const planeColor = isSelected ? '#FFDC00' : color;
+        const svg = `<svg viewBox="0 0 24 24" width="28" height="28" style="transform: rotate(${heading}deg); filter: ${glow};"><path fill="${planeColor}" d="M21,16V14L13,9V3.5A1.5,1.5 0 0,0 11.5,2A1.5,1.5 0 0,0 10,3.5V9L2,14V16L10,13.5V19L8,20.5V22L11.5,21L15,22V20.5L13,19V13.5L21,16Z" /></svg>`;
+        return L.divIcon({ html: svg, className: `plane-icon ${extraClass}`, iconSize: [28, 28], iconAnchor: [14, 14] });
+    }
+
+    function closeSidebar() {
+        selectedIcao24 = null;
+        document.getElementById('sidebar').classList.remove('active');
+        if (trackLine) map.removeLayer(trackLine);
+        renderPlanes(); 
+    }
+    map.on('click', closeSidebar);
+
+    async function fetchAndDrawFullTrack(icao24) {
+        if (trackLine) map.removeLayer(trackLine);
+        try {
+            const trackUrl = `https://opensky-network.org/api/tracks/all?icao24=${icao24}&time=0`;
+            const res = await fetch(trackUrl);
+            if (!res.ok) throw new Error('API Blocked');
+            const data = await res.json();
+            const latlngs = data.path.map(p => [p[1], p[2]]);
+            trackLine = L.polyline(latlngs, { color: '#FFDC00', weight: 2, opacity: 0.8 }).addTo(map);
+        } catch (e) {
+            if (flightHistory[icao24]) {
+                trackLine = L.polyline(flightHistory[icao24], { color: '#FFDC00', weight: 2, opacity: 0.8, dashArray: '5,5' }).addTo(map);
+            }
+        }
+    }
+
+    function updateSidebar(callsign, country, altitude, velocity, vRate, onGround, isEmergency, squawk, icao24) {
+        document.getElementById('sidebar').classList.add('active');
+        document.getElementById('sb-alert').style.display = isEmergency ? 'block' : 'none';
+        document.getElementById('sb-alert').innerText = `🚨 EMERGENCY SQUAWK: ${squawk}`;
+        document.getElementById('sb-callsign').innerText = callsign;
+        document.getElementById('sb-logo').src = `https://cdn.flightradar24.com/assets/airlines/logotypes/${callsign.substring(0, 3)}.png`;
+        document.getElementById('sb-logo').style.display = 'inline-block';
+        document.getElementById('sb-reg').innerText = icao24.toUpperCase();
+        document.getElementById('sb-country').innerText = country;
+        document.getElementById('sb-alt').innerText = onGround ? 'GROUND' : `${altitude} m`;
+        document.getElementById('sb-spd').innerText = `${velocity} km/h`;
+        if(planesDict[icao24]) document.getElementById('sb-hdg').innerText = `${Math.round(planesDict[icao24].heading)}°`;
+        document.getElementById('sb-vrate').innerText = vRate > 0.5 ? `↗ ${vRate} m/s` : (vRate < -0.5 ? `↘ ${vRate} m/s` : '→ Level');
+        document.getElementById('sb-route-btn').href = `https://www.flightradar24.com/${callsign}`;
+    }
+
+    setInterval(() => {
+        document.getElementById('sys-time').innerText = new Date().toLocaleTimeString('en-US', { hour12: false });
+    }, 1000);
+
+    // ==========================================
+    // 資料獲取引擎：加入「真實通訊時間」判定
+    // ==========================================
+    let isFetching = false;
+    async function fetchPlanes() {
+        if (isFetching || map.getZoom() < 6) return;
+        isFetching = true;
+
+        const bounds = map.getBounds();
+        const url = `https://opensky-network.org/api/states/all?lamin=${bounds.getSouth()}&lomin=${bounds.getWest()}&lamax=${bounds.getNorth()}&lomax=${bounds.getEast()}`;
+        
+        try {
+            const response = await fetch(url);
+            const textData = await response.text();
+
+            if (textData.includes('Too many requests') || textData.includes('<html') || !response.ok) {
+                document.getElementById('plane-count').innerText = 'IP 封鎖冷卻中';
+                document.getElementById('status-dot').style.backgroundColor = '#FF4136';
+                isFetching = false; return; 
+            }
+
+            const data = JSON.parse(textData);
+            document.getElementById('status-dot').style.backgroundColor = '#01FF70'; 
+            const currentIcaos = new Set();
+            const nowUnix = Math.floor(Date.now() / 1000); // 取得現在的真實 Unix 秒數
+
+            if (data.states) {
+                data.states.forEach(plane => {
+                    const icao24 = plane[0]; 
+                    
+                    // 【核心破解】讀取 plane[4]：這架飛機最後一次發送訊號的真實時間
+                    const lastContact = plane[4] || nowUnix;
+                    const dataAgeSeconds = nowUnix - lastContact;
+
+                    // 1. 🧹 超時清理：如果超過 120 秒沒有真實更新，判定為消失/降落，直接拋棄
+                    if (dataAgeSeconds > 120) return; 
+
+                    currentIcaos.add(icao24);
+                    
+                    const callsign = plane[1] ? plane[1].trim() : 'UNKNOWN';
+                    let altitude = plane[7] ? Math.round(plane[7]) : 'N/A';
+                    let onGround = plane[8];
+                    let velocity = plane[9] || 0;
+
+                    // 2. 🛬 智慧降落推測：如果高度低於 1500m 且超過 45 秒沒新訊號，判定為已降落滑行中
+                    if (altitude !== 'N/A' && altitude < 1500 && dataAgeSeconds > 45) {
+                        onGround = true;
+                        altitude = 'GROUND';
+                        velocity = 0; // 強制煞車
+                    }
+                    
+                    const pData = {
+                        callsign: callsign, country: plane[2], lng: plane[5], lat: plane[6],
+                        altitude: altitude, onGround: onGround, velocity: velocity, 
+                        heading: plane[10] || 0, vRate: plane[11] || 0,
+                        squawk: plane[14] || '', isEmergency: ['7700', '7600', '7500'].includes(plane[14]),
+                        lastContact: lastContact // 存入字典供動畫引擎使用
+                    };
+
+                    if (pData.lat && pData.lng) {
+                        if (!flightHistory[icao24]) flightHistory[icao24] = [];
+                        flightHistory[icao24].push([pData.lat, pData.lng]);
+                        if (flightHistory[icao24].length > 50) flightHistory[icao24].shift();
+
+                        if (!planesDict[icao24]) {
+                            planesDict[icao24] = pData;
+                            const marker = L.marker([pData.lat, pData.lng]).addTo(planeLayer);
+                            marker.on('click', (e) => {
+                                L.DomEvent.stopPropagation(e);
+                                selectedIcao24 = icao24;
+                                fetchAndDrawFullTrack(icao24);
+                                renderPlanes();
+                            });
+                            planesDict[icao24].marker = marker;
+                        } else {
+                            Object.assign(planesDict[icao24], pData);
+                        }
+                    }
+                });
+            }
+
+            // 清理不在 currentIcaos 名單裡的飛機 (包含被我們判定超時拋棄的)
+            Object.keys(planesDict).forEach(id => {
+                if (!currentIcaos.has(id)) {
+                    planeLayer.removeLayer(planesDict[id].marker);
+                    delete planesDict[id];
+                }
+            });
+
+            document.getElementById('plane-count').innerText = currentIcaos.size.toString().padStart(3, '0');
+            renderPlanes();
+
+        } catch (error) {
+            console.warn('API 錯誤或解析失敗:', error.message);
+        } finally {
+            isFetching = false;
+        }
+    }
+
+    // ==========================================
+    // 動畫引擎：加入「超時停止預測」防暴衝
+    // ==========================================
+    const EARTH_RADIUS = 6371000;
+    let lastDrawTime = performance.now();
+    
+    function animatePlanes() {
+        requestAnimationFrame(animatePlanes);
+        const now = performance.now();
+        const deltaTime = (now - lastDrawTime) / 1000; 
+        lastDrawTime = now;
+        const nowUnix = Math.floor(Date.now() / 1000);
+
+        for (const id in planesDict) {
+            const p = planesDict[id];
+            
+            // 計算訊號老化程度
+            const dataAge = nowUnix - p.lastContact;
+
+            // 只有在資料夠新鮮 (< 60秒)、不是地面狀態、且有速度時，才進行移動預測
+            if (!p.onGround && p.velocity > 0 && dataAge < 60) {
+                
+                let currentVelocity = p.velocity;
+                
+                // 低空減速模擬：如果高度低於 1500m，隨時間漸漸煞車
+                if (p.altitude !== 'N/A' && p.altitude !== 'GROUND' && p.altitude < 1500) {
+                    const brakingFactor = Math.max(0.1, 1 - (dataAge / 45));
+                    currentVelocity = currentVelocity * brakingFactor;
+                }
+
+                if (currentVelocity > 0) {
+                    const dist = currentVelocity * deltaTime;
+                    const brng = p.heading * Math.PI / 180;
+                    const lat1 = p.lat * Math.PI / 180;
+                    const lng1 = p.lng * Math.PI / 180;
+
+                    const lat2 = Math.asin(Math.sin(lat1) * Math.cos(dist / EARTH_RADIUS) + Math.cos(lat1) * Math.sin(dist / EARTH_RADIUS) * Math.cos(brng));
+                    const lng2 = lng1 + Math.atan2(Math.sin(brng) * Math.sin(dist / EARTH_RADIUS) * Math.cos(lat1), Math.cos(dist / EARTH_RADIUS) - Math.sin(lat1) * Math.sin(lat2));
+
+                    p.lat = lat2 * 180 / Math.PI;
+                    p.lng = lng2 * 180 / Math.PI;
+                }
+            }
+            p.marker.setLatLng([p.lat, p.lng]);
+        }
+    }
+
+    function renderPlanes() {
+        for (const id in planesDict) {
+            const p = planesDict[id];
+            const isSelected = (id === selectedIcao24);
+            p.marker.setIcon(createPlaneIcon(p.heading, p.altitude, isSelected, p.onGround, p.isEmergency));
+            const logoUrl = `https://cdn.flightradar24.com/assets/airlines/logotypes/${p.callsign.substring(0, 3)}.png`;
+            p.marker.bindTooltip(`<img src="${logoUrl}" onerror="this.style.display='none'"><span>${p.callsign}</span>`, { permanent: true, direction: 'right', offset: [15, 0], className: 'cyber-label' });
+            if (isSelected) updateSidebar(p.callsign, p.country, p.altitude, Math.round(p.velocity * 3.6), p.vRate, p.onGround, p.isEmergency, p.squawk, id);
+        }
+    }
+
+    fetchPlanes();
+    setInterval(fetchPlanes, 30000); // 維持 30 秒保護 IP 額度
+    animatePlanes(); 
+</script>
+</body>
+</html>
