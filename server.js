@@ -44,17 +44,51 @@ function setCache(key, data) {
 }
 
 // ==========================================
-// OpenSky API 認證 Header
+// OpenSky API OAuth2 認證 Header
 // ==========================================
-function getAuthHeaders() {
-    const user = process.env.OPENSKY_USER;
-    const pass = process.env.OPENSKY_PASS;
+let openskyAccessToken = null;
+let openskyTokenExpiresAt = 0;
 
-    if (user && pass) {
-        const credentials = Buffer.from(`${user}:${pass}`).toString('base64');
-        return { 'Authorization': `Basic ${credentials}` };
+async function getAuthHeaders() {
+    const clientId = process.env.OPENSKY_USER;
+    const clientSecret = process.env.OPENSKY_PASS;
+
+    if (!clientId || !clientSecret) return {};
+
+    // 如果 Token 還有效（保留 60 秒緩衝），直接回傳
+    if (openskyAccessToken && Date.now() < openskyTokenExpiresAt) {
+        return { 'Authorization': `Bearer ${openskyAccessToken}` };
     }
-    return {};
+
+    try {
+        console.log(`🔑 [AUTH] Fetching new OAuth2 token...`);
+        const params = new URLSearchParams();
+        params.append('grant_type', 'client_credentials');
+        params.append('client_id', clientId);
+        params.append('client_secret', clientSecret);
+
+        const response = await fetch('https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params
+        });
+
+        if (!response.ok) {
+            const err = await response.text();
+            console.error(`❌ [AUTH ERROR] Failed to get token: ${err}`);
+            return {};
+        }
+
+        const data = await response.json();
+        openskyAccessToken = data.access_token;
+        openskyTokenExpiresAt = Date.now() + (data.expires_in - 60) * 1000;
+
+        console.log(`✅ [AUTH] Token received. Expires in ${data.expires_in}s.`);
+        return { 'Authorization': `Bearer ${openskyAccessToken}` };
+    } catch (error) {
+        console.error(`❌ [AUTH ERROR] ${error.message}`);
+        return {};
+    }
 }
 
 // ==========================================
@@ -93,8 +127,9 @@ app.get('/api/states', async (req, res) => {
         const url = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
 
         console.log(`🌐 [API CALL] Fetching states from OpenSky...`);
+        const headers = await getAuthHeaders();
         const response = await fetch(url, {
-            headers: getAuthHeaders(),
+            headers,
             signal: AbortSignal.timeout(15000)
         });
 
@@ -140,8 +175,9 @@ app.get('/api/tracks', async (req, res) => {
         const url = `https://opensky-network.org/api/tracks/all?icao24=${icao24}&time=0`;
 
         console.log(`🌐 [API CALL] Fetching track for ${icao24}...`);
+        const headers = await getAuthHeaders();
         const response = await fetch(url, {
-            headers: getAuthHeaders(),
+            headers,
             signal: AbortSignal.timeout(15000)
         });
 
