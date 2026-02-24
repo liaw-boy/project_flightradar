@@ -1,0 +1,74 @@
+.app {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    position: relative;
+}
+
+.map-container {
+    width: 100%;
+    height: 100%;
+}
+
+/* Leaflet overrides */
+.leaflet-control-attribution,
+.leaflet-control-zoom {
+    display: none !important;
+}
+
+/* 飛機圖標 */
+.plane-icon {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: transform 0.1s;
+}
+
+.plane-icon:active {
+    transform: scale(1.2);
+}
+
+.emergency-glow {
+    filter: drop-shadow(0 0 15px #FF4136) !important;
+    animation: emergency-pulse 0.5s infinite;
+}
+
+.ground-glow {
+    filter: drop-shadow(0 0 3px #666) !important;
+    opacity: 0.6;
+}
+
+@keyframes emergency-pulse {
+
+    0%,
+    100% {
+        filter: drop-shadow(0 0 15px #FF4136);
+    }
+
+    50% {
+        filter: drop-shadow(0 0 25px #FF4136);
+    }
+}
+
+/* Cyber Tooltip */
+.cyber-label {
+    background: rgba(10, 15, 20, 0.9) !important;
+    border: 1px solid rgba(1, 255, 112, 0.5) !important;
+    border-radius: 4px !important;
+    color: #01FF70 !important;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px !important;
+    padding: 4px 8px !important;
+    backdrop-filter: blur(5px);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 0 10px rgba(1, 255, 112, 0.3);
+}
+
+.cyber-label::before,
+.cyber-label::after {
+    display: none !important;
+}

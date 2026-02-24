@@ -1,0 +1,54 @@
+.search-container {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    width: auto;
+}
+
+.search-box {
+    padding: 12px 20px;
+    background: rgba(10, 15, 20, 0.9);
+    border: 1px solid rgba(1, 255, 112, 0.4);
+    border-radius: 25px;
+    color: #01FF70;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 14px;
+    width: 300px;
+    outline: none;
+    backdrop-filter: blur(10px);
+    transition: 0.3s;
+}
+
+.search-box:focus {
+    border-color: #FFDC00;
+    box-shadow: 0 0 15px rgba(255, 220, 0, 0.3);
+}
+
+.search-box::placeholder {
+    color: #666;
+}
+
+/* ===== RWD ===== */
+@media (max-width: 768px) {
+    .search-container {
+        top: 12px;
+        left: 10px;
+        right: 10px;
+        transform: none;
+    }
+
+    .search-box {
+        width: 100%;
+        font-size: 13px;
+        padding: 10px 16px;
+    }
+}
+
+@media (max-width: 480px) {
+    .search-box {
+        font-size: 12px;
+        padding: 8px 14px;
+    }
+}

@@ -1,0 +1,43 @@
+.filter-panel {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    z-index: 1000;
+    background: rgba(10, 15, 20, 0.9);
+    border: 1px solid rgba(1, 255, 112, 0.4);
+    border-radius: 8px;
+    padding: 15px;
+    color: #fff;
+    backdrop-filter: blur(10px);
+    min-width: 200px;
+    font-family: 'Share Tech Mono', monospace;
+}
+
+.filter-title {
+    font-size: 14px;
+    color: #01FF70;
+    margin-bottom: 10px;
+    letter-spacing: 1px;
+}
+
+.filter-option {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: #aaa;
+    cursor: pointer;
+    gap: 8px;
+}
+
+.filter-option input[type="checkbox"] {
+    cursor: pointer;
+    accent-color: #01FF70;
+}
+
+/* ===== RWD ===== */
+@media (max-width: 768px) {
+    .filter-panel {
+        display: none;
+    }
+}

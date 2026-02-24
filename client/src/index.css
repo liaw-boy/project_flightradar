@@ -1,0 +1,65 @@
+/* ==========================================
+   Global Reset & Base Styles
+   ========================================== */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #000;
+    font-family: 'Share Tech Mono', monospace;
+    user-select: none;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* ==========================================
+   Touch & Mobile Enhancements
+   ========================================== */
+@media (hover: none) and (pointer: coarse) {
+
+    /* 觸控裝置上增大點擊區域 */
+    .plane-icon {
+        min-width: 32px;
+        min-height: 32px;
+    }
+
+    .sb-close {
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .filter-option {
+        min-height: 36px;
+    }
+}
+
+/* ==========================================
+   Safe Area (iPhone notch / dynamic island)
+   ========================================== */
+@supports (padding: env(safe-area-inset-top)) {
+    .dashboard {
+        padding-right: calc(20px + env(safe-area-inset-right));
+    }
+
+    .sidebar .sb-content {
+        padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    }
+
+    .filter-panel {
+        padding-left: calc(15px + env(safe-area-inset-left));
+        padding-bottom: calc(15px + env(safe-area-inset-bottom));
+    }
+}

@@ -13,7 +13,8 @@ app.use(cors());
 app.use(express.json());
 
 // 提供前端靜態檔案
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public-react'))); // React build
+app.use(express.static(path.join(__dirname, 'public')));        // 舊版 HTML
 
 // ==========================================
 // 快取系統
@@ -163,10 +164,10 @@ app.get('/api/tracks', async (req, res) => {
 });
 
 // ==========================================
-// SPA Fallback — 所有未匹配路由指向前端
+// SPA Fallback — 未匹配的路由指向 React 前端
 // ==========================================
 app.use((req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.sendFile(path.join(__dirname, 'public-react', 'index.html'));
 });
 
 // ==========================================
