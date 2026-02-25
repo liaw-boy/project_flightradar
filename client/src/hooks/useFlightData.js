@@ -24,42 +24,23 @@ export function useFlightData(mapRef, showNotification) {
     }, [planesDict]);
 
     const fetchPlanes = useCallback(async () => {
-        const map = mapRef.current;
-        if (!map || isFetchingRef.current || map.getZoom() < 6) return;
-
+        if (isFetchingRef.current) return;
         isFetchingRef.current = true;
 
-        const bounds = map.getBounds();
-        const zoom = map.getZoom();
-        const cacheKey = `${bounds.getCenter().lat.toFixed(1)}_${bounds.getCenter().lng.toFixed(1)}_${zoom}`;
-
-        // 檢查快取（5 分鐘）
-        if (cacheRef.current.has(cacheKey)) {
-            const cached = cacheRef.current.get(cacheKey);
-            if (Date.now() - cached.timestamp < 300000) {
-                processPlaneData(cached.data);
-                isFetchingRef.current = false;
-                return;
-            }
-        }
-
         try {
-            const url = `/api/states?lamin=${bounds.getSouth()}&lomin=${bounds.getWest()}&lamax=${bounds.getNorth()}&lomax=${bounds.getEast()}`;
-            const response = await fetch(url);
-            const textData = await response.text();
+            // [Global Fetch] 抓取全球資料，不帶座標參數
+            const response = await fetch('/api/states');
 
-            if (textData.includes('Too many requests') || textData.includes('<html') || !response.ok) {
-                throw new Error('API Blocked or Rate Limited');
+            if (!response.ok) {
+                const textData = await response.text();
+                if (response.status === 429 || textData.includes('Too many requests')) {
+                    throw new Error('API Rate Limited');
+                }
+                throw new Error('API Error');
             }
 
-            const data = JSON.parse(textData);
-            const parsedPlanes = parseOpenSkyData(data);
-
-            cacheRef.current.set(cacheKey, { data: parsedPlanes, timestamp: Date.now() });
-            if (cacheRef.current.size > 10) {
-                const firstKey = cacheRef.current.keys().next().value;
-                cacheRef.current.delete(firstKey);
-            }
+            const data = await response.json();
+            const parsedPlanes = parseOpenSkyData(data); // 假設 utils 有這個通用解析函數
 
             processPlaneData(parsedPlanes);
             setApiStatus('OpenSky');
@@ -68,12 +49,13 @@ export function useFlightData(mapRef, showNotification) {
             console.warn('❌ API Error:', error.message);
             setApiStatus('ERROR');
             setApiStatusClass('stat-error');
-            showNotification?.('⚠️ API 失敗，請稍後重試', 'error');
+            // showNotification?.('⚠️ API 連線異常', 'error'); // 降噪，不一直彈跳
         }
 
         isFetchingRef.current = false;
-    }, [mapRef, showNotification]);
+    }, []);
 
+    // 處理飛機資料
     const processPlaneData = useCallback((planes) => {
         const currentIcaos = new Set();
         const history = flightHistoryRef.current;
@@ -141,10 +123,10 @@ export function useFlightData(mapRef, showNotification) {
         return history && history.length > 1 ? history : [];
     }, []);
 
-    // 定時更新
+    // 定時更新 (測試階段 60秒，上線改回 11000)
     useEffect(() => {
         fetchPlanes();
-        const interval = setInterval(fetchPlanes, 30000);
+        const interval = setInterval(fetchPlanes, 60000);
         return () => clearInterval(interval);
     }, [fetchPlanes]);
 

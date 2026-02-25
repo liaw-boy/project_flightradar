@@ -46,26 +46,45 @@ function setCache(key, data) {
 // ==========================================
 // OpenSky API OAuth2 認證 Header
 // ==========================================
-let openskyAccessToken = null;
-let openskyTokenExpiresAt = 0;
+// ==========================================
+// OpenSky API OAuth2 多帳號輪替系統
+// ==========================================
+const ACCOUNTS = [
+    { user: process.env.OPENSKY_USER, pass: process.env.OPENSKY_PASS },
+    { user: process.env.OPENSKY_USER2, pass: process.env.OPENSKY_PASS2 }
+].filter(acc => acc.user && acc.pass);
+
+let accountStates = ACCOUNTS.map(() => ({
+    token: null,
+    expiresAt: 0
+}));
+
+let currentAccountIndex = 0;
+
+function rotateAccount() {
+    if (ACCOUNTS.length <= 1) return false;
+    currentAccountIndex = (currentAccountIndex + 1) % ACCOUNTS.length;
+    console.log(`🔄 [AUTH] Rotating to account #${currentAccountIndex + 1} (${ACCOUNTS[currentAccountIndex].user})`);
+    return true;
+}
 
 async function getAuthHeaders() {
-    const clientId = process.env.OPENSKY_USER;
-    const clientSecret = process.env.OPENSKY_PASS;
+    if (ACCOUNTS.length === 0) return {};
 
-    if (!clientId || !clientSecret) return {};
+    const account = ACCOUNTS[currentAccountIndex];
+    const state = accountStates[currentAccountIndex];
 
     // 如果 Token 還有效（保留 60 秒緩衝），直接回傳
-    if (openskyAccessToken && Date.now() < openskyTokenExpiresAt) {
-        return { 'Authorization': `Bearer ${openskyAccessToken}` };
+    if (state.token && Date.now() < state.expiresAt) {
+        return { 'Authorization': `Bearer ${state.token}` };
     }
 
     try {
-        console.log(`🔑 [AUTH] Fetching new OAuth2 token...`);
+        console.log(`🔑 [AUTH] Fetching token for account #${currentAccountIndex + 1} (${account.user})...`);
         const params = new URLSearchParams();
         params.append('grant_type', 'client_credentials');
-        params.append('client_id', clientId);
-        params.append('client_secret', clientSecret);
+        params.append('client_id', account.user);
+        params.append('client_secret', account.pass);
 
         const response = await fetch('https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token', {
             method: 'POST',
@@ -75,16 +94,18 @@ async function getAuthHeaders() {
 
         if (!response.ok) {
             const err = await response.text();
-            console.error(`❌ [AUTH ERROR] Failed to get token: ${err}`);
+            console.error(`❌ [AUTH ERROR] Failed to get token for ${account.user}: ${err}`);
+            // 如果這個帳號認證失敗，嘗試切換下一個
+            if (rotateAccount()) return await getAuthHeaders();
             return {};
         }
 
         const data = await response.json();
-        openskyAccessToken = data.access_token;
-        openskyTokenExpiresAt = Date.now() + (data.expires_in - 60) * 1000;
+        state.token = data.access_token;
+        state.expiresAt = Date.now() + (data.expires_in - 60) * 1000;
 
-        console.log(`✅ [AUTH] Token received. Expires in ${data.expires_in}s.`);
-        return { 'Authorization': `Bearer ${openskyAccessToken}` };
+        console.log(`✅ [AUTH] Token received for ${account.user}. Expires in ${data.expires_in}s.`);
+        return { 'Authorization': `Bearer ${state.token}` };
     } catch (error) {
         console.error(`❌ [AUTH ERROR] ${error.message}`);
         return {};
@@ -101,6 +122,8 @@ app.get('/api/health', (req, res) => {
         status: 'ok',
         uptime: process.uptime(),
         cacheSize: cache.size,
+        activeAccount: ACCOUNTS.length > 0 ? ACCOUNTS[currentAccountIndex].user : 'none',
+        totalAccounts: ACCOUNTS.length,
         timestamp: new Date().toISOString()
     });
 });
@@ -133,7 +156,8 @@ app.get('/api/stats', function (req, res) {
         lastErrorTime: apiStats.lastErrorTime,
         lastSuccessTime: apiStats.lastSuccessTime,
         uptimeMinutes: Math.round((Date.now() - apiStats.startTime) / 60000),
-        metadataCacheSize: Object.keys(aircraftMetadataCache).length
+        metadataCacheSize: Object.keys(aircraftMetadataCache).length,
+        activeAccount: ACCOUNTS.length > 0 ? `${currentAccountIndex + 1}/${ACCOUNTS.length} (${ACCOUNTS[currentAccountIndex].user})` : 'none'
     });
 });
 
@@ -153,51 +177,71 @@ app.get('/api/states', async (req, res) => {
         return res.json(cached);
     }
 
-    try {
-        const url = isGlobal
-            ? `https://opensky-network.org/api/states/all`
-            : `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
+    // 嘗試請求（支援失敗重試與帳號輪替）
+    let retries = ACCOUNTS.length;
+    let lastError = null;
 
-        console.log(`🌐 [API CALL] Fetching states from OpenSky...`);
-        apiStats.totalCalls++;
-        apiStats.stateCalls++;
-        const headers = await getAuthHeaders();
-        const response = await fetch(url, {
-            headers,
-            signal: AbortSignal.timeout(15000)
-        });
+    while (retries > 0) {
+        try {
+            const url = isGlobal
+                ? `https://opensky-network.org/api/states/all`
+                : `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`❌ [API ERROR] Status ${response.status}: ${errorText.substring(0, 200)}`);
+            console.log(`🌐 [API CALL] Fetching states... (Account: ${ACCOUNTS[currentAccountIndex].user})`);
+            apiStats.totalCalls++;
+            apiStats.stateCalls++;
 
-            if (response.status === 429) {
-                apiStats.rateLimits++;
-                apiStats.lastError = '429 Rate Limited';
-                apiStats.lastErrorTime = new Date().toISOString();
-                return res.status(429).json({ error: 'Rate limited by OpenSky. Please wait and try again.' });
+            const headers = await getAuthHeaders();
+            const response = await fetch(url, {
+                headers,
+                signal: AbortSignal.timeout(15000)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+
+                // 429 Rate Check -> Rotate and Retry
+                if (response.status === 429) {
+                    console.warn(`⚠️ [RATE LIMIT] Account ${ACCOUNTS[currentAccountIndex].user} limited. Rotating...`);
+                    apiStats.rateLimits++;
+
+                    if (rotateAccount()) {
+                        retries--;
+                        continue; // Retry loop with new account
+                    } else {
+                        // No more accounts to rotate
+                        throw new Error('All accounts rate limited');
+                    }
+                }
+
+                throw new Error(`OpenSky API error: ${response.status} ${errorText.substring(0, 100)}`);
             }
-            apiStats.errors++;
-            apiStats.lastError = 'HTTP ' + response.status;
-            apiStats.lastErrorTime = new Date().toISOString();
-            return res.status(response.status).json({ error: `OpenSky API error: ${response.status}` });
+
+            const data = await response.json();
+            apiStats.lastSuccessTime = new Date().toISOString();
+
+            // 存入快取
+            setCache(cacheKey, data);
+            console.log(`📦 [CACHED] ${cacheKey} | States: ${data.states ? data.states.length : 0}`);
+
+            return res.json(data); // Success!
+
+        } catch (error) {
+            lastError = error;
+            console.error(`❌ [FETCH ERROR] ${error.message}`);
+            // If it was not a 429 (handled above), we might not want to retry, but let's be safe and fail out if not 429
+            if (!error.message.includes('Rate limited') && !error.message.includes('All accounts')) {
+                break;
+            }
+            if (retries <= 0) break;
         }
-
-        const data = await response.json();
-        apiStats.lastSuccessTime = new Date().toISOString();
-
-        // 存入快取
-        setCache(cacheKey, data);
-        console.log(`📦 [CACHED] ${cacheKey} | States: ${data.states ? data.states.length : 0}`);
-
-        res.json(data);
-    } catch (error) {
-        console.error(`❌ [FETCH ERROR] ${error.message}`);
-        apiStats.errors++;
-        apiStats.lastError = error.message;
-        apiStats.lastErrorTime = new Date().toISOString();
-        res.status(500).json({ error: 'Failed to fetch flight data', detail: error.message });
     }
+
+    // All retries failed
+    apiStats.errors++;
+    apiStats.lastError = lastError ? lastError.message : 'Unknown error';
+    apiStats.lastErrorTime = new Date().toISOString();
+    res.status(429).json({ error: 'Rate limited on all accounts or API error.', detail: apiStats.lastError });
 });
 
 // 取得飛行軌跡（代理 OpenSky /tracks/all）

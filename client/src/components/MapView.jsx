@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl } from '../utils/flightUtils';
@@ -24,6 +24,8 @@ export default function MapView({
     const animFrameRef = useRef(null);
     const lastDrawTimeRef = useRef(performance.now());
 
+    const [bounds, setBounds] = useState(null);
+
     // ===== 初始化地圖 =====
     useEffect(() => {
         if (mapRef.current) return;
@@ -35,11 +37,15 @@ export default function MapView({
             attribution: '',
         }).addTo(map);
 
+        // 初始 bounds
+        setBounds(map.getBounds());
+
         // 點擊地圖空白處取消選擇
         map.on('click', () => onDeselectPlane());
 
         // 地圖移動結束時通知
         map.on('moveend', () => {
+            setBounds(map.getBounds());
             if (map.getZoom() >= 6) {
                 onMapMove?.();
             }
@@ -61,9 +67,19 @@ export default function MapView({
             if (!filters.showGround && plane.onGround) return false;
             if (!filters.showEmergency && plane.isEmergency) return false;
             if (!filters.showLow && plane.altitude !== 'N/A' && plane.altitude !== 'GROUND' && plane.altitude < 1500) return false;
+
+            // Local Bounds Check for Zero-Latency Panning
+            if (bounds) {
+                const lat = parseFloat(plane.lat);
+                const lng = parseFloat(plane.lng);
+                // Simple bounds check
+                if (lat < bounds.getSouth() || lat > bounds.getNorth() || lng < bounds.getWest() || lng > bounds.getEast()) {
+                    return false;
+                }
+            }
             return true;
         },
-        [filters]
+        [filters, bounds]
     );
 
     // ===== 同步 markers 到 planesDict =====

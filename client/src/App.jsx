@@ -47,8 +47,11 @@ export default function App() {
 
     // 地圖移動
     const handleMapMove = useCallback(() => {
-        fetchPlanes();
-    }, [fetchPlanes]);
+        // [Zero-Latency Panning] 
+        // 地圖移動不再觸發 API 請求，僅由 MapView 負責本地過濾渲染
+        // fetchPlanes(); 
+        console.log('Map moved - re-filtering local planes');
+    }, []);
 
     // 選中飛機
     const handleSelectPlane = useCallback(
