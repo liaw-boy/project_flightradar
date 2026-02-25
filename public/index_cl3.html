@@ -879,10 +879,9 @@
         let isFollowing = false;
 
         function getAdaptiveInterval() {
-            var zoom = map.getZoom();
-            if (zoom >= 10) return 10000;
-            if (zoom >= 8) return 15000;
-            return 20000;
+            // [開發階段] 為了節省 API 額度並預防開發時重啟干擾，設定為 60 秒一次。
+            // 之後上線可以改回 22 秒 (原定 4000次/天 的完美輪詢時間)。
+            return 60000;
         }
 
         // 過濾器狀態
