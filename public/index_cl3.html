@@ -1285,7 +1285,7 @@
         var API_SOURCES = [
             {
                 name: 'OpenSky',
-                url: function (bounds) { return '/api/states?lamin=' + bounds.getSouth() + '&lomin=' + bounds.getWest() + '&lamax=' + bounds.getNorth() + '&lomax=' + bounds.getEast(); },
+                url: function () { return '/api/states'; },
                 parser: parseOpenSkyData,
                 priority: 1
             }
@@ -1671,51 +1671,28 @@
         // 資料獲取引擎（多源支援）
         // ==========================================
         async function fetchPlanes() {
-            if (isFetching || map.getZoom() < 6) return;
+            if (isFetching || map.getZoom() < 3) return;
             isFetching = true;
 
             const fetchStart = performance.now();
-            const bounds = map.getBounds();
-            const zoom = map.getZoom();
-            var cacheKey = bounds.getCenter().lat.toFixed(1) + '_' + bounds.getCenter().lng.toFixed(1) + '_' + zoom;
-
-            // 檢查快取（8 秒內有效）
-            if (spatialCache.has(cacheKey)) {
-                const cached = spatialCache.get(cacheKey);
-                if (Date.now() - cached.timestamp < SPATIAL_CACHE_TTL) {
-                    console.log('✅ 使用快取資料');
-                    processPlaneData(cached.data);
-                    isFetching = false;
-                    return;
-                }
-            }
 
             // 嘗試所有資料源
             for (let attempt = 0; attempt < API_SOURCES.length; attempt++) {
                 const source = API_SOURCES[currentSourceIndex];
 
                 try {
-                    const url = source.url(bounds);
+                    const url = source.url();
                     const response = await fetch(url);
                     const textData = await response.text();
 
                     // 檢測封鎖
-                    if (textData.includes('Too many requests') || textData.includes('<html') || !response.ok) {
+                    if (textData.indexOf('Too many requests') !== -1 || textData.indexOf('<html') !== -1 || !response.ok) {
                         throw new Error('API Blocked or Rate Limited');
                     }
 
                     const data = JSON.parse(textData);
                     const nowUnix = Math.floor(Date.now() / 1000);
                     const parsedPlanes = source.parser(data, nowUnix);
-
-                    // 存入快取
-                    spatialCache.set(cacheKey, { data: parsedPlanes, timestamp: Date.now() });
-
-                    // 清理舊快取
-                    if (spatialCache.size > 10) {
-                        const firstKey = spatialCache.keys().next().value;
-                        spatialCache.delete(firstKey);
-                    }
 
                     processPlaneData(parsedPlanes);
 
@@ -1858,6 +1835,10 @@
             if (!filters.showGround && plane.onGround) return false;
             if (!filters.showEmergency && plane.isEmergency) return false;
             if (!filters.showLow && plane.altitude !== 'N/A' && plane.altitude !== 'GROUND' && plane.altitude < 1500) return false;
+
+            var point = L.latLng(plane.lat, plane.lng);
+            if (!map.getBounds().contains(point)) return false;
+
             return true;
         }
 
@@ -2103,16 +2084,13 @@
             updateAirportVisibility();
             animatePlanes();
 
-            // 地圖移動時重新獲取（防抖 300ms，加速縮放回應）
+            // 地圖移動時重新渲染畫面 (不再發送 API 請求)
             map.on('moveend', function () {
                 clearTimeout(moveEndDebounceTimer);
                 moveEndDebounceTimer = setTimeout(function () {
-                    if (map.getZoom() >= 6) {
-                        fetchPlanes();
-                    }
-                    startAdaptivePolling();
+                    renderPlanes();
                     updateAirportVisibility();
-                }, 300);
+                }, 150);
             });
         } catch (e) {
             console.error('初始化錯誤:', e);

@@ -141,12 +141,10 @@ app.get('/api/stats', function (req, res) {
 app.get('/api/states', async (req, res) => {
     const { lamin, lomin, lamax, lomax } = req.query;
 
-    // 驗證參數
-    if (!lamin || !lomin || !lamax || !lomax) {
-        return res.status(400).json({ error: 'Missing required bounds parameters: lamin, lomin, lamax, lomax' });
-    }
-
-    const cacheKey = `states_${parseFloat(lamin).toFixed(1)}_${parseFloat(lomin).toFixed(1)}_${parseFloat(lamax).toFixed(1)}_${parseFloat(lomax).toFixed(1)}`;
+    const isGlobal = !lamin || !lomin || !lamax || !lomax;
+    const cacheKey = isGlobal
+        ? 'states_global'
+        : `states_${parseFloat(lamin).toFixed(1)}_${parseFloat(lomin).toFixed(1)}_${parseFloat(lamax).toFixed(1)}_${parseFloat(lomax).toFixed(1)}`;
 
     // 檢查快取
     const cached = getCached(cacheKey);
@@ -156,7 +154,9 @@ app.get('/api/states', async (req, res) => {
     }
 
     try {
-        const url = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
+        const url = isGlobal
+            ? `https://opensky-network.org/api/states/all`
+            : `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
 
         console.log(`🌐 [API CALL] Fetching states from OpenSky...`);
         apiStats.totalCalls++;
