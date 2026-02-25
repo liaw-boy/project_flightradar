@@ -768,6 +768,8 @@
                     id="sb-vrate">--</span></div>
             <div class="sb-data-row"><span class="sb-data-label">On Ground</span><span class="sb-data-value"
                     id="sb-ground">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label" data-i18n="spi">SPI</span><span class="sb-data-value"
+                    id="sb-spi">--</span></div>
             <div class="sb-data-row"><span class="sb-data-label">Position</span><span class="sb-data-value"
                     id="sb-pos">--</span></div>
 
@@ -804,6 +806,10 @@
         <div class="stat-row"><span>LATENCY</span><span id="api-latency" class="stat-value">--</span></div>
         <div class="stat-row"><span>LAST UPDATE</span><span id="last-update" class="stat-value">--</span></div>
         <div class="stat-row"><span>NEXT REFRESH</span><span id="next-refresh" class="stat-value">--</span></div>
+        <div style="border-top:1px solid rgba(0,255,65,0.2);margin:5px 0;"></div>
+        <div class="stat-row"><span>📊 API CALLS</span><span id="api-total-calls" class="stat-value">0</span></div>
+        <div class="stat-row"><span>⚠️ RATE LIMITS</span><span id="api-rate-limits" class="stat-value">0</span></div>
+        <div class="stat-row"><span>💾 DB CACHE</span><span id="api-cache-size" class="stat-value">0</span></div>
     </div>
 
     <!-- 搜尋框 -->
@@ -1358,8 +1364,8 @@
         }
 
         function createTooltipHTML(plane) {
-            const logoUrl = `https://cdn.flightradar24.com/assets/airlines/logotypes/${plane.callsign.substring(0, 3)}.png`;
-            return `<img src="${logoUrl}" onerror="this.style.display='none'"><span>${plane.callsign}</span>`;
+            var logoUrl = 'https://cdn.flightradar24.com/assets/airlines/logotypes/' + plane.callsign.substring(0, 3) + '.png';
+            return '<img src="' + logoUrl + '" onerror="this.style.display=\'none\'"><span>' + plane.callsign + '</span>';
         }
 
         // ==========================================
@@ -1374,7 +1380,7 @@
                 console.log('✈️ 點擊飛機:', icao24, pData.callsign);
 
                 // Debug 資訊
-                document.getElementById('debug-click').innerText = `${icao24} (${pData.callsign})`;
+                document.getElementById('debug-click').innerText = icao24 + ' (' + pData.callsign + ')';
 
                 selectedIcao24 = icao24;
 
@@ -1461,7 +1467,7 @@
             if (trackLine) map.removeLayer(trackLine);
 
             try {
-                const trackUrl = `/api/tracks?icao24=${icao24}`;
+                var trackUrl = '/api/tracks?icao24=' + icao24;
                 const res = await fetch(trackUrl);
 
                 if (!res.ok) throw new Error('API Blocked');
@@ -1513,7 +1519,7 @@
             const alertBox = document.getElementById('sb-alert');
             if (plane.isEmergency) {
                 alertBox.style.display = 'block';
-                alertBox.innerText = `🚨 EMERGENCY SQUAWK: ${plane.squawk}`;
+                alertBox.innerText = '🚨 EMERGENCY SQUAWK: ' + plane.squawk;
             } else {
                 alertBox.style.display = 'none';
             }
@@ -1547,8 +1553,8 @@
             document.getElementById('sb-type').innerText = plane.aircraftType || 'Unknown';
 
             // Logo
-            const logoUrl = `https://cdn.flightradar24.com/assets/airlines/logotypes/${plane.callsign.substring(0, 3)}.png`;
-            const logoImg = document.getElementById('sb-logo');
+            var logoUrl = 'https://cdn.flightradar24.com/assets/airlines/logotypes/' + plane.callsign.substring(0, 3) + '.png';
+            var logoImg = document.getElementById('sb-logo');
             logoImg.src = logoUrl;
             logoImg.style.display = 'inline-block';
 
@@ -1556,26 +1562,34 @@
             var phase = detectFlightPhase(plane);
             document.getElementById('sb-phase').innerHTML = '<span class="phase-badge ' + phase.css + '">' + phase.text + '</span>';
             document.getElementById('sb-alt').innerText = plane.onGround ? 'GROUND' : plane.altitude + ' m';
-            document.getElementById('sb-geoalt').innerText = plane.geoAltitude ? `${plane.geoAltitude} m` : 'N/A';
-            const kmh = Math.round(plane.velocity * 3.6);
-            const kts = Math.round(plane.velocity * 1.944);
-            document.getElementById('sb-spd').innerText = `${kmh} km/h (${kts} kts)`;
-            document.getElementById('sb-hdg').innerText = `${Math.round(plane.heading)}°`;
+            document.getElementById('sb-geoalt').innerText = plane.geoAltitude ? plane.geoAltitude + ' m' : 'N/A';
+            var kmh = Math.round(plane.velocity * 3.6);
+            var kts = Math.round(plane.velocity * 1.944);
+            document.getElementById('sb-spd').innerText = kmh + ' km/h (' + kts + ' kts)';
+            document.getElementById('sb-hdg').innerText = Math.round(plane.heading) + '°';
 
-            const vRate = plane.vRate || 0;
-            let vrateText = '→ Level';
-            if (vRate > 0.5) vrateText = `↗ ${vRate.toFixed(1)} m/s`;
-            else if (vRate < -0.5) vrateText = `↘ ${vRate.toFixed(1)} m/s`;
+            var vRate = plane.vRate || 0;
+            var vrateText = '→ Level';
+            if (vRate > 0.5) vrateText = '↗ ' + vRate.toFixed(1) + ' m/s';
+            else if (vRate < -0.5) vrateText = '↘ ' + vRate.toFixed(1) + ' m/s';
             document.getElementById('sb-vrate').innerText = vrateText;
             document.getElementById('sb-ground').innerText = plane.onGround ? '✅ YES' : '❌ NO';
 
-            document.getElementById('sb-pos').innerText = `${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}`;
+            // SPI
+            var spiEl = document.getElementById('sb-spi');
+            if (spiEl) {
+                spiEl.innerText = plane.spi ? '⚠️ ACTIVE' : 'Normal';
+                if (plane.spi) spiEl.style.color = '#FF4136';
+                else spiEl.style.color = '';
+            }
+
+            document.getElementById('sb-pos').innerText = plane.lat.toFixed(4) + ', ' + plane.lng.toFixed(4);
 
             // 時間資訊
-            const nowUnix = Math.floor(Date.now() / 1000);
-            const dataAge = nowUnix - (plane.lastContact || nowUnix);
+            var nowUnix = Math.floor(Date.now() / 1000);
+            var dataAge = nowUnix - (plane.lastContact || nowUnix);
             document.getElementById('sb-contact').innerText = new Date((plane.lastContact || nowUnix) * 1000).toLocaleTimeString();
-            document.getElementById('sb-age').innerText = `${dataAge}s ago`;
+            document.getElementById('sb-age').innerText = dataAge + 's ago';
 
             // 來源資訊
             document.getElementById('sb-squawk').innerText = plane.squawk || '----';
@@ -1622,7 +1636,7 @@
                     velocity = 0;
                 }
 
-                const pData = {
+                var pData = {
                     callsign: callsign,
                     country: plane[2] || 'Unknown',
                     lng: plane[5],
@@ -1634,8 +1648,10 @@
                     heading: plane[10] || 0,
                     vRate: plane[11] || 0,
                     squawk: plane[14] || '',
-                    isEmergency: ['7700', '7600', '7500'].includes(plane[14]),
+                    spi: plane[15] || false,
+                    isEmergency: ['7700', '7600', '7500'].indexOf(plane[14]) >= 0 || plane[15] === true,
                     lastContact: lastContact,
+                    timePosition: plane[3] || null,
                     registration: plane[1] ? plane[1].trim() : 'N/A',
                     aircraftType: 'Unknown',
                     sensors: plane[12] ? (Array.isArray(plane[12]) ? plane[12].length : plane[12]) : null,
@@ -1661,7 +1677,7 @@
             const fetchStart = performance.now();
             const bounds = map.getBounds();
             const zoom = map.getZoom();
-            const cacheKey = `${bounds.getCenter().lat.toFixed(1)}_${bounds.getCenter().lng.toFixed(1)}_${zoom}`;
+            var cacheKey = bounds.getCenter().lat.toFixed(1) + '_' + bounds.getCenter().lng.toFixed(1) + '_' + zoom;
 
             // 檢查快取（8 秒內有效）
             if (spatialCache.has(cacheKey)) {
@@ -1706,7 +1722,7 @@
                     // 即時性指標更新
                     lastApiLatency = Math.round(performance.now() - fetchStart);
                     lastFetchTime = Date.now();
-                    document.getElementById('api-latency').innerText = `${lastApiLatency}ms`;
+                    document.getElementById('api-latency').innerText = lastApiLatency + 'ms';
                     document.getElementById('last-update').innerText = new Date().toLocaleTimeString('en-US', { hour12: false });
                     document.getElementById('status-dot').style.backgroundColor = '#01FF70';
                     document.getElementById('api-status').innerText = source.name;
@@ -1716,7 +1732,7 @@
                     return;
 
                 } catch (error) {
-                    console.warn(`❌ ${source.name} 失敗:`, error.message);
+                    console.warn('❌ ' + source.name + ' 失敗:', error.message);
                     currentSourceIndex = (currentSourceIndex + 1) % API_SOURCES.length;
 
                     if (attempt === API_SOURCES.length - 1) {
@@ -1801,7 +1817,42 @@
             document.getElementById('plane-count').innerText = currentIcaos.size.toString().padStart(3, '0');
             document.getElementById('air-ground-count').innerText = airCount + ' / ' + groundCount;
             renderPlanes();
+
+            // 背景批次預取所有可見飛機的 metadata
+            var allIcao24s = Object.keys(planesDict);
+            if (allIcao24s.length > 0) {
+                try {
+                    fetch('/api/metadata/batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ icao24s: allIcao24s })
+                    }).then(function (r) { return r.json(); }).then(function (result) {
+                        if (result.fetched > 0) {
+                            console.log('📦 [BATCH] Prefetched ' + result.fetched + ' metadata | Cache: ' + result.total);
+                        }
+                    }).catch(function () { });
+                } catch (e) { }
+            }
         }
+
+        // ==========================================
+        // API 使用量監控
+        // ==========================================
+        function updateApiStats() {
+            fetch('/api/stats').then(function (r) { return r.json(); }).then(function (stats) {
+                document.getElementById('api-total-calls').innerText = stats.totalCalls;
+                var rlEl = document.getElementById('api-rate-limits');
+                rlEl.innerText = stats.rateLimits;
+                if (stats.rateLimits > 0) {
+                    rlEl.style.color = '#FF4136';
+                } else {
+                    rlEl.style.color = '';
+                }
+                document.getElementById('api-cache-size').innerText = stats.metadataCacheSize;
+            }).catch(function () { });
+        }
+        setInterval(updateApiStats, 30000);
+        setTimeout(updateApiStats, 3000);
 
         function shouldShowPlane(plane) {
             if (!filters.showGround && plane.onGround) return false;
@@ -1957,7 +2008,7 @@
                         updateSidebar(plane, id);
                         fetchAndDrawFullTrack(id);
                         forceRenderAllPlanes();
-                        showNotification(`✈️ 找到航班: ${plane.callsign}`, 'info');
+                        showNotification('✈️ 找到航班: ' + plane.callsign, 'info');
                         return;
                     }
                 }
@@ -2032,7 +2083,7 @@
             if (pollIntervalId) clearInterval(pollIntervalId);
             const interval = getAdaptiveInterval();
             pollIntervalId = setInterval(fetchPlanes, interval);
-            console.log(`🔄 輪詢間隔: ${interval / 1000}s (zoom: ${map.getZoom()})`);
+            console.log('🔄 輪詢間隔: ' + (interval / 1000) + 's (zoom: ' + map.getZoom() + ')');
         }
 
         // ==========================================

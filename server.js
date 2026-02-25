@@ -105,6 +105,38 @@ app.get('/api/health', (req, res) => {
     });
 });
 
+// ==========================================
+// API 請求計數器
+// ==========================================
+var apiStats = {
+    totalCalls: 0,
+    stateCalls: 0,
+    metadataCalls: 0,
+    cacheHits: 0,
+    rateLimits: 0,
+    errors: 0,
+    lastError: null,
+    lastErrorTime: null,
+    lastSuccessTime: null,
+    startTime: Date.now()
+};
+
+app.get('/api/stats', function (req, res) {
+    res.json({
+        totalCalls: apiStats.totalCalls,
+        stateCalls: apiStats.stateCalls,
+        metadataCalls: apiStats.metadataCalls,
+        cacheHits: apiStats.cacheHits,
+        rateLimits: apiStats.rateLimits,
+        errors: apiStats.errors,
+        lastError: apiStats.lastError,
+        lastErrorTime: apiStats.lastErrorTime,
+        lastSuccessTime: apiStats.lastSuccessTime,
+        uptimeMinutes: Math.round((Date.now() - apiStats.startTime) / 60000),
+        metadataCacheSize: Object.keys(aircraftMetadataCache).length
+    });
+});
+
 // 取得飛機狀態（代理 OpenSky /states/all）
 app.get('/api/states', async (req, res) => {
     const { lamin, lomin, lamax, lomax } = req.query;
@@ -127,6 +159,8 @@ app.get('/api/states', async (req, res) => {
         const url = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
 
         console.log(`🌐 [API CALL] Fetching states from OpenSky...`);
+        apiStats.totalCalls++;
+        apiStats.stateCalls++;
         const headers = await getAuthHeaders();
         const response = await fetch(url, {
             headers,
@@ -138,12 +172,19 @@ app.get('/api/states', async (req, res) => {
             console.error(`❌ [API ERROR] Status ${response.status}: ${errorText.substring(0, 200)}`);
 
             if (response.status === 429) {
+                apiStats.rateLimits++;
+                apiStats.lastError = '429 Rate Limited';
+                apiStats.lastErrorTime = new Date().toISOString();
                 return res.status(429).json({ error: 'Rate limited by OpenSky. Please wait and try again.' });
             }
+            apiStats.errors++;
+            apiStats.lastError = 'HTTP ' + response.status;
+            apiStats.lastErrorTime = new Date().toISOString();
             return res.status(response.status).json({ error: `OpenSky API error: ${response.status}` });
         }
 
         const data = await response.json();
+        apiStats.lastSuccessTime = new Date().toISOString();
 
         // 存入快取
         setCache(cacheKey, data);
@@ -152,6 +193,9 @@ app.get('/api/states', async (req, res) => {
         res.json(data);
     } catch (error) {
         console.error(`❌ [FETCH ERROR] ${error.message}`);
+        apiStats.errors++;
+        apiStats.lastError = error.message;
+        apiStats.lastErrorTime = new Date().toISOString();
         res.status(500).json({ error: 'Failed to fetch flight data', detail: error.message });
     }
 });
@@ -270,6 +314,83 @@ app.get('/api/metadata/:icao24', async (req, res) => {
         console.error(`❌ [METADATA ERROR] ${icao24}: ${error.message}`);
         res.json({ icao24, noData: true, error: error.message });
     }
+});
+
+// ==========================================
+// 批次 Metadata 預取（背景自動擷取所有可見飛機的資料）
+// ==========================================
+app.post('/api/metadata/batch', async function (req, res) {
+    var icao24List = req.body.icao24s || [];
+
+    // 過濾已快取的
+    var uncached = icao24List.filter(function (id) {
+        return !aircraftMetadataCache[id.toLowerCase()];
+    });
+
+    if (uncached.length === 0) {
+        return res.json({ fetched: 0, total: Object.keys(aircraftMetadataCache).length });
+    }
+
+    // 最多同時查詢 10 架，避免限流
+    var toFetch = uncached.slice(0, 10);
+    var fetched = 0;
+
+    for (var i = 0; i < toFetch.length; i++) {
+        var icao24 = toFetch[i].toLowerCase();
+        try {
+            var headers = await getAuthHeaders();
+            apiStats.totalCalls++;
+            apiStats.metadataCalls++;
+            var response = await fetch(
+                'https://opensky-network.org/api/metadata/aircraft/icao/' + icao24,
+                { headers, signal: AbortSignal.timeout(8000) }
+            );
+
+            if (response.status === 429) {
+                apiStats.rateLimits++;
+                apiStats.lastError = '429 Rate Limited (metadata batch)';
+                apiStats.lastErrorTime = new Date().toISOString();
+                break; // 停止批次查詢
+            }
+
+            if (response.ok) {
+                var data = await response.json();
+                aircraftMetadataCache[icao24] = {
+                    icao24: icao24,
+                    registration: data.registration || '',
+                    manufacturerName: data.manufacturerName || '',
+                    model: data.model || '',
+                    typecode: data.typecode || '',
+                    owner: data.owner || '',
+                    operator: data.operatorCallsign || '',
+                    built: data.built || '',
+                    categoryDescription: data.categoryDescription || ''
+                };
+                fetched++;
+                apiStats.lastSuccessTime = new Date().toISOString();
+            } else {
+                aircraftMetadataCache[icao24] = { icao24: icao24, noData: true };
+            }
+        } catch (e) {
+            aircraftMetadataCache[icao24] = { icao24: icao24, noData: true };
+            apiStats.errors++;
+        }
+
+        // 每查一架等 300ms，避免限流
+        if (i < toFetch.length - 1) {
+            await new Promise(function (r) { setTimeout(r, 300); });
+        }
+    }
+
+    saveMetadataCache();
+    console.log(`📦 [BATCH] Fetched ${fetched}/${toFetch.length} metadata | Cache: ${Object.keys(aircraftMetadataCache).length}`);
+
+    res.json({
+        fetched: fetched,
+        requested: toFetch.length,
+        remaining: uncached.length - toFetch.length,
+        total: Object.keys(aircraftMetadataCache).length
+    });
 });
 
 // ==========================================
