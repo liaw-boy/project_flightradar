@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { useI18n } from '../hooks/useI18n';
 import './SearchBar.css';
 
 export default function SearchBar({ planesDict, onSelectPlane }) {
     const [query, setQuery] = useState('');
+    const { t } = useI18n();
 
     const handleSearch = (e) => {
         const value = e.target.value;
@@ -32,7 +34,7 @@ export default function SearchBar({ planesDict, onSelectPlane }) {
             <input
                 type="text"
                 className="search-box"
-                placeholder="🔍 搜尋航班號 (例: CX123)"
+                placeholder={t('searchPlaceholder')}
                 value={query}
                 onChange={handleSearch}
                 onKeyDown={handleKeyDown}

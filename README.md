@@ -1,6 +1,6 @@
 # ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - 終極最佳化版
 
-基於 OpenSky Network API 與 Leaflet 開發的即時全球航空雷達系統。專注於提供極致效能、極低延遲的飛機追蹤體驗。配備充滿科技感的暗黑螢光主題介面，並**全面支援舊版瀏覽器 (最低 iOS 12 Safari / IE11)** 以及 **RWD 響應式手機底部抽屜設計**。
+基於 OpenSky Network API、React (Vite) 與 Leaflet 開發的即時全球航空雷達系統。專注於提供極致效能、極低延遲的飛機追蹤體驗。配備充滿科技感的暗黑螢光主題介面，並**全面支援 RWD 響應式設計** (桌面 / 平板 / 手機底部抽屜)。
 
 本專案採用 **Node.js Express 後端** 作為外部 API 的反向代理 (Reverse Proxy) 與快取層，有效隱藏 API 金鑰，具備完整的 `client_credentials` 認證機制、**多帳號自動輪替 (Token Rotation)** 與 API 使用量監控系統。
 
@@ -11,7 +11,7 @@
 - **🌍 全球即時航班追蹤**：一次性快取全地球的航班位置，包含高度、速度、航向、垂直速率、SPI 等完整資訊。
 - **🚀 零延遲順暢平移 (Zero-Latency Panning)**：地圖縮放或拖曳時**不再發送 API 請求**。由客戶端直接從已載入的全球資料庫中瞬間篩選可見範圍。
 - **⏱️ 分散式雙帳號輪詢**：支援多組 OpenSky 帳號自動輪替。目前配置兩組帳號，API 額度翻倍至每日 8000 次，系統優化為 **每 11 秒** 更新一次全球資料。
-- **⚛️ 雙版本並存 (HTML + React)**：經典 HTML 版 (`index_cl3.html`) 與現代 React 版 (`/`) 同時部署在同一伺服器上。
+- **⚛️ React + Vite 現代架構**：使用 React 組件化開發 + Vite 建置，支援 Hot Reload 開發與高效 production bundle。
 - **🏗️ 全球機場標記 (Airport Markers)**：內建全球主要國際機場座標，根據地圖縮放層級自動顯示/隱藏機場圖示與名稱標籤，方便定位航班出發與降落地點。
 - **📱 全方位 RWD 響應式設計**：完美兼容各種視窗尺寸與設備 — 桌面大螢幕、平板 (iPad)、各品牌手機 (iPhone / Android)，乃至 **iOS 12 Safari、Android 5+ WebView、IE11** 等老舊系統瀏覽器。手機端側邊欄自動變為底部抽屜 (Bottom Sheet)，保留 55% 上半部雷達視野。
 - **🛡️ 後端代理與 API 監控儀表板**：隱藏 API 帳密，自動處理 Access Token。儀表板即時顯示 API 呼叫數、限流次數與快取數量。
@@ -19,8 +19,7 @@
 - **✈️ 飛機比例圖示與直升機支援**：根據飛機噸位動態改變地圖圖示大小，並提供直升機專屬 SVG。
 - **🔍 最近機場計算**：使用 Haversine 大圓距離公式，即時算出飛機距離最近的機場與公里數。
 - **🌐 國旗與航空公司 Logo 支援**：Unicode Emoji 國旗 + CDN 動態抓取全球 120+ 航空公司 Logo。
-- **🇺🇸/🇹🇼 中英雙語切換 (i18n)**：單鍵即時切換整個 UI 介面語言。
-- **💻 跨世代相容性 (ES5)**：HTML 版前端程式碼使用嚴格的 ES5 語法，確保在十年老舊設備上順暢運行。
+- **🇺🇸/🇹🇼 中英雙語切換 (i18n)**：單鍵即時切換整個 UI 介面語言 (React Context 驅動)。
 
 ---
 
@@ -80,10 +79,9 @@ node server.js
 
 ### 4. 開啟雷達
 
-| 版本 | 網址 | 說明 |
-|------|------|------|
-| ⚛️ React 版 | [http://localhost:3000/](http://localhost:3000/) | 現代化組件架構 |
-| 🏛️ HTML 經典版 | [http://localhost:3000/index_cl3.html](http://localhost:3000/index_cl3.html) | ES5 相容、極致輕量 |
+👉 **[http://localhost:3000/](http://localhost:3000/)**
+
+> 📝 經典 HTML 版仍可透過 `/index_cl3.html` 存取，但已不再主動維護。
 
 ---
 

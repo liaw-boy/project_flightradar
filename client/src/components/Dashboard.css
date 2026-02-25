@@ -20,6 +20,23 @@
     margin-bottom: 15px;
 }
 
+.lang-toggle {
+    margin-left: auto;
+    background: rgba(1, 255, 112, 0.15);
+    border: 1px solid #01FF70;
+    color: #01FF70;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.lang-toggle:hover {
+    background: rgba(1, 255, 112, 0.3);
+}
+
 .live-dot {
     width: 10px;
     height: 10px;
@@ -124,4 +141,9 @@
         bottom: 10px;
         padding: 8px 10px;
     }
+}
+
+.stat-divider {
+    border-top: 1px solid rgba(0, 255, 65, 0.2);
+    margin: 5px 0;
 }

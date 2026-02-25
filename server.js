@@ -438,6 +438,134 @@ app.post('/api/metadata/batch', async function (req, res) {
 });
 
 // ==========================================
+// 航班來源/目的地 API (flights/aircraft)
+// ==========================================
+const routeCache = new Map(); // icao24 -> { data, timestamp }
+const ROUTE_CACHE_TTL = 1800000; // 30 分鐘
+
+app.get('/api/route/:icao24', async (req, res) => {
+    const icao24 = req.params.icao24.toLowerCase();
+
+    // 檢查快取
+    const cached = routeCache.get(icao24);
+    if (cached && (Date.now() - cached.timestamp < ROUTE_CACHE_TTL)) {
+        return res.json(cached.data);
+    }
+
+    try {
+        const now = Math.floor(Date.now() / 1000);
+        const begin = now - 86400; // 過去 24 小時
+        const url = `https://opensky-network.org/api/flights/aircraft?icao24=${icao24}&begin=${begin}&end=${now}`;
+
+        console.log(`✈️ [ROUTE] Fetching route for ${icao24}...`);
+        const headers = await getAuthHeaders();
+        const response = await fetch(url, {
+            headers,
+            signal: AbortSignal.timeout(15000)
+        });
+
+        if (!response.ok) {
+            if (response.status === 429) {
+                return res.json({ icao24, noData: true, reason: 'rate_limited' });
+            }
+            return res.json({ icao24, noData: true });
+        }
+
+        const flights = await response.json();
+
+        if (!flights || flights.length === 0) {
+            const noDataResult = { icao24, noData: true };
+            routeCache.set(icao24, { data: noDataResult, timestamp: Date.now() });
+            return res.json(noDataResult);
+        }
+
+        // 取最新一筆航班
+        const latest = flights[flights.length - 1];
+        const routeData = {
+            icao24,
+            callsign: (latest.callsign || '').trim(),
+            departureAirport: latest.estDepartureAirport || null,
+            arrivalAirport: latest.estArrivalAirport || null,
+            firstSeen: latest.firstSeen,
+            lastSeen: latest.lastSeen,
+        };
+
+        routeCache.set(icao24, { data: routeData, timestamp: Date.now() });
+        console.log(`✈️ [ROUTE] ${icao24}: ${routeData.departureAirport} → ${routeData.arrivalAirport}`);
+        res.json(routeData);
+
+    } catch (error) {
+        console.error(`❌ [ROUTE ERROR] ${icao24}: ${error.message}`);
+        res.json({ icao24, noData: true, error: error.message });
+    }
+});
+
+// ==========================================
+// METAR 機場天氣 API (每小時更新)
+// ==========================================
+const METAR_CACHE_FILE = path.join(__dirname, 'metar-cache.json');
+const METAR_TTL = 3600000; // 1 小時
+let metarCache = { timestamp: 0, data: [] };
+
+// 啟動時讀取快取
+try {
+    if (fs.existsSync(METAR_CACHE_FILE)) {
+        metarCache = JSON.parse(fs.readFileSync(METAR_CACHE_FILE, 'utf8'));
+        console.log(`📡 [METAR] Loaded ${metarCache.data.length} airport weather records from cache`);
+    }
+} catch (e) { /* ignore */ }
+
+// 所有需要抓 METAR 的機場 ICAO 碼
+const METAR_AIRPORTS = [
+    'RCTP', 'RCSS', 'RCKH', 'RCMQ', 'RCNN', 'RCFN', 'RCQC',
+    'RJTT', 'RJAA', 'RJBB', 'RJFF', 'RJCC', 'ROAH',
+    'RKSI', 'RKSS',
+    'ZBAA', 'ZSPD', 'ZSSS', 'ZGGG', 'ZGSZ', 'VHHH',
+    'WSSS', 'VTBS', 'WMKK', 'RPLL', 'WIII', 'VVNB', 'VVTS', 'VIDP',
+    'OMDB', 'OTHH',
+    'EGLL', 'LFPG', 'EDDF', 'EHAM', 'LTFM',
+    'KJFK', 'KLAX', 'KORD', 'KATL',
+    'YSSY', 'NZAA'
+];
+
+async function fetchMetarData() {
+    try {
+        const ids = METAR_AIRPORTS.join(',');
+        const url = `https://aviationweather.gov/api/data/metar?ids=${ids}&format=json`;
+        console.log(`📡 [METAR] Fetching weather for ${METAR_AIRPORTS.length} airports...`);
+
+        const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+        if (!response.ok) throw new Error(`METAR API error: ${response.status}`);
+
+        const data = await response.json();
+        metarCache = { timestamp: Date.now(), data };
+
+        // 寫入檔案快取
+        fs.writeFileSync(METAR_CACHE_FILE, JSON.stringify(metarCache, null, 2));
+        console.log(`📡 [METAR] Updated ${data.length} airport weather records`);
+    } catch (error) {
+        console.error('❌ [METAR] Fetch error:', error.message);
+    }
+}
+
+// 啟動時抓取 (如果快取過期)
+if (Date.now() - metarCache.timestamp > METAR_TTL) {
+    fetchMetarData();
+}
+
+// 每小時定時更新
+setInterval(fetchMetarData, METAR_TTL);
+
+app.get('/api/metar', (req, res) => {
+    const icao = req.query.icao;
+    if (icao) {
+        const found = metarCache.data.find(m => m.icaoId === icao.toUpperCase());
+        return res.json(found || { error: 'Airport not found' });
+    }
+    res.json(metarCache.data);
+});
+
+// ==========================================
 // SPA Fallback — 未匹配的路由指向 React 前端
 // ==========================================
 app.use((req, res) => {

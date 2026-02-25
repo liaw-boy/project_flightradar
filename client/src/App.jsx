@@ -14,22 +14,44 @@ export default function App() {
     const [loading, setLoading] = useState(true);
     const [selectedIcao24, setSelectedIcao24] = useState(null);
     const [trackPoints, setTrackPoints] = useState([]);
+    const [selectedMetadata, setSelectedMetadata] = useState(null);
+    const [selectedRoute, setSelectedRoute] = useState(null);
     const [filters, setFilters] = useState({
         showGround: true,
         showEmergency: true,
         showLow: true,
+        showAirports: true,
     });
+    const [nextRefresh, setNextRefresh] = useState(null);
 
     const mapInstanceRef = useRef(null);
     const { notifications, showNotification } = useNotification();
     const {
         planesDict,
         planeCount,
+        airCount,
+        groundCount,
         apiStatus,
         apiStatusClass,
+        latency,
+        lastUpdateTime,
+        apiStats,
         fetchPlanes,
         fetchTrack,
     } = useFlightData(mapInstanceRef, showNotification);
+
+    // NEXT REFRESH 倒數計時器
+    const POLL_INTERVAL = 60; // 測試階段 60 秒
+    useEffect(() => {
+        let countdown = POLL_INTERVAL;
+        setNextRefresh(countdown);
+        const timer = setInterval(() => {
+            countdown--;
+            if (countdown <= 0) countdown = POLL_INTERVAL;
+            setNextRefresh(countdown);
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [lastUpdateTime]);
 
     // 載入動畫
     useEffect(() => {
@@ -57,12 +79,25 @@ export default function App() {
     const handleSelectPlane = useCallback(
         async (icao24, plane) => {
             setSelectedIcao24(icao24);
+            setSelectedMetadata(null);
+            setSelectedRoute(null);
 
             // 取得軌跡
             const points = await fetchTrack(icao24);
             setTrackPoints(points);
 
             showNotification(`✈️ ${plane.callsign}`, 'info');
+
+            // 背景取得 metadata + route (不阻塞 UI)
+            fetch(`/api/metadata/${icao24}`)
+                .then(r => r.json())
+                .then(data => { if (!data.noData) setSelectedMetadata(data); })
+                .catch(() => { });
+
+            fetch(`/api/route/${icao24}`)
+                .then(r => r.json())
+                .then(data => { if (!data.noData) setSelectedRoute(data); })
+                .catch(() => { });
         },
         [fetchTrack, showNotification]
     );
@@ -71,6 +106,8 @@ export default function App() {
     const handleDeselectPlane = useCallback(() => {
         setSelectedIcao24(null);
         setTrackPoints([]);
+        setSelectedMetadata(null);
+        setSelectedRoute(null);
     }, []);
 
     // 過濾器變更
@@ -111,8 +148,14 @@ export default function App() {
 
             <Dashboard
                 planeCount={planeCount}
+                airCount={airCount}
+                groundCount={groundCount}
                 apiStatus={apiStatus}
                 apiStatusClass={apiStatusClass}
+                latency={latency}
+                lastUpdateTime={lastUpdateTime}
+                nextRefresh={nextRefresh}
+                apiStats={apiStats}
             />
 
             <FilterPanel
@@ -124,6 +167,8 @@ export default function App() {
                 <Sidebar
                     plane={selectedPlane}
                     icao24={selectedIcao24}
+                    metadata={selectedMetadata}
+                    route={selectedRoute}
                     onClose={handleDeselectPlane}
                 />
             )}
