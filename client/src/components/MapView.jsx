@@ -271,8 +271,24 @@ export default function MapView({
             const { svg, size } = createPlaneSVG(plane.heading, plane.altitude, isSelected, plane.onGround, plane.isEmergency, plane.category);
             const extraClass = getPlaneExtraClass(plane.isEmergency, plane.onGround);
 
+            let tooltipHtml = '';
+            if (showTooltips) {
+                const logoUrl = getAirlineLogoUrl(plane.callsign);
+                const logoHtml = logoUrl
+                    ? `<img src="${logoUrl}" onerror="this.style.display='none'" class="airline-logo">`
+                    : '';
+                tooltipHtml = `<div class="cyber-label css-tooltip">${logoHtml}<span>${plane.callsign}</span></div>`;
+            }
+
+            const iconHtml = `
+                <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">
+                    ${svg}
+                    ${tooltipHtml}
+                </div>
+            `;
+
             const icon = L.divIcon({
-                html: svg,
+                html: iconHtml,
                 className: `plane-icon ${extraClass}`,
                 iconSize: [size, size],
                 iconAnchor: [size / 2, size / 2],
@@ -280,45 +296,18 @@ export default function MapView({
 
             if (markersRef.current[id]) {
                 markersRef.current[id].setLatLng([plane.lat, plane.lng]);
-                markersRef.current[id].setIcon(icon);
+
+                // Only update the icon if the HTML actually changed.
+                // This preserves DOM state (like standard CSS :hover) and prevents tooltips from sticking.
+                const oldHtml = markersRef.current[id].options.icon?.options?.html;
+                if (oldHtml !== iconHtml) {
+                    markersRef.current[id].setIcon(icon);
+                }
+
                 const el = markersRef.current[id].getElement();
                 if (el) el.style.display = inBounds ? '' : 'none';
-
-                // Tooltip 可見性控制
-                if (showTooltips) {
-                    if (!markersRef.current[id].getTooltip()) {
-                        const logoUrl = getAirlineLogoUrl(plane.callsign);
-                        const logoHtml = logoUrl
-                            ? `<img src="${logoUrl}" onerror="this.style.display='none'" style="max-height:20px;width:auto;vertical-align:middle;margin-right:4px;border-radius:3px">`
-                            : '';
-                        markersRef.current[id].bindTooltip(`${logoHtml}<span>${plane.callsign}</span>`, {
-                            permanent: false,
-                            direction: 'right',
-                            offset: [15, 0],
-                            className: 'cyber-label',
-                        });
-                    }
-                } else {
-                    if (markersRef.current[id].getTooltip()) {
-                        markersRef.current[id].unbindTooltip();
-                    }
-                }
             } else if (inBounds) {
                 const marker = L.marker([plane.lat, plane.lng], { icon }).addTo(map);
-
-                // Tooltip（zoom >= 6 才顯示）
-                if (showTooltips) {
-                    const logoUrl = getAirlineLogoUrl(plane.callsign);
-                    const logoHtml = logoUrl
-                        ? `<img src="${logoUrl}" onerror="this.style.display='none'" style="max-height:20px;width:auto;vertical-align:middle;margin-right:4px;border-radius:3px">`
-                        : '';
-                    marker.bindTooltip(`${logoHtml}<span>${plane.callsign}</span>`, {
-                        permanent: true,
-                        direction: 'right',
-                        offset: [15, 0],
-                        className: 'cyber-label',
-                    });
-                }
 
                 marker.on('click', (e) => {
                     L.DomEvent.stopPropagation(e);

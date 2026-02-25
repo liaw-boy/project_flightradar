@@ -52,7 +52,7 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                 {/* Logo */}
                 {logoUrl && (
                     <div className="sb-logo-container">
-                        <img src={logoUrl} alt="Airline Logo" onError={(e) => (e.target.style.display = 'none')} />
+                        <img src={logoUrl} alt="Airline Logo" className="airline-logo" onError={(e) => (e.target.style.display = 'none')} />
                     </div>
                 )}
 

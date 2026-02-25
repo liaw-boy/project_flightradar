@@ -73,6 +73,39 @@
     display: none !important;
 }
 
+.airline-logo {
+    height: 25px !important;
+    /* 強制高度為 5px */
+    max-height: 30px !important;
+    /* 限制最大高度 */
+    width: auto !important;
+    /* 確保寬度等比例縮放 */
+    display: inline-block;
+    /* 確保高度設定能生效 */
+    vertical-align: middle;
+    margin-right: 4px;
+    border-radius: 3px;
+    filter: brightness(1.2);
+}
+
+/* Pure CSS Hover Tooltip */
+.css-tooltip {
+    position: absolute;
+    left: 50%;
+    margin-left: 20px;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+    white-space: nowrap;
+    z-index: 1000;
+}
+
+.plane-icon:hover .css-tooltip {
+    opacity: 1;
+    visibility: visible;
+}
+
 /* Airport markers */
 .airport-icon {
     display: flex;
