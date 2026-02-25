@@ -20,7 +20,7 @@ app.use(express.static(path.join(__dirname, 'public')));        // 舊版 HTML
 // 快取系統
 // ==========================================
 const cache = new Map();
-const CACHE_TTL = 15000; // 15 秒快取
+const CACHE_TTL = 8000; // 8 秒快取（配合前端快速輪詢）
 
 function getCached(key) {
     if (cache.has(key)) {
@@ -196,6 +196,79 @@ app.get('/api/tracks', async (req, res) => {
     } catch (error) {
         console.error(`❌ [FETCH ERROR] Track ${icao24}: ${error.message}`);
         res.status(500).json({ error: 'Failed to fetch track data', detail: error.message });
+    }
+});
+
+// ==========================================
+// 飛機 Metadata（機型/製造商/註冊號）— 永久快取
+// ==========================================
+const fs = require('fs');
+const METADATA_CACHE_FILE = path.join(__dirname, 'aircraft-cache.json');
+let aircraftMetadataCache = {};
+
+// 啟動時載入快取檔案
+try {
+    if (fs.existsSync(METADATA_CACHE_FILE)) {
+        aircraftMetadataCache = JSON.parse(fs.readFileSync(METADATA_CACHE_FILE, 'utf8'));
+        console.log(`📂 [METADATA] Loaded ${Object.keys(aircraftMetadataCache).length} cached aircraft`);
+    }
+} catch (e) {
+    console.warn('⚠️ Failed to load metadata cache:', e.message);
+}
+
+function saveMetadataCache() {
+    try {
+        fs.writeFileSync(METADATA_CACHE_FILE, JSON.stringify(aircraftMetadataCache), 'utf8');
+    } catch (e) {
+        console.warn('⚠️ Failed to save metadata cache:', e.message);
+    }
+}
+
+app.get('/api/metadata/:icao24', async (req, res) => {
+    const icao24 = req.params.icao24.toLowerCase();
+
+    // 檢查永久快取
+    if (aircraftMetadataCache[icao24]) {
+        return res.json(aircraftMetadataCache[icao24]);
+    }
+
+    try {
+        const url = `https://opensky-network.org/api/metadata/aircraft/icao/${icao24}`;
+        console.log(`🌐 [METADATA] Fetching metadata for ${icao24}...`);
+        const headers = await getAuthHeaders();
+        const response = await fetch(url, {
+            headers,
+            signal: AbortSignal.timeout(10000)
+        });
+
+        if (!response.ok) {
+            // 記錄為「無資料」避免重複查詢
+            aircraftMetadataCache[icao24] = { icao24, noData: true };
+            saveMetadataCache();
+            return res.json(aircraftMetadataCache[icao24]);
+        }
+
+        const data = await response.json();
+        const metadata = {
+            icao24: icao24,
+            registration: data.registration || '',
+            manufacturerName: data.manufacturerName || '',
+            model: data.model || '',
+            typecode: data.typecode || '',
+            owner: data.owner || '',
+            operator: data.operatorCallsign || '',
+            built: data.built || '',
+            categoryDescription: data.categoryDescription || ''
+        };
+
+        aircraftMetadataCache[icao24] = metadata;
+        saveMetadataCache();
+        console.log(`📦 [METADATA] Cached: ${icao24} = ${metadata.typecode} ${metadata.model}`);
+
+        res.json(metadata);
+    } catch (error) {
+        console.error(`❌ [METADATA ERROR] ${icao24}: ${error.message}`);
+        res.json({ icao24, noData: true, error: error.message });
     }
 });
 

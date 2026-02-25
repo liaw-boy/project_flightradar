@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>暗黑全球航空雷達 - 終極優化版</title>
+    <title>Dark Global Flight Radar - Ultimate Edition</title>
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -81,6 +81,7 @@
             padding: 15px 20px;
             color: #fff;
             box-shadow: 0 0 20px rgba(0, 0, 0, 0.8), inset 0 0 10px rgba(1, 255, 112, 0.1);
+            -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
             min-width: 220px;
         }
@@ -156,6 +157,7 @@
             font-family: 'Share Tech Mono', monospace;
             font-size: 11px !important;
             padding: 4px 8px !important;
+            -webkit-backdrop-filter: blur(5px);
             backdrop-filter: blur(5px);
             display: flex;
             align-items: center;
@@ -185,6 +187,7 @@
             background: rgba(15, 20, 25, 0.95);
             border-right: 2px solid #FFDC00;
             box-shadow: 5px 0 30px rgba(0, 0, 0, 0.9);
+            -webkit-backdrop-filter: blur(15px);
             backdrop-filter: blur(15px);
             transform: translateX(-100%);
             transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -297,6 +300,109 @@
             box-shadow: 0 5px 15px rgba(255, 220, 0, 0.4);
         }
 
+        .follow-btn {
+            display: block;
+            margin-top: 10px;
+            padding: 12px;
+            background: rgba(1, 255, 112, 0.1);
+            border: 2px solid #01FF70;
+            color: #01FF70;
+            border-radius: 6px;
+            font-size: 14px;
+            text-align: center;
+            cursor: pointer;
+            -webkit-transition: 0.3s;
+            transition: 0.3s;
+            font-weight: bold;
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        .follow-btn:hover {
+            background: rgba(1, 255, 112, 0.2);
+        }
+
+        .follow-btn.active {
+            background: #01FF70;
+            color: #000;
+            -webkit-animation: pulse 1s infinite;
+            animation: pulse 1s infinite;
+        }
+
+        .phase-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        .phase-parked {
+            background: rgba(136, 136, 136, 0.3);
+            color: #aaa;
+        }
+
+        .phase-taxi {
+            background: rgba(255, 220, 0, 0.2);
+            color: #FFDC00;
+        }
+
+        .phase-takeoff {
+            background: rgba(255, 65, 54, 0.2);
+            color: #FF4136;
+        }
+
+        .phase-climb {
+            background: rgba(1, 255, 112, 0.2);
+            color: #01FF70;
+        }
+
+        .phase-cruise {
+            background: rgba(0, 170, 255, 0.2);
+            color: #00AAFF;
+        }
+
+        .phase-descent {
+            background: rgba(255, 220, 0, 0.2);
+            color: #FFDC00;
+        }
+
+        .phase-approach {
+            background: rgba(255, 165, 0, 0.2);
+            color: #FFA500;
+        }
+
+        .phase-landed {
+            background: rgba(136, 136, 136, 0.3);
+            color: #aaa;
+        }
+
+        /* Airport markers */
+        .airport-icon {
+            display: -webkit-flex;
+            display: flex;
+            -webkit-align-items: center;
+            align-items: center;
+            -webkit-justify-content: center;
+            justify-content: center;
+        }
+
+        .airport-label {
+            background: rgba(0, 170, 255, 0.15) !important;
+            border: 1px solid rgba(0, 170, 255, 0.5) !important;
+            border-radius: 4px !important;
+            color: #00AAFF !important;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 10px !important;
+            padding: 2px 6px !important;
+            -webkit-backdrop-filter: blur(5px);
+            backdrop-filter: blur(5px);
+        }
+
+        .airport-label::before,
+        .airport-label::after {
+            display: none !important;
+        }
+
         .alert-box {
             color: #FF4136;
             border: 2px solid #FF4136;
@@ -304,6 +410,7 @@
             text-align: center;
             margin-bottom: 15px;
             border-radius: 6px;
+            -webkit-animation: emergency-pulse 1s infinite;
             animation: emergency-pulse 1s infinite;
             display: none;
             font-weight: bold;
@@ -329,6 +436,7 @@
             font-size: 14px;
             width: 300px;
             outline: none;
+            -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
             transition: 0.3s;
         }
@@ -405,6 +513,7 @@
             border-radius: 8px;
             padding: 15px;
             color: #fff;
+            -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
             min-width: 200px;
         }
@@ -544,20 +653,40 @@
                     id="sb-icao">--</span></div>
             <div class="sb-data-row"><span class="sb-data-label">Registration</span><span class="sb-data-value"
                     id="sb-reg">--</span></div>
-            <div class="sb-data-row"><span class="sb-data-label">Country</span><span class="sb-data-value"
-                    id="sb-country">--</span></div>
-            <div class="sb-data-row"><span class="sb-data-label">Type</span><span class="sb-data-value"
+            <div class="sb-data-row"><span class="sb-data-label" data-i18n="country">Country</span><span
+                    class="sb-data-value" id="sb-country">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label" data-i18n="type">Type</span><span class="sb-data-value"
                     id="sb-type">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label" data-i18n="airline">Airline</span><span
+                    class="sb-data-value" id="sb-airline">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label" data-i18n="model">Model</span><span
+                    class="sb-data-value" id="sb-model">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label" data-i18n="category">Category</span><span
+                    class="sb-data-value" id="sb-category">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label">Manufacturer</span><span class="sb-data-value"
+                    id="sb-manufacturer">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label">Owner</span><span class="sb-data-value"
+                    id="sb-owner">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label">Squawk</span><span class="sb-data-value"
+                    id="sb-squawk">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label" data-i18n="nearestApt">Nearest Apt</span><span
+                    class="sb-data-value" id="sb-nearest-apt">--</span></div>
 
             <div class="sb-section-title">📊 SPATIAL DATA</div>
-            <div class="sb-data-row"><span class="sb-data-label">Altitude</span><span class="sb-data-value"
+            <div class="sb-data-row"><span class="sb-data-label">Flight Phase</span><span class="sb-data-value"
+                    id="sb-phase">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label">Baro Alt</span><span class="sb-data-value"
                     id="sb-alt">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label">Geo Alt</span><span class="sb-data-value"
+                    id="sb-geoalt">--</span></div>
             <div class="sb-data-row"><span class="sb-data-label">Speed</span><span class="sb-data-value"
                     id="sb-spd">--</span></div>
             <div class="sb-data-row"><span class="sb-data-label">Heading</span><span class="sb-data-value"
                     id="sb-hdg">--</span></div>
             <div class="sb-data-row"><span class="sb-data-label">Vert. Rate</span><span class="sb-data-value"
                     id="sb-vrate">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label">On Ground</span><span class="sb-data-value"
+                    id="sb-ground">--</span></div>
             <div class="sb-data-row"><span class="sb-data-label">Position</span><span class="sb-data-value"
                     id="sb-pos">--</span></div>
 
@@ -567,7 +696,14 @@
             <div class="sb-data-row"><span class="sb-data-label">Data Age</span><span class="sb-data-value"
                     id="sb-age">--</span></div>
 
+            <div class="sb-section-title">📡 SOURCE</div>
+            <div class="sb-data-row"><span class="sb-data-label">Sensors</span><span class="sb-data-value"
+                    id="sb-sensors">--</span></div>
+            <div class="sb-data-row"><span class="sb-data-label">Source</span><span class="sb-data-value"
+                    id="sb-source">OpenSky</span></div>
+
             <a id="sb-route-btn" href="#" target="_blank" class="route-btn">🔍 Track on Flightradar24 ↗</a>
+            <button id="sb-follow-btn" class="follow-btn" onclick="toggleFollow()">🔒 FOLLOW</button>
         </div>
     </div>
 
@@ -576,11 +712,17 @@
         <div class="title-container">
             <div class="live-dot" id="status-dot"></div>
             <h2>RADAR SYSTEM</h2>
+            <button id="lang-toggle" onclick="toggleLang()"
+                style="margin-left:auto;background:rgba(1,255,112,0.15);border:1px solid #01FF70;color:#01FF70;font-family:'Share Tech Mono',monospace;font-size:11px;padding:3px 8px;border-radius:4px;cursor:pointer;">EN/中</button>
         </div>
         <div class="stat-row"><span>SYS.TIME</span><span id="sys-time" class="stat-value">--:--:--</span></div>
         <div class="stat-row"><span>AIRCRAFT</span><span id="plane-count" class="stat-value">SCANNING</span></div>
+        <div class="stat-row"><span>✈️ AIR / 🛬 GND</span><span id="air-ground-count" class="stat-value">-- / --</span>
+        </div>
         <div class="stat-row"><span>API STATUS</span><span id="api-status" class="stat-value">INIT</span></div>
-        <div class="stat-row"><span>FPS</span><span id="fps-counter" class="stat-value">--</span></div>
+        <div class="stat-row"><span>LATENCY</span><span id="api-latency" class="stat-value">--</span></div>
+        <div class="stat-row"><span>LAST UPDATE</span><span id="last-update" class="stat-value">--</span></div>
+        <div class="stat-row"><span>NEXT REFRESH</span><span id="next-refresh" class="stat-value">--</span></div>
     </div>
 
     <!-- 搜尋框 -->
@@ -602,6 +744,10 @@
         <div class="filter-option">
             <input type="checkbox" id="filter-low" checked>
             <label for="filter-low">Show Low Alt (&lt;1500m)</label>
+        </div>
+        <div class="filter-option">
+            <input type="checkbox" id="filter-airports" checked>
+            <label for="filter-airports">Show Airports</label>
         </div>
     </div>
 
@@ -637,39 +783,445 @@
         let frameCount = 0;
         let lastFpsUpdate = performance.now();
 
+        // 即時性優化：自適應輪詢
+        let pollIntervalId = null;
+        let lastFetchTime = 0;
+        let lastApiLatency = 0;
+        let moveEndDebounceTimer = null;
+        let searchDebounceTimer = null;
+        let isFollowing = false;
+
+        function getAdaptiveInterval() {
+            var zoom = map.getZoom();
+            if (zoom >= 10) return 10000;
+            if (zoom >= 8) return 15000;
+            return 20000;
+        }
+
         // 過濾器狀態
         const filters = {
             showGround: true,
             showEmergency: true,
-            showLow: true
+            showLow: true,
+            showAirports: true
         };
 
+        // ==========================================
+        // 飛行階段偵測
+        // ==========================================
+        function detectFlightPhase(plane) {
+            var alt = plane.altitude;
+            var spd = plane.velocity * 3.6;
+            var vr = plane.vRate || 0;
+            if (plane.onGround && spd < 5) return { text: '\ud83c\udd7f\ufe0f PARKED', css: 'phase-parked' };
+            if (plane.onGround) return { text: '\ud83d\udd04 TAXIING', css: 'phase-taxi' };
+            if (alt !== 'N/A' && alt !== 'GROUND') {
+                if (alt < 500 && vr > 3 && spd > 100) return { text: '\ud83d\udeed TAKEOFF', css: 'phase-takeoff' };
+                if (vr > 1) return { text: '\u2b06\ufe0f CLIMBING', css: 'phase-climb' };
+                if (alt > 8000 && Math.abs(vr) < 1) return { text: '\u2708\ufe0f CRUISE', css: 'phase-cruise' };
+                if (vr < -1 && alt > 1500) return { text: '\u2b07\ufe0f DESCENDING', css: 'phase-descent' };
+                if (vr < -1 && alt <= 1500) return { text: '\ud83d\udeec APPROACH', css: 'phase-approach' };
+                return { text: '\u2708\ufe0f EN ROUTE', css: 'phase-climb' };
+            }
+            return { text: '\u2708\ufe0f FLIGHT', css: 'phase-cruise' };
+        }
+
+        // ==========================================
+        // 自動跟蹤
+        // ==========================================
+        function toggleFollow() {
+            isFollowing = !isFollowing;
+            var btn = document.getElementById('sb-follow-btn');
+            if (isFollowing) {
+                btn.classList.add('active');
+                btn.innerText = '\ud83d\udd13 FOLLOWING...';
+                showNotification('\ud83d\udd12 已鎖定跟蹤飛機', 'info');
+            } else {
+                btn.classList.remove('active');
+                btn.innerText = '\ud83d\udd12 FOLLOW';
+            }
+        }
+        function disableFollow() {
+            isFollowing = false;
+            var btn = document.getElementById('sb-follow-btn');
+            btn.classList.remove('active');
+            btn.innerText = '\ud83d\udd12 FOLLOW';
+        }
+        map.on('dragstart', function () {
+            if (isFollowing) { disableFollow(); showNotification('\ud83d\udd13 已取消跟蹤', 'warning'); }
+        });
+
+        // ==========================================
+        // 機場資料庫
+        // ==========================================
+        var AIRPORTS = [
+            { icao: 'RCTP', name: 'Taoyuan Intl', lat: 25.0777, lng: 121.2325, type: 'large' },
+            { icao: 'RCSS', name: 'Songshan', lat: 25.0694, lng: 121.5525, type: 'medium' },
+            { icao: 'RCKH', name: 'Kaohsiung Intl', lat: 22.5771, lng: 120.3500, type: 'large' },
+            { icao: 'RCMQ', name: 'Taichung', lat: 24.2647, lng: 120.6208, type: 'medium' },
+            { icao: 'RCNN', name: 'Tainan', lat: 22.9504, lng: 120.2057, type: 'small' },
+            { icao: 'RCFN', name: 'Hualien', lat: 24.0231, lng: 121.6162, type: 'small' },
+            { icao: 'RCQC', name: 'Makung', lat: 23.5687, lng: 119.6283, type: 'small' },
+            { icao: 'RJTT', name: 'Tokyo Haneda', lat: 35.5533, lng: 139.7811, type: 'large' },
+            { icao: 'RJAA', name: 'Tokyo Narita', lat: 35.7647, lng: 140.3864, type: 'large' },
+            { icao: 'RJBB', name: 'Kansai Intl', lat: 34.4347, lng: 135.2441, type: 'large' },
+            { icao: 'RJFF', name: 'Fukuoka', lat: 33.5859, lng: 130.4514, type: 'large' },
+            { icao: 'RJCC', name: 'Sapporo CTS', lat: 42.7752, lng: 141.6925, type: 'large' },
+            { icao: 'ROAH', name: 'Naha Okinawa', lat: 26.1958, lng: 127.6459, type: 'medium' },
+            { icao: 'RKSI', name: 'Seoul Incheon', lat: 37.4602, lng: 126.4407, type: 'large' },
+            { icao: 'RKSS', name: 'Seoul Gimpo', lat: 37.5583, lng: 126.7906, type: 'medium' },
+            { icao: 'ZBAA', name: 'Beijing Capital', lat: 40.0801, lng: 116.5846, type: 'large' },
+            { icao: 'ZSPD', name: 'Shanghai Pudong', lat: 31.1434, lng: 121.8052, type: 'large' },
+            { icao: 'ZSSS', name: 'Shanghai Hongqiao', lat: 31.1979, lng: 121.3362, type: 'large' },
+            { icao: 'ZGGG', name: 'Guangzhou Baiyun', lat: 23.3924, lng: 113.2988, type: 'large' },
+            { icao: 'ZGSZ', name: 'Shenzhen Baoan', lat: 22.6393, lng: 113.8107, type: 'large' },
+            { icao: 'VHHH', name: 'Hong Kong Intl', lat: 22.3089, lng: 113.9146, type: 'large' },
+            { icao: 'WSSS', name: 'Singapore Changi', lat: 1.3502, lng: 103.9944, type: 'large' },
+            { icao: 'VTBS', name: 'Bangkok Suvarnabhumi', lat: 13.6900, lng: 100.7501, type: 'large' },
+            { icao: 'WMKK', name: 'Kuala Lumpur KLIA', lat: 2.7456, lng: 101.7099, type: 'large' },
+            { icao: 'RPLL', name: 'Manila NAIA', lat: 14.5086, lng: 121.0198, type: 'large' },
+            { icao: 'WIII', name: 'Jakarta Soekarno', lat: -6.1256, lng: 106.6558, type: 'large' },
+            { icao: 'VVNB', name: 'Hanoi Noi Bai', lat: 21.2212, lng: 105.8072, type: 'large' },
+            { icao: 'VVTS', name: 'Ho Chi Minh', lat: 10.8188, lng: 106.6519, type: 'large' },
+            { icao: 'VIDP', name: 'Delhi Intl', lat: 28.5665, lng: 77.1031, type: 'large' },
+            { icao: 'OMDB', name: 'Dubai Intl', lat: 25.2528, lng: 55.3644, type: 'large' },
+            { icao: 'OTHH', name: 'Doha Hamad', lat: 25.2731, lng: 51.6082, type: 'large' },
+            { icao: 'EGLL', name: 'London Heathrow', lat: 51.4700, lng: -0.4543, type: 'large' },
+            { icao: 'LFPG', name: 'Paris CDG', lat: 49.0097, lng: 2.5479, type: 'large' },
+            { icao: 'EDDF', name: 'Frankfurt', lat: 50.0379, lng: 8.5622, type: 'large' },
+            { icao: 'EHAM', name: 'Amsterdam Schiphol', lat: 52.3086, lng: 4.7639, type: 'large' },
+            { icao: 'LTFM', name: 'Istanbul', lat: 41.2611, lng: 28.7419, type: 'large' },
+            { icao: 'KJFK', name: 'New York JFK', lat: 40.6413, lng: -73.7781, type: 'large' },
+            { icao: 'KLAX', name: 'Los Angeles LAX', lat: 33.9416, lng: -118.4085, type: 'large' },
+            { icao: 'KORD', name: 'Chicago OHare', lat: 41.9742, lng: -87.9073, type: 'large' },
+            { icao: 'KATL', name: 'Atlanta', lat: 33.6407, lng: -84.4277, type: 'large' },
+            { icao: 'YSSY', name: 'Sydney', lat: -33.9461, lng: 151.1772, type: 'large' },
+            { icao: 'NZAA', name: 'Auckland', lat: -37.0082, lng: 174.7850, type: 'large' }
+        ];
+        var airportLayer = L.layerGroup().addTo(map);
+        var airportMarkersLoaded = false;
+
+        function createAirportIcon(type) {
+            var size = type === 'large' ? 10 : (type === 'medium' ? 7 : 5);
+            var color = type === 'large' ? '#00AAFF' : (type === 'medium' ? '#0088CC' : '#006699');
+            var svg = '<svg width="' + (size * 2) + '" height="' + (size * 2) + '"><circle cx="' + size + '" cy="' + size + '" r="' + (size - 1) + '" fill="' + color + '" fill-opacity="0.4" stroke="' + color + '" stroke-width="1.5"/></svg>';
+            return L.divIcon({ html: svg, className: 'airport-icon', iconSize: [size * 2, size * 2], iconAnchor: [size, size] });
+        }
+
+        function loadAirports() {
+            if (airportMarkersLoaded) return;
+            airportMarkersLoaded = true;
+            for (var i = 0; i < AIRPORTS.length; i++) {
+                var ap = AIRPORTS[i];
+                var m = L.marker([ap.lat, ap.lng], { icon: createAirportIcon(ap.type), interactive: true, zIndexOffset: -1000 });
+                m.bindTooltip(ap.icao + ' - ' + ap.name, { permanent: false, direction: 'right', offset: [10, 0], className: 'airport-label' });
+                m.addTo(airportLayer);
+            }
+        }
+
+        function updateAirportVisibility() {
+            var zoom = map.getZoom();
+            if (zoom >= 7 && filters.showAirports) {
+                if (!map.hasLayer(airportLayer)) map.addLayer(airportLayer);
+                if (!airportMarkersLoaded) loadAirports();
+            } else {
+                if (map.hasLayer(airportLayer)) map.removeLayer(airportLayer);
+            }
+        }
+        map.on('zoomend', updateAirportVisibility);
+
+        function getNearestAirport(lat, lng) {
+            var minDist = Infinity;
+            var nearest = null;
+            for (var i = 0; i < AIRPORTS.length; i++) {
+                var ap = AIRPORTS[i];
+                var dLat = (ap.lat - lat) * Math.PI / 180;
+                var dLng = (ap.lng - lng) * Math.PI / 180;
+                var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                    Math.cos(lat * Math.PI / 180) * Math.cos(ap.lat * Math.PI / 180) *
+                    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+                var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                var d = 6371 * c; // km
+                if (d < minDist) { minDist = d; nearest = { icao: ap.icao, name: ap.name, dist: d }; }
+            }
+            return nearest;
+        }
+
+        // ==========================================
+        // 航空公司 ICAO 代碼資料庫
+        // ==========================================
+        var AIRLINE_DB = {
+            // Taiwan
+            'CAL': 'China Airlines', 'EVA': 'EVA Air', 'UIA': 'Mandarin Airlines', 'TNA': 'TransAsia Airways',
+            'TTW': 'Tigerair Taiwan', 'SJX': 'StarLux Airlines', 'FEA': 'Far Eastern Air Transport',
+            // Japan
+            'JAL': 'Japan Airlines', 'ANA': 'All Nippon Airways', 'JJP': 'Jetstar Japan',
+            'APJ': 'Peach Aviation', 'SFJ': 'StarFlyer', 'ADO': 'Air Do', 'SNJ': 'Solaseed Air',
+            // Korea
+            'KAL': 'Korean Air', 'AAR': 'Asiana Airlines', 'JNA': 'Jin Air', 'TWB': 'T\'way Air',
+            'JJA': 'Jeju Air', 'ABL': 'Air Busan', 'ESR': 'Eastar Jet',
+            // China
+            'CCA': 'Air China', 'CES': 'China Eastern', 'CSN': 'China Southern', 'HXA': 'Hong Kong Airlines',
+            'CPA': 'Cathay Pacific', 'HDA': 'Hong Kong Air Cargo', 'SHQ': 'Spring Airlines',
+            'CSZ': 'Shenzhen Airlines', 'CDG': 'Shandong Airlines', 'CHH': 'Hainan Airlines',
+            // Southeast Asia
+            'SIA': 'Singapore Airlines', 'THA': 'Thai Airways', 'MAS': 'Malaysia Airlines',
+            'AXM': 'AirAsia', 'GIA': 'Garuda Indonesia', 'PAL': 'Philippine Airlines',
+            'CEB': 'Cebu Pacific', 'VJC': 'Vietjet', 'HVN': 'Vietnam Airlines',
+            'JSA': 'Jetstar Asia', 'SLK': 'SilkAir', 'SCO': 'Scoot',
+            // Middle East
+            'UAE': 'Emirates', 'ETD': 'Etihad Airways', 'QTR': 'Qatar Airways',
+            'THY': 'Turkish Airlines', 'SVA': 'Saudia', 'GFA': 'Gulf Air',
+            // Europe
+            'BAW': 'British Airways', 'DLH': 'Lufthansa', 'AFR': 'Air France',
+            'KLM': 'KLM', 'SAS': 'Scandinavian Airlines', 'FIN': 'Finnair',
+            'SWR': 'Swiss Intl', 'AUA': 'Austrian Airlines', 'TAP': 'TAP Portugal',
+            'IBE': 'Iberia', 'AZA': 'ITA Airways', 'LOT': 'LOT Polish',
+            'EZY': 'easyJet', 'RYR': 'Ryanair', 'WZZ': 'Wizz Air',
+            // Americas
+            'AAL': 'American Airlines', 'DAL': 'Delta Air Lines', 'UAL': 'United Airlines',
+            'SWA': 'Southwest Airlines', 'JBU': 'JetBlue', 'ASA': 'Alaska Airlines',
+            'ACA': 'Air Canada', 'TAM': 'LATAM Brasil', 'AVA': 'Avianca',
+            // Oceania
+            'QFA': 'Qantas', 'ANZ': 'Air New Zealand', 'JST': 'Jetstar Airways',
+            'VOZ': 'Virgin Australia',
+            // Cargo
+            'FDX': 'FedEx Express', 'UPS': 'UPS Airlines', 'GTI': 'Atlas Air',
+            'CLX': 'Cargolux', 'CKS': 'Kalitta Air', 'ABW': 'AirBridgeCargo',
+            'AHK': 'Air Hong Kong', 'CAO': 'Air China Cargo'
+        };
+
+        // ==========================================
+        // 飛機類別名稱
+        // ==========================================
+        var CATEGORY_NAMES = {
+            0: 'No Info', 1: 'No ADS-B', 2: 'Light',
+            3: 'Small', 4: 'Large', 5: 'High Vortex Large',
+            6: 'Heavy', 7: 'High Performance', 8: 'Rotorcraft',
+            9: 'Glider', 10: 'Lighter-than-air', 11: 'Skydiver',
+            12: 'Ultralight', 14: 'UAV', 15: 'Space Vehicle',
+            17: 'Surface Emergency', 18: 'Surface Service', 19: 'Point Obstacle'
+        };
+
+        function getAirlineName(callsign) {
+            if (!callsign || callsign === 'UNKNOWN') return '';
+            var prefix = callsign.substring(0, 3);
+            return AIRLINE_DB[prefix] || '';
+        }
+
+        function getCategoryName(cat) {
+            return CATEGORY_NAMES[cat] || 'Unknown';
+        }
+
+        // ==========================================
+        // 國家旗幟 Emoji
+        // ==========================================
+        var COUNTRY_FLAGS = {
+            'Taiwan': '🇹🇼', 'Japan': '🇯🇵', 'South Korea': '🇰🇷', 'Republic of Korea': '🇰🇷',
+            'China': '🇨🇳', 'Hong Kong': '🇭🇰', 'Macau': '🇲🇴',
+            'Singapore': '🇸🇬', 'Thailand': '🇹🇭', 'Malaysia': '🇲🇾', 'Philippines': '🇵🇭',
+            'Indonesia': '🇮🇩', 'Vietnam': '🇻🇳', 'Cambodia': '🇰🇭', 'Myanmar': '🇲🇲',
+            'India': '🇮🇳', 'Pakistan': '🇵🇰', 'Bangladesh': '🇧🇩', 'Sri Lanka': '🇱🇰',
+            'United States': '🇺🇸', 'Canada': '🇨🇦', 'Mexico': '🇲🇽', 'Brazil': '🇧🇷',
+            'Argentina': '🇦🇷', 'Chile': '🇨🇱', 'Colombia': '🇨🇴',
+            'United Kingdom': '🇬🇧', 'France': '🇫🇷', 'Germany': '🇩🇪', 'Italy': '🇮🇹',
+            'Spain': '🇪🇸', 'Netherlands': '🇳🇱', 'Switzerland': '🇨🇭', 'Austria': '🇦🇹',
+            'Sweden': '🇸🇪', 'Norway': '🇳🇴', 'Denmark': '🇩🇰', 'Finland': '🇫🇮',
+            'Poland': '🇵🇱', 'Portugal': '🇵🇹', 'Ireland': '🇮🇪', 'Belgium': '🇧🇪',
+            'Greece': '🇬🇷', 'Czechia': '🇨🇿', 'Turkey': '🇹🇷', 'Turkiye': '🇹🇷',
+            'Russia': '🇷🇺', 'Ukraine': '🇺🇦', 'Israel': '🇮🇱',
+            'United Arab Emirates': '🇦🇪', 'Saudi Arabia': '🇸🇦', 'Qatar': '🇶🇦',
+            'Australia': '🇦🇺', 'New Zealand': '🇳🇿',
+            'South Africa': '🇿🇦', 'Egypt': '🇪🇬', 'Ethiopia': '🇪🇹', 'Kenya': '🇰🇪'
+        };
+
+        function getCountryFlag(country) {
+            if (!country) return '';
+            return COUNTRY_FLAGS[country] || '';
+        }
+
+        // ==========================================
+        // 多語言系統 (EN/CN)
+        // ==========================================
+        var currentLang = 'en';
+        var I18N = {
+            en: {
+                title: 'Dark Global Flight Radar - Ultimate Edition',
+                radarSystem: 'RADAR SYSTEM',
+                sysTime: 'SYS.TIME', aircraft: 'AIRCRAFT', airGnd: '✈️ AIR / 🛬 GND',
+                apiStatus: 'API STATUS', latency: 'LATENCY', lastUpdate: 'LAST UPDATE',
+                nextRefresh: 'NEXT REFRESH', searchPlaceholder: '🔍 Search flight (e.g. CX123)',
+                filterTitle: '🎯 FILTERS', showGround: 'Show Ground', showEmergency: 'Show Emergency',
+                showLow: 'Show Low Alt (<1500m)', showAirports: 'Show Airports',
+                flightIdentity: '✈️ FLIGHT IDENTITY', spatialData: '📊 SPATIAL DATA',
+                timing: '⏱️ TIMING', source: '📡 SOURCE',
+                icao24: 'ICAO24', registration: 'Registration', country: 'Country',
+                type: 'Type', airline: 'Airline', model: 'Model', category: 'Category',
+                manufacturer: 'Manufacturer', owner: 'Owner', squawk: 'Squawk',
+                phase: 'Flight Phase', baroAlt: 'Baro Alt', geoAlt: 'Geo Alt',
+                speed: 'Speed', heading: 'Heading', vrate: 'Vert. Rate',
+                onGround: 'On Ground', position: 'Position',
+                lastContact: 'Last Contact', dataAge: 'Data Age',
+                sensors: 'Sensors', sourceName: 'Source',
+                trackBtn: '🔍 Track on Flightradar24 ↗', followBtn: '🔒 FOLLOW',
+                followingBtn: '🔓 FOLLOWING...', radarStarted: '🚀 Radar system started',
+                followOn: '🔒 Following aircraft', followOff: '🔓 Follow cancelled',
+                loading: 'INITIALIZING SYSTEM...'
+            },
+            cn: {
+                title: '暗黑全球航空雷達 - 終極優化版',
+                radarSystem: '雷達系統',
+                sysTime: '系統時間', aircraft: '飛機數量', airGnd: '✈️ 空中 / 🛬 地面',
+                apiStatus: 'API 狀態', latency: '延遲', lastUpdate: '最後更新',
+                nextRefresh: '下次刷新', searchPlaceholder: '🔍 搜尋航班號 (例: CX123)',
+                filterTitle: '🎯 過濾器', showGround: '顯示地面飛機', showEmergency: '顯示緊急航班',
+                showLow: '顯示低空 (<1500m)', showAirports: '顯示機場',
+                flightIdentity: '✈️ 航班資訊', spatialData: '📊 空間資料',
+                timing: '⏱️ 時間', source: '📡 資料來源',
+                icao24: 'ICAO24', registration: '註冊號', country: '國家',
+                type: '機型', airline: '航空公司', model: '型號', category: '類別',
+                manufacturer: '製造商', owner: '擁有者', squawk: '應答機代碼',
+                phase: '飛行階段', baroAlt: '氣壓高度', geoAlt: '幾何高度',
+                speed: '速度', heading: '航向', vrate: '垂直速率',
+                onGround: '在地面', position: '位置',
+                lastContact: '最後聯繫', dataAge: '資料延遲',
+                sensors: '感測器', sourceName: '來源',
+                trackBtn: '🔍 在 Flightradar24 追蹤 ↗', followBtn: '🔒 跟蹤',
+                followingBtn: '🔓 跟蹤中...', radarStarted: '🚀 雷達系統已啟動',
+                followOn: '🔒 已鎖定跟蹤飛機', followOff: '🔓 已取消跟蹤',
+                loading: '系統初始化中...'
+            }
+        };
+
+        function toggleLang() {
+            currentLang = (currentLang === 'en') ? 'cn' : 'en';
+            applyLang();
+        }
+
+        function applyLang() {
+            var t = I18N[currentLang];
+            document.title = t.title;
+
+            // Dashboard
+            var dashRows = document.querySelectorAll('#dashboard .stat-row');
+            var dashKeys = ['sysTime', 'aircraft', 'airGnd', 'apiStatus', 'latency', 'lastUpdate', 'nextRefresh'];
+            for (var i = 0; i < dashRows.length && i < dashKeys.length; i++) {
+                var label = dashRows[i].querySelector('span:first-child');
+                if (label && dashKeys[i]) label.textContent = t[dashKeys[i]];
+            }
+
+            // Search
+            document.getElementById('search-box').placeholder = t.searchPlaceholder;
+
+            // Filter panel
+            var filterLabels = document.querySelectorAll('#filter-panel label');
+            var filterKeys = ['showGround', 'showEmergency', 'showLow', 'showAirports'];
+            for (var j = 0; j < filterLabels.length && j < filterKeys.length; j++) {
+                filterLabels[j].textContent = t[filterKeys[j]];
+            }
+            var filterTitle = document.querySelector('.filter-title');
+            if (filterTitle) filterTitle.textContent = t.filterTitle;
+
+            // Sidebar section titles
+            var sections = document.querySelectorAll('.sb-section-title');
+            var sectionKeys = ['flightIdentity', 'spatialData', 'timing', 'source'];
+            for (var k = 0; k < sections.length && k < sectionKeys.length; k++) {
+                sections[k].textContent = t[sectionKeys[k]];
+            }
+
+            // Sidebar data labels
+            var dataLabels = document.querySelectorAll('.sb-data-row .sb-data-label');
+            var labelKeys = ['icao24', 'registration', 'country', 'type', 'airline', 'model', 'category',
+                'manufacturer', 'owner', 'squawk', 'phase', 'baroAlt', 'geoAlt', 'speed',
+                'heading', 'vrate', 'onGround', 'position', 'lastContact', 'dataAge', 'sensors', 'sourceName'];
+            for (var m = 0; m < dataLabels.length && m < labelKeys.length; m++) {
+                dataLabels[m].textContent = t[labelKeys[m]];
+            }
+
+            // Buttons
+            document.getElementById('sb-route-btn').textContent = t.trackBtn;
+            if (!isFollowing) {
+                document.getElementById('sb-follow-btn').textContent = t.followBtn;
+            }
+
+            // Loading text
+            var loadText = document.getElementById('loading-text');
+            if (loadText) loadText.textContent = t.loading;
+
+            // Toggle button label
+            document.getElementById('lang-toggle').textContent = (currentLang === 'en') ? 'EN/中' : '中/EN';
+        }
+
+        // ==========================================
+        // 飛機 Metadata 快取（前端）
+        // ==========================================
+        var metadataCache = {};
+
+        function fetchAircraftMetadata(icao24) {
+            if (metadataCache[icao24]) {
+                displayMetadata(metadataCache[icao24]);
+                return;
+            }
+            fetch('/api/metadata/' + icao24)
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    metadataCache[icao24] = data;
+                    if (selectedIcao24 === icao24) {
+                        displayMetadata(data);
+                    }
+                })
+                .catch(function (e) {
+                    console.warn('Metadata fetch failed:', e);
+                });
+        }
+
+        function displayMetadata(data) {
+            if (!data || data.noData) {
+                document.getElementById('sb-model').innerText = '--';
+                document.getElementById('sb-manufacturer').innerText = '--';
+                document.getElementById('sb-owner').innerText = '--';
+                return;
+            }
+            var typeStr = data.typecode ? (data.typecode + ' ' + data.model) : (data.model || '--');
+            document.getElementById('sb-model').innerText = typeStr;
+            document.getElementById('sb-manufacturer').innerText = data.manufacturerName || '--';
+            document.getElementById('sb-owner').innerText = data.owner || data.operator || '--';
+            if (data.registration) {
+                document.getElementById('sb-reg').innerText = data.registration;
+            }
+            if (data.typecode) {
+                document.getElementById('sb-type').innerText = data.typecode;
+            }
+        }
+
         // API 資料源配置
-        const API_SOURCES = [
+        var API_SOURCES = [
             {
                 name: 'OpenSky',
-                url: (bounds) => `/api/states?lamin=${bounds.getSouth()}&lomin=${bounds.getWest()}&lamax=${bounds.getNorth()}&lomax=${bounds.getEast()}`,
+                url: function (bounds) { return '/api/states?lamin=' + bounds.getSouth() + '&lomin=' + bounds.getWest() + '&lamax=' + bounds.getNorth() + '&lomax=' + bounds.getEast(); },
                 parser: parseOpenSkyData,
                 priority: 1
             }
         ];
 
-        let currentSourceIndex = 0;
-        const spatialCache = new Map();
-        const EARTH_RADIUS = 6371000;
+        var currentSourceIndex = 0;
+        var spatialCache = new Map();
+        var SPATIAL_CACHE_TTL = 8000;
+        var EARTH_RADIUS = 6371000;
 
         // ==========================================
         // 通知系統
         // ==========================================
-        function showNotification(message, type = 'info') {
-            const notification = document.createElement('div');
-            notification.className = `notification ${type}`;
+        function showNotification(message, type) {
+            if (!type) type = 'info';
+            var notification = document.createElement('div');
+            notification.className = 'notification ' + type;
             notification.innerText = message;
             document.body.appendChild(notification);
 
-            setTimeout(() => {
+            setTimeout(function () {
                 notification.style.animation = 'slideOut 0.3s ease-out';
-                setTimeout(() => notification.remove(), 300);
+                setTimeout(function () { notification.remove(); }, 300);
             }, 3000);
         }
 
@@ -685,24 +1237,40 @@
             return '#01FF70';
         }
 
-        function createPlaneIcon(heading, altitude, isSelected, onGround, isEmergency) {
+        function createPlaneIcon(heading, altitude, isSelected, onGround, isEmergency, category) {
             const color = getAltitudeColor(altitude, onGround, isEmergency);
             let extraClass = isEmergency ? 'emergency-glow' : (onGround ? 'ground-glow' : '');
-            const size = onGround ? 24 : Math.min(36, 24 + (altitude !== 'N/A' && altitude !== 'GROUND' ? altitude / 500 : 0));
-            const glow = isSelected ? `drop-shadow(0 0 15px #FFDC00)` : `drop-shadow(0 0 6px ${color})`;
+
+            // 根據類別設定比例大小
+            var baseSize = 28;
+            if (category >= 6) baseSize = 40;       // Heavy
+            else if (category === 5) baseSize = 36;  // High Vortex Large
+            else if (category === 4) baseSize = 34;  // Large
+            else if (category === 3) baseSize = 28;  // Small
+            else if (category === 2) baseSize = 22;  // Light
+            else if (category === 8) baseSize = 26;  // Rotorcraft
+            else if (category === 7) baseSize = 32;  // High Performance
+            if (onGround) baseSize = Math.max(20, baseSize - 4);
+            var size = baseSize;
+
+            const glow = isSelected ? 'drop-shadow(0 0 15px #FFDC00)' : 'drop-shadow(0 0 6px ' + color + ')';
             const planeColor = isSelected ? '#FFDC00' : color;
 
-            const svg = `
-            <svg viewBox="0 0 24 24" width="${size}" height="${size}" style="filter: ${glow};">
-                <path fill="${planeColor}" 
-                      d="M21,16V14L13,9V3.5A1.5,1.5 0 0,0 11.5,2A1.5,1.5 0 0,0 10,3.5V9L2,14V16L10,13.5V19L8,20.5V22L11.5,21L15,22V20.5L13,19V13.5L21,16Z" 
-                      transform="rotate(${heading} 12 12)" />
-            </svg>
-        `;
+            var svgPath;
+            if (category === 8) {
+                // Rotorcraft (helicopter icon)
+                svgPath = 'M12,2A2,2 0 0,0 10,4V8.5L5,12V14L10,12V17L8,18.5V20L12,19L16,20V18.5L14,17V12L19,14V12L14,8.5V4A2,2 0 0,0 12,2Z';
+            } else {
+                svgPath = 'M21,16V14L13,9V3.5A1.5,1.5 0 0,0 11.5,2A1.5,1.5 0 0,0 10,3.5V9L2,14V16L10,13.5V19L8,20.5V22L11.5,21L15,22V20.5L13,19V13.5L21,16Z';
+            }
+
+            var svg = '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size + '" style="filter: ' + glow + ';">' +
+                '<path fill="' + planeColor + '" d="' + svgPath + '" transform="rotate(' + heading + ' 12 12)" />' +
+                '</svg>';
 
             return L.divIcon({
                 html: svg,
-                className: `plane-icon ${extraClass}`,
+                className: 'plane-icon ' + extraClass,
                 iconSize: [size, size],
                 iconAnchor: [size / 2, size / 2]
             });
@@ -736,6 +1304,9 @@
 
                 // 獲取完整軌跡
                 fetchAndDrawFullTrack(icao24);
+
+                // 獲取飛機詳細資訊（機型/製造商/擁有者）
+                fetchAircraftMetadata(icao24);
 
                 // 強制重新渲染所有飛機（更新選中狀態）
                 forceRenderAllPlanes();
@@ -771,7 +1342,8 @@
                     p.altitude,
                     isSelected,
                     p.onGround,
-                    p.isEmergency
+                    p.isEmergency,
+                    p.category || 0
                 ));
 
                 // 更新 Tooltip
@@ -785,6 +1357,7 @@
         function closeSidebar() {
             const previousSelected = selectedIcao24;
             selectedIcao24 = null;
+            disableFollow();
 
             document.getElementById('sidebar').classList.remove('active');
 
@@ -814,9 +1387,9 @@
 
                 const data = await res.json();
                 if (data.path && data.path.length > 0) {
-                    const latlngs = data.path
-                        .filter(p => p[1] && p[2])
-                        .map(p => [p[1], p[2]]);
+                    var latlngs = data.path
+                        .filter(function (p) { return p[1] && p[2]; })
+                        .map(function (p) { return [p[1], p[2]]; });
 
                     if (latlngs.length > 0) {
                         trackLine = L.polyline(latlngs, {
@@ -868,7 +1441,28 @@
             document.getElementById('sb-callsign').innerText = plane.callsign || 'UNKNOWN';
             document.getElementById('sb-icao').innerText = icao24.toUpperCase();
             document.getElementById('sb-reg').innerText = plane.registration || 'N/A';
-            document.getElementById('sb-country').innerText = plane.country || 'Unknown';
+            var flag = getCountryFlag(plane.country);
+            document.getElementById('sb-country').innerText = (flag ? flag + ' ' : '') + (plane.country || 'Unknown');
+
+            var airlineName = getAirlineName(plane.callsign);
+            var airlinePrefix = plane.callsign ? plane.callsign.substring(0, 3) : '';
+            var airlineLogoUrl = 'https://cdn.flightradar24.com/assets/airlines/logotypes/' + airlinePrefix + '.png';
+            if (airlineName) {
+                document.getElementById('sb-airline').innerHTML = '<img src=\"' + airlineLogoUrl + '\" style=\"height:14px;vertical-align:middle;margin-right:4px;\" onerror=\"this.style.display=\'none\'\">' + airlineName;
+            } else {
+                document.getElementById('sb-airline').innerText = '--';
+            }
+            document.getElementById('sb-category').innerText = getCategoryName(plane.category);
+
+            // 顯示已快取的 metadata，或顯示 loading
+            var cachedMeta = metadataCache[icao24];
+            if (cachedMeta && !cachedMeta.noData) {
+                displayMetadata(cachedMeta);
+            } else if (!cachedMeta) {
+                document.getElementById('sb-model').innerText = 'Loading...';
+                document.getElementById('sb-manufacturer').innerText = '--';
+                document.getElementById('sb-owner').innerText = '--';
+            }
             document.getElementById('sb-type').innerText = plane.aircraftType || 'Unknown';
 
             // Logo
@@ -877,9 +1471,14 @@
             logoImg.src = logoUrl;
             logoImg.style.display = 'inline-block';
 
-            // 空間資料
-            document.getElementById('sb-alt').innerText = plane.onGround ? 'GROUND' : `${plane.altitude} m`;
-            document.getElementById('sb-spd').innerText = `${Math.round(plane.velocity * 3.6)} km/h`;
+            // 空間資料 + 飛行階段
+            var phase = detectFlightPhase(plane);
+            document.getElementById('sb-phase').innerHTML = '<span class="phase-badge ' + phase.css + '">' + phase.text + '</span>';
+            document.getElementById('sb-alt').innerText = plane.onGround ? 'GROUND' : plane.altitude + ' m';
+            document.getElementById('sb-geoalt').innerText = plane.geoAltitude ? `${plane.geoAltitude} m` : 'N/A';
+            const kmh = Math.round(plane.velocity * 3.6);
+            const kts = Math.round(plane.velocity * 1.944);
+            document.getElementById('sb-spd').innerText = `${kmh} km/h (${kts} kts)`;
             document.getElementById('sb-hdg').innerText = `${Math.round(plane.heading)}°`;
 
             const vRate = plane.vRate || 0;
@@ -887,6 +1486,7 @@
             if (vRate > 0.5) vrateText = `↗ ${vRate.toFixed(1)} m/s`;
             else if (vRate < -0.5) vrateText = `↘ ${vRate.toFixed(1)} m/s`;
             document.getElementById('sb-vrate').innerText = vrateText;
+            document.getElementById('sb-ground').innerText = plane.onGround ? '✅ YES' : '❌ NO';
 
             document.getElementById('sb-pos').innerText = `${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}`;
 
@@ -896,8 +1496,21 @@
             document.getElementById('sb-contact').innerText = new Date((plane.lastContact || nowUnix) * 1000).toLocaleTimeString();
             document.getElementById('sb-age').innerText = `${dataAge}s ago`;
 
+            // 來源資訊
+            document.getElementById('sb-squawk').innerText = plane.squawk || '----';
+            document.getElementById('sb-sensors').innerText = plane.sensors || 'N/A';
+
+            // 最近機場
+            var nearest = getNearestAirport(plane.lat, plane.lng);
+            var nearestEl = document.getElementById('sb-nearest-apt');
+            if (nearestEl && nearest) {
+                nearestEl.innerText = nearest.icao + ' (' + nearest.dist.toFixed(0) + ' km)';
+            } else if (nearestEl) {
+                nearestEl.innerText = '--';
+            }
+
             // 追蹤連結
-            document.getElementById('sb-route-btn').href = `https://www.flightradar24.com/${plane.callsign}`;
+            document.getElementById('sb-route-btn').href = 'https://www.flightradar24.com/' + plane.callsign;
         }
 
         // ==========================================
@@ -908,7 +1521,7 @@
 
             if (!data.states) return planes;
 
-            data.states.forEach(plane => {
+            data.states.forEach(function (plane) {
                 const icao24 = plane[0];
                 const lastContact = plane[4] || nowUnix;
                 const dataAgeSeconds = nowUnix - lastContact;
@@ -934,6 +1547,7 @@
                     lng: plane[5],
                     lat: plane[6],
                     altitude: altitude,
+                    geoAltitude: plane[13] ? Math.round(plane[13]) : null,
                     onGround: onGround,
                     velocity: velocity,
                     heading: plane[10] || 0,
@@ -942,7 +1556,10 @@
                     isEmergency: ['7700', '7600', '7500'].includes(plane[14]),
                     lastContact: lastContact,
                     registration: plane[1] ? plane[1].trim() : 'N/A',
-                    aircraftType: 'Unknown'
+                    aircraftType: 'Unknown',
+                    sensors: plane[12] ? (Array.isArray(plane[12]) ? plane[12].length : plane[12]) : null,
+                    positionSource: plane[16] || 0,
+                    category: (typeof plane[17] === 'number') ? plane[17] : 0
                 };
 
                 if (pData.lat && pData.lng) {
@@ -960,14 +1577,15 @@
             if (isFetching || map.getZoom() < 6) return;
             isFetching = true;
 
+            const fetchStart = performance.now();
             const bounds = map.getBounds();
             const zoom = map.getZoom();
             const cacheKey = `${bounds.getCenter().lat.toFixed(1)}_${bounds.getCenter().lng.toFixed(1)}_${zoom}`;
 
-            // 檢查快取（5 分鐘內有效）
+            // 檢查快取（8 秒內有效）
             if (spatialCache.has(cacheKey)) {
                 const cached = spatialCache.get(cacheKey);
-                if (Date.now() - cached.timestamp < 300000) {
+                if (Date.now() - cached.timestamp < SPATIAL_CACHE_TTL) {
                     console.log('✅ 使用快取資料');
                     processPlaneData(cached.data);
                     isFetching = false;
@@ -1004,6 +1622,11 @@
 
                     processPlaneData(parsedPlanes);
 
+                    // 即時性指標更新
+                    lastApiLatency = Math.round(performance.now() - fetchStart);
+                    lastFetchTime = Date.now();
+                    document.getElementById('api-latency').innerText = `${lastApiLatency}ms`;
+                    document.getElementById('last-update').innerText = new Date().toLocaleTimeString('en-US', { hour12: false });
                     document.getElementById('status-dot').style.backgroundColor = '#01FF70';
                     document.getElementById('api-status').innerText = source.name;
                     document.getElementById('api-status').className = 'stat-value';
@@ -1033,7 +1656,9 @@
         function processPlaneData(planes) {
             const currentIcaos = new Set();
 
-            planes.forEach(({ icao24, data: pData }) => {
+            planes.forEach(function (item) {
+                var icao24 = item.icao24;
+                var pData = item.data;
                 currentIcaos.add(icao24);
 
                 // 更新歷史軌跡
@@ -1073,7 +1698,7 @@
             });
 
             // 清理消失的飛機
-            Object.keys(planesDict).forEach(id => {
+            Object.keys(planesDict).forEach(function (id) {
                 if (!currentIcaos.has(id)) {
                     planeLayer.removeLayer(planesDict[id].marker);
                     delete planesDict[id];
@@ -1086,7 +1711,14 @@
                 }
             });
 
+            // 統計地面/空中
+            var airCount = 0, groundCount = 0;
+            var allKeys = Object.keys(planesDict);
+            for (var ai = 0; ai < allKeys.length; ai++) {
+                if (planesDict[allKeys[ai]].onGround) groundCount++; else airCount++;
+            }
             document.getElementById('plane-count').innerText = currentIcaos.size.toString().padStart(3, '0');
+            document.getElementById('air-ground-count').innerText = airCount + ' / ' + groundCount;
             renderPlanes();
         }
 
@@ -1122,7 +1754,8 @@
                         p.altitude,
                         isSelected,
                         p.onGround,
-                        p.isEmergency
+                        p.isEmergency,
+                        p.category || 0
                     ));
 
                     // Tooltip 更新
@@ -1157,10 +1790,11 @@
             lastDrawTime = now;
             const nowUnix = Math.floor(Date.now() / 1000);
 
-            // FPS 計算
+            // FPS 計算 (移入 debug)
             frameCount++;
             if (now - lastFpsUpdate > 1000) {
-                document.getElementById('fps-counter').innerText = frameCount;
+                const fpsEl = document.getElementById('debug-fps');
+                if (fpsEl) fpsEl.innerText = frameCount;
                 frameCount = 0;
                 lastFpsUpdate = now;
             }
@@ -1170,7 +1804,7 @@
 
                 // 如果有目標位置（API 更新），使用插值
                 if (p.targetLat && p.targetLng) {
-                    const lerpSpeed = 0.08;
+                    const lerpSpeed = 0.12; // 加快插值
                     p.lat += (p.targetLat - p.lat) * lerpSpeed;
                     p.lng += (p.targetLng - p.lng) * lerpSpeed;
 
@@ -1217,106 +1851,141 @@
 
                 p.marker.setLatLng([p.lat, p.lng]);
             }
+
+            // 自動跟蹤
+            if (isFollowing && selectedIcao24 && planesDict[selectedIcao24]) {
+                var fp = planesDict[selectedIcao24];
+                map.panTo([fp.lat, fp.lng], { animate: false });
+            }
         }
 
         // ==========================================
         // 搜尋功能
         // ==========================================
-        document.getElementById('search-box').addEventListener('input', (e) => {
-            const query = e.target.value.toUpperCase().trim();
+        document.getElementById('search-box').addEventListener('input', function (e) {
+            clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(function () {
+                var query = e.target.value.toUpperCase().trim();
+                if (query.length < 2) return;
 
-            if (query.length < 2) return;
-
-            for (const id in planesDict) {
-                const plane = planesDict[id];
-                if (plane.callsign.includes(query) || id.toUpperCase().includes(query)) {
-                    // 移動地圖視角
-                    map.setView([plane.lat, plane.lng], 12);
-
-                    // 選中飛機
-                    selectedIcao24 = id;
-
-                    // 立即更新側邊欄
-                    updateSidebar(plane, id);
-
-                    // 獲取軌跡
-                    fetchAndDrawFullTrack(id);
-
-                    // 強制重新渲染
-                    forceRenderAllPlanes();
-
-                    showNotification(`✈️ 找到航班: ${plane.callsign}`, 'info');
-                    return;
+                for (var id in planesDict) {
+                    var plane = planesDict[id];
+                    if (plane.callsign.includes(query) || id.toUpperCase().includes(query)) {
+                        map.setView([plane.lat, plane.lng], 12);
+                        selectedIcao24 = id;
+                        updateSidebar(plane, id);
+                        fetchAndDrawFullTrack(id);
+                        forceRenderAllPlanes();
+                        showNotification(`✈️ 找到航班: ${plane.callsign}`, 'info');
+                        return;
+                    }
                 }
-            }
-
-            showNotification('❌ 未找到該航班', 'warning');
+                showNotification('❌ 未找到該航班', 'warning');
+            }, 300);
         });
 
         // ==========================================
         // 過濾器控制
         // ==========================================
-        document.getElementById('filter-ground').addEventListener('change', (e) => {
+        document.getElementById('filter-ground').addEventListener('change', function (e) {
             filters.showGround = e.target.checked;
             forceRenderAllPlanes();
         });
 
-        document.getElementById('filter-emergency').addEventListener('change', (e) => {
+        document.getElementById('filter-emergency').addEventListener('change', function (e) {
             filters.showEmergency = e.target.checked;
             forceRenderAllPlanes();
         });
 
-        document.getElementById('filter-low').addEventListener('change', (e) => {
+        document.getElementById('filter-low').addEventListener('change', function (e) {
             filters.showLow = e.target.checked;
             forceRenderAllPlanes();
+        });
+
+        document.getElementById('filter-airports').addEventListener('change', function (e) {
+            filters.showAirports = e.target.checked;
+            updateAirportVisibility();
         });
 
         // ==========================================
         // Debug 控制
         // ==========================================
-        document.addEventListener('keydown', (e) => {
+        document.addEventListener('keydown', function (e) {
             if (e.key === 'd' || e.key === 'D') {
-                const panel = document.getElementById('debug-panel');
+                var panel = document.getElementById('debug-panel');
                 panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
             }
         });
 
         // 更新 Debug 資訊
-        setInterval(() => {
+        setInterval(function () {
             document.getElementById('debug-selected').innerText = selectedIcao24 || 'None';
             document.getElementById('debug-total').innerText = Object.keys(planesDict).length;
             document.getElementById('debug-sidebar').innerText = document.getElementById('sidebar').classList.contains('active') ? 'Yes' : 'No';
         }, 500);
 
         // ==========================================
-        // 系統時鐘
+        // 系統時鐘 + 倒數計時器
         // ==========================================
-        setInterval(() => {
-            const now = new Date();
+        setInterval(function () {
+            var now = new Date();
             document.getElementById('sys-time').innerText = now.toLocaleTimeString('en-US', { hour12: false });
+
+            if (lastFetchTime > 0) {
+                var elapsed = Date.now() - lastFetchTime;
+                var interval = getAdaptiveInterval();
+                var remaining = Math.max(0, Math.ceil((interval - elapsed) / 1000));
+                document.getElementById('next-refresh').innerText = remaining + 's';
+                if (remaining <= 2) {
+                    document.getElementById('next-refresh').className = 'stat-value stat-warning';
+                } else {
+                    document.getElementById('next-refresh').className = 'stat-value';
+                }
+            }
         }, 1000);
+
+        // ==========================================
+        // 自適應輪詢引擎
+        // ==========================================
+        function startAdaptivePolling() {
+            if (pollIntervalId) clearInterval(pollIntervalId);
+            const interval = getAdaptiveInterval();
+            pollIntervalId = setInterval(fetchPlanes, interval);
+            console.log(`🔄 輪詢間隔: ${interval / 1000}s (zoom: ${map.getZoom()})`);
+        }
 
         // ==========================================
         // 初始化
         // ==========================================
-        window.addEventListener('load', () => {
-            setTimeout(() => {
+        window.addEventListener('load', function () {
+            setTimeout(function () {
                 document.getElementById('loading').style.display = 'none';
                 showNotification('🚀 雷達系統已啟動', 'info');
             }, 1500);
         });
 
-        // 啟動系統
-        fetchPlanes();
-        setInterval(fetchPlanes, 30000); // 30 秒更新
-        animatePlanes();
+        // 啟動系統（安全包裝，防止 iOS 舊版黑屏）
+        try {
+            fetchPlanes();
+            startAdaptivePolling();
+            updateAirportVisibility();
+            animatePlanes();
 
-        // 地圖移動時重新獲取
-        map.on('moveend', () => {
-            if (map.getZoom() >= 6) {
-                fetchPlanes();
-            }
-        });
+            // 地圖移動時重新獲取（防抖 300ms，加速縮放回應）
+            map.on('moveend', function () {
+                clearTimeout(moveEndDebounceTimer);
+                moveEndDebounceTimer = setTimeout(function () {
+                    if (map.getZoom() >= 6) {
+                        fetchPlanes();
+                    }
+                    startAdaptivePolling();
+                    updateAirportVisibility();
+                }, 300);
+            });
+        } catch (e) {
+            console.error('初始化錯誤:', e);
+            document.getElementById('loading').style.display = 'none';
+        }
     </script>
 
 </body>
