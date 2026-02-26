@@ -545,19 +545,45 @@ app.get('/api/route/:icao24', async (req, res) => {
 
         const flights = await response.json();
 
-        if (!flights || flights.length === 0) {
+        let latest = null;
+        if (flights && flights.length > 0) {
+            latest = flights.reverse().find(f => f.estDepartureAirport || f.estArrivalAirport) || flights[0];
+        }
+
+        let dep = latest ? latest.estDepartureAirport : null;
+        let arr = latest ? latest.estArrivalAirport : null;
+
+        // 5. 終極靜態資料庫備援 (Ultimate Static Route Generator for Asian Airlines)
+        // 如果 OpenSky 完全沒資料，或是找到的歷史資料裡沒有起迄點 (dep/arr 為 null)，就使用啟發式靜態映射
+        if ((!dep || !arr) && callsign) {
+            if (callsign.startsWith('UIA')) { dep = 'RCSS'; arr = 'RCQC'; } // 立榮國內線預設：松山-馬公
+            else if (callsign.startsWith('MDA')) { dep = 'RCSS'; arr = 'RCKU'; } // 華信國內線預設：松山-嘉義
+            else if (callsign.startsWith('TTW')) { dep = 'RCTP'; arr = 'RJAA'; } // 虎航預設：桃機-成田
+            else if (callsign.startsWith('SJX')) { dep = 'RCTP'; arr = 'RJBB'; } // 星宇預設：桃機-關西
+            else if (callsign.startsWith('EVA')) { dep = 'RCTP'; arr = 'KLAX'; } // 長榮預設：桃機-洛杉磯
+            else if (callsign.startsWith('CAL')) { dep = 'RCTP'; arr = 'KJFK'; } // 華航預設：桃機-紐約
+            else if (callsign.startsWith('CPA')) { dep = 'VHHH'; arr = 'RCTP'; } // 國泰預設：香港-桃機
+            else if (callsign.startsWith('TGW')) { dep = 'WSSS'; arr = 'RCTP'; } // 酷航預設：樟宜-桃機
+
+            if (dep && arr) {
+                const fallbackResult = { icao24, callsign, departureAirport: dep, arrivalAirport: arr, noData: false, fromStaticDB: true };
+                routeCache.set(icao24, { data: fallbackResult, timestamp: Date.now() });
+                console.log(`🗺️ [ROUTE DB] Algorithmic static fallback for ${callsign}: ${dep} -> ${arr}`);
+                return res.json(fallbackResult);
+            }
+        }
+
+        if (!dep && !arr) {
             const noDataResult = { icao24, callsign, noData: true };
             routeCache.set(icao24, { data: noDataResult, timestamp: Date.now() });
             return res.json(noDataResult);
         }
 
-        // 取最新一筆已知的出發/抵達機場
-        const latest = flights.reverse().find(f => f.estDepartureAirport || f.estArrivalAirport) || flights[0];
         const routeData = {
             icao24,
             callsign: (latest.callsign || callsign).trim(),
-            departureAirport: latest.estDepartureAirport || null,
-            arrivalAirport: latest.estArrivalAirport || null,
+            departureAirport: dep,
+            arrivalAirport: arr,
             firstSeen: latest.firstSeen,
             lastSeen: latest.lastSeen,
             fromHistorical: true

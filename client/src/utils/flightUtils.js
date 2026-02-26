@@ -57,8 +57,8 @@ export const AIRPORTS = [
 // ==========================================
 const AIRLINE_DB = {
     // Taiwan
-    'CAL': 'China Airlines', 'EVA': 'EVA Air', 'MDA': 'Mandarin Airlines', 'TNA': 'TransAsia Airways',
-    'TTW': 'Tigerair Taiwan', 'SJX': 'StarLux Airlines', 'FEA': 'Far Eastern Air Transport', 'UIA': 'Mandarin Airlines',
+    'CAL': 'China Airlines', 'EVA': 'EVA Air', 'MDA': 'Mandarin Airlines', 'UIA': 'Uni Air', 'TNA': 'TransAsia Airways',
+    'TTW': 'Tigerair Taiwan', 'SJX': 'StarLux Airlines', 'FEA': 'Far Eastern Air Transport',
     // Japan
     'JAL': 'Japan Airlines', 'ANA': 'All Nippon Airways', 'JJP': 'Jetstar Japan',
     'APJ': 'Peach Aviation', 'SFJ': 'StarFlyer', 'ADO': 'Air Do', 'SNJ': 'Solaseed Air',
@@ -73,7 +73,7 @@ const AIRLINE_DB = {
     'SIA': 'Singapore Airlines', 'THA': 'Thai Airways', 'MAS': 'Malaysia Airlines',
     'AXM': 'AirAsia', 'GIA': 'Garuda Indonesia', 'PAL': 'Philippine Airlines',
     'CEB': 'Cebu Pacific', 'VJC': 'Vietjet', 'HVN': 'Vietnam Airlines',
-    'JSA': 'Jetstar Asia', 'SLK': 'SilkAir', 'SCO': 'Scoot',
+    'JSA': 'Jetstar Asia', 'SLK': 'SilkAir', 'SCO': 'Scoot', 'TGW': 'Scoot',
     // Middle East
     'UAE': 'Emirates', 'ETD': 'Etihad Airways', 'QTR': 'Qatar Airways',
     'THY': 'Turkish Airlines', 'SVA': 'Saudia', 'GFA': 'Gulf Air',
@@ -113,7 +113,7 @@ const CATEGORY_NAMES = {
 // ==========================================
 const AIRLINE_LOGOS = {
     // Taiwan
-    'CAL': 'CI', 'EVA': 'BR', 'MDA': 'AE', 'SJX': 'JX', 'TTW': 'IT', 'FEA': 'FE',
+    'CAL': 'CI', 'EVA': 'BR', 'MDA': 'AE', 'UIA': 'B7', 'SJX': 'JX', 'TTW': 'IT', 'FEA': 'FE',
     // Japan
     'JAL': 'JL', 'ANA': 'NH', 'JJP': 'GK', 'APJ': 'MM', 'SFJ': '7G', 'ADO': 'HD', 'SNJ': '6J',
     // Korea
@@ -123,7 +123,7 @@ const AIRLINE_LOGOS = {
     'CSZ': 'ZH', 'CDG': 'SC', 'CHH': 'HU',
     // Southeast Asia
     'SIA': 'SQ', 'THA': 'TG', 'MAS': 'MH', 'AXM': 'AK', 'GIA': 'GA', 'PAL': 'PR',
-    'CEB': '5J', 'VJC': 'VJ', 'HVN': 'VN', 'JSA': '3K', 'SLK': 'MI', 'SCO': 'TR',
+    'CEB': '5J', 'VJC': 'VJ', 'HVN': 'VN', 'JSA': '3K', 'SLK': 'MI', 'SCO': 'TR', 'TGW': 'TR',
     // Middle East
     'UAE': 'EK', 'ETD': 'EY', 'QTR': 'QR', 'THY': 'TK', 'SVA': 'SV', 'GFA': 'GF',
     // Europe
@@ -423,7 +423,7 @@ export function formatVerticalRate(vRate) {
  */
 const ICAO_TO_IATA = {
     // Taiwan
-    'CAL': 'CI', 'EVA': 'BR', 'UIA': 'AE', 'SJX': 'JX', 'TTW': 'IT', 'FEA': 'FE',
+    'CAL': 'CI', 'EVA': 'BR', 'MDA': 'AE', 'UIA': 'B7', 'SJX': 'JX', 'TTW': 'IT', 'FEA': 'FE',
     // Japan
     'JAL': 'JL', 'ANA': 'NH', 'JJP': 'GK', 'APJ': 'MM', 'SFJ': '7G', 'ADO': 'HD', 'SNJ': '6J',
     // Korea
@@ -433,7 +433,7 @@ const ICAO_TO_IATA = {
     'CSZ': 'ZH', 'CDG': 'SC', 'CHH': 'HU',
     // Southeast Asia
     'SIA': 'SQ', 'THA': 'TG', 'MAS': 'MH', 'AXM': 'AK', 'GIA': 'GA', 'PAL': 'PR',
-    'CEB': '5J', 'VJC': 'VJ', 'HVN': 'VN', 'SCO': 'TR', 'JSA': '3K',
+    'CEB': '5J', 'VJC': 'VJ', 'HVN': 'VN', 'SCO': 'TR', 'JSA': '3K', 'TGW': 'TR',
     // Middle East
     'UAE': 'EK', 'ETD': 'EY', 'QTR': 'QR', 'THY': 'TK', 'SVA': 'SV', 'GFA': 'GF',
     // Europe

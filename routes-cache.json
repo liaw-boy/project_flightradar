@@ -82,5 +82,33 @@
   "CAL131": {
     "dep": "RJCC",
     "arr": "RCTP"
+  },
+  "CAL584": {
+    "dep": "ZSPD",
+    "arr": "RCKH"
+  },
+  "EVA705": {
+    "dep": "ZSPD",
+    "arr": "RCKH"
+  },
+  "ANA479": {
+    "dep": "RJTT",
+    "arr": "ROAH"
+  },
+  "CEB188": {
+    "dep": "RPLL",
+    "arr": "RKSI"
+  },
+  "CAL936": {
+    "dep": "VHHH",
+    "arr": "RCKH"
+  },
+  "EVA721": {
+    "dep": "ZSPD",
+    "arr": "RCTP"
+  },
+  "CAL504": {
+    "dep": "ZSPD",
+    "arr": "RCTP"
   }
 }

@@ -206,8 +206,9 @@
     font-size: 38px;
     font-weight: 800;
     color: #fff;
-    line-height: 1;
+    line-height: 1.2;
     letter-spacing: 1px;
+    word-break: break-all;
 }
 
 .sb-airport-name {
@@ -423,11 +424,72 @@
         padding: 8px;
         font-size: 12px;
     }
-}
 
-@media (min-width: 481px) and (max-width: 768px) {
-    .sidebar {
-        /* 平板上也使用底部抽屜 */
-        height: 50vh;
+    /* Mobile Layout Fixes for Route Card */
+    .sb-airport-code {
+        font-size: 26px;
+        /* iPhone SE / 12 mini Scale down */
+        letter-spacing: 0;
+        word-break: break-all;
+    }
+
+    .sb-route-top {
+        padding: 12px 10px;
+    }
+
+    .route-plane-icon {
+        font-size: 16px;
+        padding: 4px;
+    }
+
+    .route-plane-icon svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    .sb-photo-carousel {
+        height: 140px;
+    }
+
+    .sb-photo-carousel img {
+        object-fit: contain;
+        width: 100%;
+    }
+
+    .route-btn {
+        margin-top: 10px;
+        padding: 8px;
+        font-size: 12px;
+    }
+
+    /* Mobile Layout Fixes for Route Card */
+    .sb-airport-code {
+        font-size: 26px;
+        /* iPhone SE / 12 mini Scale down */
+        letter-spacing: 0;
+        word-break: break-all;
+    }
+
+    .sb-route-top {
+        padding: 12px 10px;
+    }
+
+    .route-plane-icon {
+        font-size: 16px;
+        padding: 4px;
+    }
+
+    .route-plane-icon svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    .sb-photo-carousel {
+        height: 140px;
+    }
+
+    .sb-photo-carousel img {
+        object-fit: contain;
+        width: 100%;
     }
 }

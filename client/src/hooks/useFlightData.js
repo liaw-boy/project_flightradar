@@ -113,7 +113,7 @@ export function useFlightData(mapRef, showNotification) {
 
                 if (!history[icao24]) history[icao24] = [];
                 history[icao24].push([pData.lat, pData.lng]);
-                if (history[icao24].length > 50) history[icao24].shift();
+                if (history[icao24].length > 500) history[icao24].shift(); // 保留 500 個點 (~83分鐘追蹤)
 
                 if (!next[icao24]) {
                     next[icao24] = { ...pData, isDirty: true, lastCallsign: '' };
