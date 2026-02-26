@@ -111,7 +111,20 @@ export default function MapView({
     useEffect(() => {
         if (mapRef.current) return;
 
-        const map = L.map(mapContainerRef.current, { zoomControl: false }).setView([25.17, 121.44], 10);
+        // 防止無限縮小與平移的邊界限制
+        const southWest = L.latLng(-89.98155760646617, -180);
+        const northEast = L.latLng(89.99346179538875, 180);
+        const maxBounds = L.latLngBounds(southWest, northEast);
+
+        const map = L.map(mapContainerRef.current, {
+            zoomControl: false,
+            minZoom: 3,
+            maxBounds: maxBounds,
+            maxBoundsViscosity: 1.0
+        }).setView([25.17, 121.44], 10);
+
+        // 加入右下角的縮放按鈕
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
 
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
             maxZoom: 19,
@@ -330,13 +343,7 @@ export default function MapView({
         }
 
         if (trackPoints && trackPoints.length > 1) {
-            // 將選中飛機的當前位置加入軌跡線末端
-            let points = [...trackPoints];
-            if (selectedIcao24 && planesDict[selectedIcao24]) {
-                const p = planesDict[selectedIcao24];
-                points.push([p.lat, p.lng]);
-            }
-            trackLineRef.current = L.polyline(points, {
+            trackLineRef.current = L.polyline(trackPoints, {
                 color: '#FFDC00',
                 weight: 3,
                 opacity: 0.8,

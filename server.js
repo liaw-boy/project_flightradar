@@ -13,7 +13,15 @@ app.use(cors());
 app.use(express.json());
 
 // 提供前端靜態檔案
-app.use(express.static(path.join(__dirname, 'public-react'))); // React build
+app.use(express.static(path.join(__dirname, 'public-react'), {
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+        }
+    }
+})); // React build
 app.use(express.static(path.join(__dirname, 'public')));        // 舊版 HTML
 
 // ==========================================
@@ -569,6 +577,9 @@ app.get('/api/metar', (req, res) => {
 // SPA Fallback — 未匹配的路由指向 React 前端
 // ==========================================
 app.use((req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(path.join(__dirname, 'public-react', 'index.html'));
 });
 

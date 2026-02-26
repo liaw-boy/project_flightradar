@@ -152,19 +152,36 @@ export function useFlightData(mapRef, showNotification) {
     }, []);
 
     // 取得飛行軌跡
-    const fetchTrack = useCallback(async (icao24) => {
+    const fetchTrack = useCallback(async (icao24, lastContact) => {
         try {
             const res = await fetch(`/api/tracks?icao24=${icao24}`);
             if (!res.ok) throw new Error('API Error');
             const data = await res.json();
 
             if (data.path && data.path.length > 0) {
-                const now = Math.floor(Date.now() / 1000);
+                // 如果沒有傳入 lastContact，才 fallback 到當前時間
+                const limitTime = lastContact || Math.floor(Date.now() / 1000);
+
                 // path 格式: [time, lat, lng, altitude, heading, onGround]
-                // 只保留時間戳 <= 當前時間的歷史點 (排除未來預測點)
-                return data.path
-                    .filter((p) => p[1] && p[2] && p[0] <= now)
-                    .map((p) => [p[1], p[2]]);
+                // 只保留時間戳 <= 飛機目前最後更新時間 的歷史點 (排除未來預測點)
+                const validPoints = data.path.filter((p) => p[1] && p[2] && p[0] <= limitTime);
+
+                // 找出最新的飛行航段：
+                // 1. 時間間隔大於 15 分鐘 (900 秒)
+                // 2. 或者飛機處於地面狀態 (onGround == true)，代表上一趟已經結束
+                let latestSegmentStartIdx = 0;
+                for (let i = 1; i < validPoints.length; i++) {
+                    const timeDiff = validPoints[i][0] - validPoints[i - 1][0];
+                    const isOnGround = validPoints[i][5] === true; // path[5] 是 onGround
+
+                    if (timeDiff > 900 || isOnGround) {
+                        // 如果因為 onGround 切斷，我們希望最新的軌跡「不包含」在地面滑行的漫長過去，
+                        // 所以最新的起點設在目前這個點。
+                        latestSegmentStartIdx = i;
+                    }
+                }
+
+                return validPoints.slice(latestSegmentStartIdx).map((p) => [p[1], p[2]]);
             }
         } catch (e) {
             console.warn('無法獲取完整軌跡，使用本地歷史:', e.message);

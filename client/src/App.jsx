@@ -83,7 +83,7 @@ export default function App() {
             setSelectedRoute(null);
 
             // 取得軌跡
-            const points = await fetchTrack(icao24);
+            const points = await fetchTrack(icao24, plane.lastContact);
             setTrackPoints(points);
 
             showNotification(`✈️ ${plane.callsign}`, 'info');
