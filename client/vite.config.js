@@ -22,7 +22,7 @@ export default defineConfig({
     build: {
         outDir: '../public-react',
         emptyOutDir: true,
-        chunkSizeWarningLimit: 1500,
+        chunkSizeWarningLimit: 3000,
         rollupOptions: {
             output: {
                 manualChunks: {

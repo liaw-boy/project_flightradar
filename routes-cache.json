@@ -166,5 +166,33 @@
   "APJ620": {
     "dep": "RCTP",
     "arr": "RJAA"
+  },
+  "KAL486": {
+    "dep": "VVDN",
+    "arr": "RKSI"
+  },
+  "CAL838": {
+    "dep": "VTBS",
+    "arr": "RCTP"
+  },
+  "EVA206": {
+    "dep": "VTBS",
+    "arr": "RCTP"
+  },
+  "AFL1465": {
+    "dep": "UWPS",
+    "arr": "UUEE"
+  },
+  "DLH773": {
+    "dep": "VTBS",
+    "arr": "EDDM"
+  },
+  "HVN408": {
+    "dep": "VVTS",
+    "arr": "RKSI"
+  },
+  "ANA813": {
+    "dep": "RJAA",
+    "arr": "VYYY"
   }
 }

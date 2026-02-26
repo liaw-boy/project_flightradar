@@ -11,16 +11,30 @@ https.get('https://raw.githubusercontent.com/mwgg/Airports/master/airports.json'
 
             // Map ICAO -> { iata, city }
             const mapping = {};
+            const globalAirports = [];
             for (const icao in db) {
                 const iata = db[icao].iata;
                 if (iata && iata !== '\\N' && iata !== '') {
                     const city = (db[icao].city || db[icao].name || '').split(',')[0].toUpperCase();
-                    mapping[icao.toUpperCase()] = { iata, city };
+                    // Classify size loosely based on elevation as a placeholder, or just 'medium'
+                    const type = db[icao].elevation > 3000 ? 'large' : 'medium';
+
+                    const entry = {
+                        iata,
+                        city,
+                        name: db[icao].name,
+                        lat: db[icao].lat,
+                        lng: db[icao].lon,
+                        type: type
+                    };
+                    mapping[icao.toUpperCase()] = entry;
+                    globalAirports.push({ icao: icao.toUpperCase(), ...entry });
                 }
             }
 
             let out = `// Generated comprehensive airport mappings\n`;
             out += `export const AIRPORT_IATA_DB = ${JSON.stringify(mapping, null, 2)};\n\n`;
+            out += `export const GLOBAL_AIRPORTS = ${JSON.stringify(globalAirports, null, 2)};\n\n`;
             out += `export function getAirportDisplayData(icao) {\n`;
             out += `    if (!icao || icao.length !== 4) return { code: icao || 'N/A', city: '' };\n`;
             out += `    const upper = icao.toUpperCase();\n`;

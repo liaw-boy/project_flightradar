@@ -159,6 +159,20 @@ export function useFlightData(mapRef, showNotification) {
         });
     }, []);
 
+    // Haversine distance (meters)
+    const getDistance = (lat1, lon1, lat2, lon2) => {
+        const R = 6371e3;
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+    };
+
     const fetchTrack = useCallback(async (icao24, lastContact) => {
         try {
             const timeParam = lastContact ? `&time=${lastContact}` : '';
@@ -184,11 +198,19 @@ export function useFlightData(mapRef, showNotification) {
                     const timeDiff = validPoints[i][0] - validPoints[i - 1][0];
                     const isOnGround = validPoints[i][5] === true; // path[5] 是 onGround
 
-                    if (timeDiff > 900) {
+                    if (timeDiff > 1800 && (validPoints[i - 1][5] === true || isOnGround)) {
+                        // 飛機在地面上且超過 30 分鐘沒更新，代表前一次是舊的航班
                         latestSegmentStartIdx = i;
                     } else if (isOnGround && isCurrentlyOnGround) {
                         // 如果飛機最終狀態停在地上，那我們遇到地面的點就切斷，避免畫出機場亂轉的線
                         latestSegmentStartIdx = i;
+                    } else if (timeDiff > 0) {
+                        // 檢查是否為不合理的神仙跳躍 (超過音速 400m/s，且時間間隔 > 30秒)
+                        // 有時候 OpenSky 會把昨日的軌跡跟今日的接在一起，導致超大直線
+                        const dist = getDistance(validPoints[i - 1][1], validPoints[i - 1][2], validPoints[i][1], validPoints[i][2]);
+                        if (timeDiff > 30 && (dist / timeDiff) > 400) {
+                            latestSegmentStartIdx = i; // Impossible speed, sever the track
+                        }
                     }
                 }
 
@@ -205,9 +227,12 @@ export function useFlightData(mapRef, showNotification) {
         let latestSegmentStartIdx = 0;
         for (let i = 1; i < history.length; i++) {
             const timeDiff = history[i][0] - history[i - 1][0];
-            const isOnGround = history[i][3] === true;
+            const wasOnGround = history[i - 1][3] === true;
+            const dist = getDistance(history[i - 1][1], history[i - 1][2], history[i][1], history[i][2]);
 
-            if (timeDiff > 900 || isOnGround) {
+            if ((isOnGround && history[history.length - 1][3] === true) ||
+                (timeDiff > 1800 && (wasOnGround || isOnGround)) ||
+                (timeDiff > 30 && (dist / timeDiff) > 400)) {
                 latestSegmentStartIdx = i;
             }
         }

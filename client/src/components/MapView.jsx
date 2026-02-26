@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, AIRPORTS } from '../utils/flightUtils';
+import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl } from '../utils/flightUtils';
+import { GLOBAL_AIRPORTS } from '../utils/airportMappings';
 
 /**
  * MapView — 管理 Leaflet 地圖、飛機 markers、軌跡線、機場圖層
@@ -12,6 +13,7 @@ export default function MapView({
     selectedIcao24,
     trackPoints,
     filters,
+    selectedRoute, // ADDED PROPS
     onSelectPlane,
     onDeselectPlane,
     onMapReady,
@@ -21,6 +23,7 @@ export default function MapView({
     const mapRef = useRef(null);
     const markersRef = useRef({});
     const trackLineRef = useRef(null);
+    const predictiveLineRef = useRef(null); // ADDED REF
     const animFrameRef = useRef(null);
     const lastDrawTimeRef = useRef(performance.now());
     const airportLayerRef = useRef(null);
@@ -35,53 +38,24 @@ export default function MapView({
         return L.divIcon({ html: svg, className: 'airport-icon', iconSize: [size * 2, size * 2], iconAnchor: [size, size] });
     }
 
-    // ===== 載入機場標記 (含天氣彈窗) =====
-    function loadAirports(map) {
-        if (airportMarkersLoadedRef.current) return;
-        airportMarkersLoadedRef.current = true;
+    // ===== 機場圖層初始化 =====
+    const renderMetarPopup = async (ap, map, popup) => {
+        try {
+            const res = await fetch(`/api/metar?icao=${ap.icao}`);
+            const data = await res.json();
 
-        const layer = L.layerGroup();
-        for (let i = 0; i < AIRPORTS.length; i++) {
-            const ap = AIRPORTS[i];
-            const m = L.marker([ap.lat, ap.lng], {
-                icon: createAirportIcon(ap.type),
-                interactive: true,
-                zIndexOffset: -1000,
-            });
-            m.bindTooltip(`${ap.icao} - ${ap.name}`, {
-                permanent: false,
-                direction: 'right',
-                offset: [10, 0],
-                className: 'airport-label',
-            });
+            if (data.error) {
+                popup.setContent(`<div class="ap-card"><div class="ap-name">${ap.name}</div><div class="ap-icao">${ap.icao}</div><div class="ap-no-data">No weather data available</div></div>`);
+                return;
+            }
 
-            // 點擊機場 → 抓 METAR → 顯示天氣彈窗
-            m.on('click', async (e) => {
-                L.DomEvent.stopPropagation(e);
-                const popup = L.popup({
-                    maxWidth: 320,
-                    className: 'airport-popup',
-                }).setLatLng([ap.lat, ap.lng]);
+            const windDir = data.wdir === 'VRB' ? 'Variable' : `${data.wdir}°`;
+            const windSpd = data.wspd || 0;
+            const fltCatClass = data.fltCat === 'VFR' ? 'ap-vfr' : data.fltCat === 'MVFR' ? 'ap-mvfr' : 'ap-ifr';
+            const cloudStr = data.clouds?.map(c => `${c.cover} ${c.base}ft`).join(', ') || '--';
+            const elevM = data.elev ? Math.round(data.elev * 0.3048) : '--';
 
-                popup.setContent(`<div class="ap-loading">Loading ${ap.icao}...</div>`);
-                popup.openOn(map);
-
-                try {
-                    const res = await fetch(`/api/metar?icao=${ap.icao}`);
-                    const data = await res.json();
-
-                    if (data.error) {
-                        popup.setContent(`<div class="ap-card"><div class="ap-name">${ap.name}</div><div class="ap-icao">${ap.icao}</div><div class="ap-no-data">No weather data available</div></div>`);
-                        return;
-                    }
-
-                    const windDir = data.wdir === 'VRB' ? 'Variable' : `${data.wdir}°`;
-                    const windSpd = data.wspd || 0;
-                    const fltCatClass = data.fltCat === 'VFR' ? 'ap-vfr' : data.fltCat === 'MVFR' ? 'ap-mvfr' : 'ap-ifr';
-                    const cloudStr = data.clouds?.map(c => `${c.cover} ${c.base}ft`).join(', ') || '--';
-                    const elevM = data.elev ? Math.round(data.elev * 0.3048) : '--';
-
-                    popup.setContent(`
+            popup.setContent(`
                         <div class="ap-card">
                             <div class="ap-name">${ap.name}</div>
                             <div class="ap-icao">${ap.icao} · Elev ${data.elev || '--'}ft (${elevM}m)</div>
@@ -97,15 +71,10 @@ export default function MapView({
                             <div class="ap-metar">${data.rawOb || '--'}</div>
                         </div>
                     `);
-                } catch (err) {
-                    popup.setContent(`<div class="ap-card"><div class="ap-name">${ap.name}</div><div class="ap-no-data">Failed to load weather</div></div>`);
-                }
-            });
-
-            m.addTo(layer);
+        } catch (err) {
+            popup.setContent(`<div class="ap-card"><div class="ap-name">${ap.name}</div><div class="ap-no-data">Failed to load weather</div></div>`);
         }
-        airportLayerRef.current = layer;
-    }
+    };
 
     // ===== 初始化地圖 =====
     useEffect(() => {
@@ -152,7 +121,7 @@ export default function MapView({
         onMapReady?.(map);
 
         // 初始載入機場
-        loadAirports(map);
+        airportLayerRef.current = L.layerGroup();
         updateAirportVisibility(map);
 
         return () => {
@@ -162,16 +131,57 @@ export default function MapView({
         };
     }, []);
 
-    // ===== 機場顯隱控制 =====
+    // ===== 機場顯隱與虛擬化渲染 (Virtualized Rendering) =====
     function updateAirportVisibility(map) {
         if (!map || !airportLayerRef.current) return;
         const zoom = map.getZoom();
-        if (zoom >= 7 && filters.showAirports) {
+        const bounds = map.getBounds();
+
+        // Zoom 5 starts showing major continental airports, keeps performance decent
+        if (zoom >= 5 && filters.showAirports) {
             if (!map.hasLayer(airportLayerRef.current)) {
                 map.addLayer(airportLayerRef.current);
             }
+
+            // 虛擬化: 清空不在畫面中的 marker，只渲染當前邊界內的機場
+            airportLayerRef.current.clearLayers();
+            const extBounds = bounds.pad(0.3); // Pad view by 30% for smooth panning
+
+            for (let i = 0; i < GLOBAL_AIRPORTS.length; i++) {
+                const ap = GLOBAL_AIRPORTS[i];
+                if (extBounds.contains([ap.lat, ap.lng])) {
+                    const m = L.marker([ap.lat, ap.lng], {
+                        icon: createAirportIcon(ap.type),
+                        interactive: true,
+                        zIndexOffset: -1000,
+                    });
+
+                    const labelName = ap.city && ap.city !== ap.name.toUpperCase() ? `${ap.name} (${ap.city})` : ap.name;
+                    m.bindTooltip(`${ap.icao} - ${labelName}`, {
+                        permanent: false,
+                        direction: 'right',
+                        offset: [10, 0],
+                        className: 'airport-label',
+                    });
+
+                    m.on('click', (e) => {
+                        L.DomEvent.stopPropagation(e);
+                        const popup = L.popup({
+                            maxWidth: 320,
+                            className: 'airport-popup',
+                        }).setLatLng([ap.lat, ap.lng]);
+
+                        popup.setContent(`<div class="ap-loading">Loading ${ap.icao}...</div>`);
+                        popup.openOn(map);
+                        renderMetarPopup(ap, map, popup);
+                    });
+
+                    m.addTo(airportLayerRef.current);
+                }
+            }
         } else {
             if (map.hasLayer(airportLayerRef.current)) {
+                airportLayerRef.current.clearLayers();
                 map.removeLayer(airportLayerRef.current);
             }
         }
@@ -342,13 +352,31 @@ export default function MapView({
             trackLineRef.current = null;
         }
 
+        const getDistMap = (lat1, lon1, lat2, lon2) => {
+            const R = 6371e3;
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        };
+
         if (trackPoints && trackPoints.length > 1) {
             // Dynamically append the plane's live position to the static history track
             // so the line doesn't fall behind as the plane moves.
             const livePoints = [...trackPoints];
             if (selectedIcao24 && planesDict[selectedIcao24]) {
                 const livePlane = planesDict[selectedIcao24];
-                livePoints.push([livePlane.lat, livePlane.lng]);
+                const trackEnd = livePoints[livePoints.length - 1];
+
+                // Anti-Glitch: Only connect if the jump is less than 500km.
+                // If OpenSky returns yesterday's track, this prevents a massive cross-continent straight line.
+                const dist = getDistMap(trackEnd[0], trackEnd[1], livePlane.lat, livePlane.lng);
+                if (dist < 500000) {
+                    livePoints.push([livePlane.lat, livePlane.lng]);
+                }
             }
 
             trackLineRef.current = L.polyline(livePoints, {
@@ -359,7 +387,48 @@ export default function MapView({
                 lineCap: 'round',
             }).addTo(map);
         }
-    }, [trackPoints, planesDict, selectedIcao24]);
+
+        // ===== 預估虛線 (Predictive Path) =====
+        if (predictiveLineRef.current) {
+            map.removeLayer(predictiveLineRef.current);
+            predictiveLineRef.current = null;
+        }
+
+        if (selectedIcao24 && planesDict[selectedIcao24] && selectedRoute) {
+            const livePlane = planesDict[selectedIcao24];
+            const livePos = [livePlane.lat, livePlane.lng];
+            const predPoints = [];
+
+            // Helper to find airport coordinates from the massive GLOBAL_AIRPORTS array
+            const getApCoords = (icao) => {
+                if (!icao) return null;
+                const ap = GLOBAL_AIRPORTS.find(a => a.icao === icao.toUpperCase());
+                return ap ? [ap.lat, ap.lng] : null;
+            };
+
+            const originCoords = getApCoords(selectedRoute.origin);
+            const destCoords = getApCoords(selectedRoute.destination);
+
+            if (originCoords) predPoints.push(originCoords);
+            predPoints.push(livePos);
+            if (destCoords) predPoints.push(destCoords);
+
+            if (predPoints.length > 1) {
+                predictiveLineRef.current = L.polyline(predPoints, {
+                    color: '#888888',
+                    weight: 2,
+                    opacity: 0.5,
+                    dashArray: '5, 10',
+                    lineCap: 'round',
+                }).addTo(map);
+
+                // Make sure the yellow actual track renders *above* the grey prediction line
+                if (trackLineRef.current) {
+                    trackLineRef.current.bringToFront();
+                }
+            }
+        }
+    }, [trackPoints, planesDict, selectedIcao24, selectedRoute]);
 
     // ===== 選中飛機時移動視角 =====
     useEffect(() => {
