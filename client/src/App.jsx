@@ -41,7 +41,7 @@ export default function App() {
     } = useFlightData(mapInstanceRef, showNotification);
 
     // NEXT REFRESH 倒數計時器
-    const POLL_INTERVAL = 60; // 測試階段 60 秒
+    const POLL_INTERVAL = 11;
     useEffect(() => {
         let countdown = POLL_INTERVAL;
         setNextRefresh(countdown);

@@ -1,25 +1,21 @@
-# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - 終極最佳化版
+# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - React 終極完整版 v1.0.11
 
-基於 OpenSky Network API、React (Vite) 與 Leaflet 開發的即時全球航空雷達系統。專注於提供極致效能、極低延遲的飛機追蹤體驗。配備充滿科技感的暗黑螢光主題介面，並**全面支援 RWD 響應式設計** (桌面 / 平板 / 手機底部抽屜)。
+基於 OpenSky Network API、React (Vite) 與 Leaflet 開發的即時全球航空雷達系統。本專案經歷了從純 HTML/JS 升級至現代化 React 框架的重大重構，並針對亞洲區域航班資料缺失、舊設備 (iOS 12) 相容性問題提出了深度的客製化解決方案。
 
-本專案採用 **Node.js Express 後端** 作為外部 API 的反向代理 (Reverse Proxy) 與快取層，有效隱藏 API 金鑰，具備完整的 `client_credentials` 認證機制、**多帳號自動輪替 (Token Rotation)** 與 API 使用量監控系統。
+系統採用 **Node.js Express 後端** 作為反向代理與快取層，有效隱藏 API 金鑰，具備完整的認證機制與「終極靜態航線生成器」，搭配 **React 前端** 打造出零延遲、高質感的暗黑科技風追蹤體驗。
 
 ---
 
-## ✨ 核心特色
+## ✨ 核心特色與技術突破
 
-- **🌍 全球即時航班追蹤**：一次性快取全地球的航班位置，包含高度、速度、航向、垂直速率、SPI 等完整資訊。
-- **🚀 零延遲順暢平移 (Zero-Latency Panning)**：地圖縮放或拖曳時**不再發送 API 請求**。由客戶端直接從已載入的全球資料庫中瞬間篩選可見範圍。
-- **⏱️ 分散式雙帳號輪詢**：支援多組 OpenSky 帳號自動輪替。目前配置兩組帳號，API 額度翻倍至每日 8000 次，系統優化為 **每 11 秒** 更新一次全球資料。
-- **⚛️ React + Vite 現代架構**：使用 React 組件化開發 + Vite 建置，支援 Hot Reload 開發與高效 production bundle。
-- **🏗️ 全球機場標記 (Airport Markers)**：內建全球主要國際機場座標，根據地圖縮放層級自動顯示/隱藏機場圖示與名稱標籤，方便定位航班出發與降落地點。
-- **📱 全方位 RWD 響應式設計**：完美兼容各種視窗尺寸與設備 — 桌面大螢幕、平板 (iPad)、各品牌手機 (iPhone / Android)，乃至 **iOS 12 Safari、Android 5+ WebView、IE11** 等老舊系統瀏覽器。手機端側邊欄自動變為底部抽屜 (Bottom Sheet)，保留 55% 上半部雷達視野。
-- **🛡️ 後端代理與 API 監控儀表板**：隱藏 API 帳密，自動處理 Access Token。儀表板即時顯示 API 呼叫數、限流次數與快取數量。
-- **💾 永久快取與批次預取 (Batch Prefetch)**：自動背景抓取當下可見飛機的實體 Metadata 並永久存檔於 `aircraft-cache.json`。
-- **✈️ 飛機比例圖示與直升機支援**：根據飛機噸位動態改變地圖圖示大小，並提供直升機專屬 SVG。
-- **🔍 最近機場計算**：使用 Haversine 大圓距離公式，即時算出飛機距離最近的機場與公里數。
-- **🌐 國旗與航空公司 Logo 支援**：Unicode Emoji 國旗 + CDN 動態抓取全球 120+ 航空公司 Logo。
-- **🇺🇸/🇹🇼 中英雙語切換 (i18n)**：單鍵即時切換整個 UI 介面語言 (React Context 驅動)。
+- **⚛️ 現代化 React + Vite 架構**：全站組件化 (Components) 重構，狀態集中管理，支援多語言 (i18n) 與流暢的 UI 渲染。
+- **📱 舊設備完美向下相容 (iOS 12+)**：導入 `@vitejs/plugin-legacy`，在前端編譯時自動生成 ES5 Polyfills (`polyfills-legacy.js`)。即使是 iPad mini (iOS 12.5.8)、舊版 Safari，也能完美無錯誤執行現代 JavaScript 語法。
+- **🛡️ 終極靜態航線備援 (Ultimate Static Route Database)**：
+  - **痛點解法**：OpenSky API 對於台灣國內線 (立榮 UIA、華信 MDA) 以及部分亞洲航班 (虎航 TTW、星宇 SJX、國泰 CPA、酷航 TGW) 嚴重缺乏起終點歷史資料，導致畫面經常顯示 "N/A"。
+  - **創新實作**：在後端 `server.js` 實作自動攔截器，當 API 回傳的機場資料為空 (Null) 時，系統會針對特定呼號啟發式配發最真實的亞洲預設航線 (例如：UIA 強制對應 松山-馬公)，徹底消滅 N/A 破圖現象。
+- **✈️ 動態長尾歷史軌跡**：前端將飛行座標的記憶體保留上限大幅擴充至 **500 個點 (約 83 分鐘)**，解決了盯著飛機看時軌跡線突然消失的 Bug。即使 API 回傳 404，也能從本地記憶體立刻畫出實況軌跡。
+- **🚀 零延遲順暢平移 (Zero-Latency Panning)**：地圖縮放或拖曳時不再頻繁發送 API 請求。由客戶端直接從已載入的全球資料庫中瞬間篩選可見範圍。
+- **🎨 精準的航空公司與機型圖示**：修正了立榮 (Uni Air) 與華信 (Mandarin Airlines) 的 ICAO 代碼衝突，並依據飛機類別 (商用客機、直升機、無人機、輕型機) 渲染不同形狀的 SVG。
 
 ---
 
@@ -27,174 +23,110 @@
 
 ```text
 project_flightradar/
-├── server.js               # Express 後端 (多帳號認證、輪替、API 快取、監控)
+├── server.js               # Express 後端核心 (API 代理、快取機制、終極航線生成器)
+├── routes-cache.json       # 🗺️ 靜態航線字典檔 (手動擴充的亞洲備援航線)
 ├── aircraft-cache.json     # ✈️ 飛機 Metadata 永久離線快取
-├── .env                    # 🔑 環境變數 (存放多組 API 帳密)
-├── start.bat               # Windows 一鍵啟動
-├── public/                 # 🏛️ 經典 HTML 版前端
-│   └── index_cl3.html      # ⭐ ES5 終極優化版主程式
-├── client/                 # ⚛️ React 版前端原始碼
-│   ├── src/
-│   │   ├── App.jsx
-│   │   ├── components/     # MapView, Dashboard, Sidebar, SearchBar...
-│   │   ├── hooks/          # useFlightData, useNotification
-│   │   └── utils/          # flightUtils (解析器、SVG 產生器)
-│   └── vite.config.js      # Vite 建置設定 (proxy → localhost:3000)
-└── public-react/           # ⚛️ React 版建置輸出 (npm run build)
+├── metar-cache.json        # ⛅ 機場天氣快取
+├── .env                    # 🔑 環境變數 (存放 OpenSky 帳密)
+├── client/                 # ⚛️ React 前端原始碼目錄 (開發區)
+│   ├── index.html          # Vite 進入點
+│   ├── vite.config.js      # Vite 配置 (包含 legacy plugin 設定)
+│   ├── package.json        # 前端相依套件 (Leaflet, React 等)
+│   └── src/
+│       ├── App.jsx         # React 主程式
+│       ├── App.css         # 全域暗黑主題樣式
+│       ├── hooks/          # useFlightData (軌跡與航班資料邏輯)
+│       ├── utils/          # flightUtils (航空公司字典、ICAO 對應、距離計算)
+│       └── components/     # UI 組件 (MapView, Sidebar, Dashboard, FilterPanel)
+└── public-react/           # ⚛️ 前端建置輸出檔 (供 Express 提供靜態網頁服務)
 ```
 
 ---
 
-## 🚀 快速開始指南
+## 🚀 完整的操作與部署過程 (Step-by-Step Guide)
 
-### 1. 安裝環境與套件
-確保您的系統已安裝 [Node.js](https://nodejs.org/)。
+要讓這套系統順利運行，必須同時啟動「前端的建置檔」與「後端的 Node.js 伺服器」。請依序執行以下步驟：
 
+### 步驟 1：安裝環境與相依套件
+確保您的系統已安裝 [Node.js](https://nodejs.org/) (建議 v18 以上版本)。
+
+首先，安裝後端伺服器所需的套件：
 ```bash
-cd project_flightradar
+# 在專案根目錄 (project_flightradar) 下執行
 npm install
 ```
 
-### 2. 設定 .env API 憑證
-1. 前往 [OpenSky Network](https://opensky-network.org/) 註冊並建立 API Client。
-2. 取得 `client_id` 與 `client_secret`。
-3. 在根目錄建立 `.env` 檔案：
+接著，進入 `client` 資料夾，安裝 React 前端所需的套件：
+```bash
+cd client
+npm install
+```
+
+### 步驟 2：設定 API 憑證 (環境變數)
+1. 前往 [OpenSky Network](https://opensky-network.org/) 註冊帳號並建立 API Client 取得 credentials。
+2. 回到專案根目錄 (不是 client 裡面)，確認是否存在 `.env` 檔案。
+3. 填入您的 OpenSky 帳號與密碼 (支援多帳號以突破 API 限流)：
 
 ```env
-OPENSKY_USER=您的_client_id_1
-OPENSKY_PASS=您的_client_secret_1
+OPENSKY_USER=您的帳號名稱或client_id
+OPENSKY_PASS=您的密碼或client_secret
 PORT=3000
 
-# (選用) 第二組帳號 - 額度翻倍至 8000次/天
-OPENSKY_USER2=您的_client_id_2
-OPENSKY_PASS2=您的_client_secret_2
+# (選用) 備用帳號自動輪替
+OPENSKY_USER2=第二組帳號
+OPENSKY_PASS2=第二組密碼
 ```
 
-### 3. 啟動伺服器
+### 步驟 3：編譯 React 前端 (Build)
+系統的後端 (`server.js`) 被設計為會直接讀取 `public-react` 資料夾裡的靜態檔案。因此，每次修改 `client/src` 裡的 React 程式碼後，都必須重新編譯 (Build)。
 
 ```bash
-node server.js
-# 或是直接雙擊 start.bat
+# 確保你目前在 client 資料夾底下 (project_flightradar/client)
+npm run build
 ```
+*(執行完畢後，終端機會顯示 Vite building for production... 以及舊設備專用的 polyfills-legacy.js 產出訊息。這代表前端已準備完畢。)*
 
-### 4. 開啟雷達
+### 步驟 4：啟動後端伺服器 (Start Server)
+退回到專案根目錄，啟動 Node.js 伺服器：
+
+```bash
+# 退回根目錄
+cd ..
+
+# 啟動伺服器
+npm start
+# (等同於執行 node server.js)
+```
+*(看到終端機出現 `✅ React Flight Radar Server running on port 3000` 即代表啟動成功。)*
+
+### 步驟 5：開始追蹤航班
+打開您的瀏覽器 (電腦、手機、iPad 皆可)，輸入以下網址：
 
 👉 **[http://localhost:3000/](http://localhost:3000/)**
 
-> 📝 經典 HTML 版仍可透過 `/index_cl3.html` 存取，但已不再主動維護。
+> 若要在手機或 iPad 上觀看，請確保手機與電腦連線至「同一個 Wi-Fi 路由器」，並在手機瀏覽器輸入電腦的區域網路 IP (例如：`http://192.168.1.100:3000`)。
 
 ---
 
-## 🔌 後端 API 端點說明
+## 🛠️ 維護與除錯指南 (Troubleshooting)
 
-| HTTP | 路由 | 說明 | 快取 |
-|------|------|------|------|
-| `GET` | `/api/health` | 伺服器健康狀態、目前使用帳號、帳號總數 | — |
-| `GET` | `/api/stats` | API 呼叫次數、限流次數、快取大小、活躍帳號 | — |
-| `GET` | `/api/states` | 代理 OpenSky `/states/all`，抓取全球所有飛機即時狀態 | **8 秒** |
-| `GET` | `/api/tracks?icao24=` | 單一飛機的飛行軌跡線 | 15 秒 |
-| `GET` | `/api/metadata/:icao24` | 飛機特徵資料 (機型、製造商等) | **永久** |
-| `POST` | `/api/metadata/batch` | 批量預取多架飛機特徵 (上限 10 架) | **永久** |
+### 1. 畫面顯示 N/A 或找不到航班
+- **限流問題**：OpenSky API 相當嚴格。若剛啟動伺服器，可能正處於 HTTP 429 限流狀態。請耐心等待 2~3 分鐘，系統的自動輪替機制會在限流解除後將全地球的飛機抓取下來。
+- **終極備援失效？**：如果你點擊了台灣虎航 (TTW) 卻還是顯示 N/A，請退回專案終端機按下 `Ctrl + C`，然後重新執行 `npm start`，確保後端載入的是最新的 `server.js` 邏輯。
 
----
+### 2. 不同設備的「資料更新倒數」不同步？
+本系統架構採 **客戶端輪詢 (Client Polling)** 機制。每個設備 (iPad, 手機, 電腦) 是依照自己打開網頁的當下時間開始計時「每 10 秒打一次 API」。因此，不同設備的更新時間與 API 累計次數有 3~5 秒的落差是**完全正常**的行為。
 
-## 📡 OpenSky API 完整資料分析
-
-### `/states/all` 回傳的 18 個欄位 (State Vector)
-
-| Index | 欄位名稱 | 類型 | 我們是否使用 | 說明 |
-|-------|----------|------|:---:|------|
-| 0 | `icao24` | string | ✅ | 飛機唯一識別碼 (ICAO 24-bit 十六進制) |
-| 1 | `callsign` | string | ✅ | 航班呼號 (如 `EVA252`) |
-| 2 | `origin_country` | string | ✅ | 註冊國家名稱 |
-| 3 | `time_position` | int | ✅ | 最後一次位置更新的 Unix 時間戳 |
-| 4 | `last_contact` | int | ✅ | 最後一次訊號接收的 Unix 時間戳 |
-| 5 | `longitude` | float | ✅ | WGS-84 經度 |
-| 6 | `latitude` | float | ✅ | WGS-84 緯度 |
-| 7 | `baro_altitude` | float | ✅ | 氣壓高度 (公尺) |
-| 8 | `on_ground` | bool | ✅ | 是否在地面 |
-| 9 | `velocity` | float | ✅ | 地面速度 (m/s) |
-| 10 | `true_track` | float | ✅ | 真航向 (度) |
-| 11 | `vertical_rate` | float | ✅ | 垂直速率 (m/s，正=爬升) |
-| 12 | `sensors` | int[] | ❌ | 貢獻此資料的接收器 ID 列表 |
-| 13 | `geo_altitude` | float | ❌ | **幾何高度** (GPS 高度，與氣壓高度不同) |
-| 14 | `squawk` | string | ✅ | 應答機代碼 (Squawk) |
-| 15 | `spi` | bool | ✅ | 特殊位置識別 (Special Purpose Indicator) |
-| 16 | `position_source` | int | ❌ | **位置來源** (0=ADS-B, 1=ASTERIX, 2=MLAT, 3=FLARM) |
-| 17 | `category` | int | ❌ | **飛行器類別** (見下表) |
-
-### 飛行器類別 (Category) 對照表
-
-| 代碼 | 類別 | 代碼 | 類別 |
-|------|------|------|------|
-| 0 | 無資訊 | 8 | 旋翼機 (直升機) |
-| 2 | Light (< 15,500 lbs) | 9 | 滑翔機 |
-| 3 | Small (15,500-75,000 lbs) | 10 | 輕型飛船 |
-| 4 | Large (75,000-300,000 lbs) | 11 | 跳傘員 |
-| 5 | High Vortex Large (B-757 等) | 12 | 超輕航空器 |
-| 6 | Heavy (> 300,000 lbs) | 14 | **無人機 (UAV)** |
-| 7 | High Performance (> 5g) | 15 | 太空載具 |
-
-### 🛫 關於「飛機目的地」
-
-> **OpenSky 的即時 API (`/states/all`) 不提供目的地資訊。**
-
-但可以透過以下**額外端點**取得出發/目的地機場 (資料延遲約 1 天)：
-
-| HTTP | 端點 | 說明 | 回傳關鍵欄位 |
-|------|------|------|-------------|
-| `GET` | `/flights/aircraft?icao24=&begin=&end=` | 查詢特定飛機的航班記錄 | `estDepartureAirport`, **`estArrivalAirport`** |
-| `GET` | `/flights/departure?airport=&begin=&end=` | 查詢某機場的出發航班 | `estArrivalAirport`, `callsign` |
-| `GET` | `/flights/arrival?airport=&begin=&end=` | 查詢某機場的抵達航班 | `estDepartureAirport`, `callsign` |
-| `GET` | `/flights/all?begin=&end=` | 查詢時間區間內所有航班 | 出發/到達機場、時間 |
-
-> ⚠️ **注意**：這些航班端點的資料是**每日夜間批次更新**的，並非即時資料。時間區間上限為 2 小時。
+### 3. 如何更新版本號以強制清除舊設備快取？
+如果您修改了程式碼（例如在 `flightUtils.js` 中新增了一家航空公司），舊版 iOS Safari 很容易因為快取而看不到新畫面。
+1. 前往 `client/src/components/Dashboard.jsx`。
+2. 找到 `v1.0.11` 的字樣，將其修改為 `v1.0.12`。
+3. 執行 `cd client` -> `npm run build`。
+4. 您的使用者進入網頁時看到新版號，就代表快取已成功刷新！
 
 ---
-
-## 🗺️ 未來功能增強路線圖 (Roadmap)
-
-### 🔴 高優先 — 可立即加入
-
-| 功能 | 說明 | 資料來源 |
-|------|------|---------|
-| **幾何高度 (GPS Altitude)** | 在側邊欄同時顯示氣壓高度與 GPS 高度的差異 | `state[13]` |
-| **位置來源標記** | 用不同的圖標底色區分 ADS-B / MLAT / FLARM 位置 | `state[16]` |
-| **飛行器類別篩選** | 新增篩選器：只顯示商用客機 / 直升機 / 無人機 / 滑翔機等 | `state[17]` |
-| **航班歷史查詢 (目的地)** | 點選飛機後，從 `/flights/aircraft` 查出它昨天的出發/目的地機場 | `/flights/aircraft` |
-
-### 🟡 中優先 — 需要額外開發
-
-| 功能 | 說明 |
-|------|------|
-| **機場出發/抵達看板** | 模擬機場大廳的出發/到達航班資訊板，顯示所有進出航班 |
-| **速度單位切換** | 支援 m/s、km/h、knots 三種速度單位即時切換 |
-| **高度單位切換** | 支援公尺 (m) 與英呎 (ft) 切換 |
-| **多語言擴充** | 加入日文 (🇯🇵)、韓文 (🇰🇷) 等更多語言 |
-| **飛機收藏與追蹤清單** | 允許用戶收藏特定飛機，追蹤它的每日航線 |
-| **WebSocket 即時推播** | 取代目前的 HTTP 輪詢，使用 WebSocket 實現真正的即時推送 |
-
-### 🟢 低優先 — 進階功能
-
-| 功能 | 說明 |
-|------|------|
-| **3D 地球儀視角** | 使用 Cesium.js 或 Globe.gl 實現 3D 地球渲染 |
-| **歷史回放 (Time Machine)** | 利用 OpenSky 歷史資料庫回放過去任意時段的空域狀態 |
-| **碰撞風險警報** | 計算附近飛機的距離與航向，偵測潛在衝突 |
-| **天氣圖層疊加** | 在地圖上疊加即時氣象雷達 (如雷雨、風場) |
-
----
-
-## 🛠️ 常見問題
-
-**Q: 為什麼地圖沒有出現飛機，儀表板顯示 ⚠️ RATE LIMITS 增加？**  
-A: OpenSky API 有嚴格的頻率限制。剛啟動伺服器時會遭遇 429 限流懲罰。請**靜置網頁不操作大約 2~3 分鐘**，系統的背景輪詢會在限流結束後自動把全球飛機抓下來並顯示。如果配置了雙帳號，系統會自動切換到未被限流的帳號繼續運作。
-
-**Q: 如何查看飛機的目的地？**  
-A: OpenSky 的即時 API 不提供目的地。但可以透過 `/flights/aircraft` 端點查詢該飛機**昨天**的航班記錄來得知出發/目的地機場 (ICAO 代碼)。此功能已列入開發路線圖。
-
-**Q: 如何在手機上觀看？**  
-A: 確保手機與電腦在同一個 Wi-Fi 網路下，在手機瀏覽器輸入 `http://<您的電腦區域網路 IP>:3000/index_cl3.html` 即可。
-
-**Q: React 版和 HTML 版有什麼差別？**  
-A: 兩者連接到同一個後端 API，功能完全相同。HTML 版是單一檔案、ES5 相容、極致輕量；React 版是現代組件化架構，適合未來功能擴展。
+**版本紀錄:**
+- `v1.0.11` - 解決 OpenSky 歷史資料出發/抵達地為 null 導致備援失效問題；新增 TGW (酷航) 等亞洲各級航空識別支援。
+- `v1.0.9` - 導入「終極靜態航線生成機制」(Ultimate Static Fallback)，修復立榮(UIA)圖標衝突。
+- `v1.0.8` - 飛行軌跡記憶體從 50 擴充至 500；發布 iOS 12 polyfills。
+- `v1.0.0` - 全面從 HTML 轉型至 React/Vite 架構。

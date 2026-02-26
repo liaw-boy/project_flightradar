@@ -211,6 +211,16 @@
     word-break: break-all;
 }
 
+.sb-airport-city {
+    font-size: 11px;
+    font-weight: 600;
+    color: #FFDC00;
+    opacity: 0.8;
+    margin-top: 2px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
 .sb-airport-name {
     font-size: 10px;
     color: #aaa;
@@ -354,6 +364,62 @@
     color: #000;
     transform: translateY(-2px);
     box-shadow: 0 5px 15px rgba(255, 220, 0, 0.4);
+}
+
+/* Accordion Styles */
+.sb-section-title.accordion {
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+    transition: background 0.2s, color 0.2s;
+}
+
+.sb-section-title.accordion:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.sb-section-title .chevron {
+    transition: transform 0.3s ease;
+    border-style: solid;
+    border-width: 0.15em 0.15em 0 0;
+    content: '';
+    display: inline-block;
+    height: 0.45em;
+    position: relative;
+    top: -0.1em;
+    transform: rotate(135deg);
+    vertical-align: middle;
+    width: 0.45em;
+    opacity: 0.6;
+}
+
+.sb-section-title.accordion.open .chevron {
+    transform: rotate(-45deg);
+    top: 0.1em;
+    opacity: 1;
+}
+
+.sb-section-content {
+    animation: slideDown 0.3s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+    overflow: hidden;
+    transform-origin: top;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: scaleY(0.9);
+        max-height: 0;
+    }
+
+    to {
+        opacity: 1;
+        transform: scaleY(1);
+        max-height: 500px;
+    }
 }
 
 /* ===== RWD: Bottom Sheet (手機端底部抽屜) ===== */

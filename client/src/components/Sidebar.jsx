@@ -7,6 +7,7 @@ import {
     getCategoryName,
     getNearestAirport,
     formatVerticalRate,
+    getAirportDisplayData,
 } from '../utils/flightUtils';
 import './Sidebar.css';
 
@@ -38,7 +39,20 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
     const dep = route?.departureAirport || (route?.noData ? 'N/A' : '...');
     const arr = route?.arrivalAirport || (route?.noData ? 'N/A' : '...');
 
+    // Convert ICAO to IATA and get City Name
+    const depData = getAirportDisplayData(dep);
+    const arrData = getAirportDisplayData(arr);
+
     const [photos, setPhotos] = useState([]);
+    const [openSections, setOpenSections] = useState({
+        spatial: false,
+        status: false,
+        nearest: false
+    });
+
+    const toggleSection = (section) => {
+        setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
+    };
 
     useEffect(() => {
         let isMounted = true;
@@ -101,7 +115,8 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                 <div className="sb-route-card">
                     <div className="sb-route-top">
                         <div className="sb-route-half left">
-                            <div className="sb-airport-code">{dep}</div>
+                            <div className="sb-airport-code">{depData.code}</div>
+                            {depData.city && <div className="sb-airport-city">{depData.city}</div>}
                         </div>
                         <div className="sb-route-center">
                             <div className="route-plane-icon">
@@ -111,7 +126,8 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                             </div>
                         </div>
                         <div className="sb-route-half right">
-                            <div className="sb-airport-code">{arr}</div>
+                            <div className="sb-airport-code">{arrData.code}</div>
+                            {arrData.city && <div className="sb-airport-city">{arrData.city}</div>}
                         </div>
                     </div>
                     {(dep || arr || (route && route.firstSeen)) && (
@@ -141,34 +157,55 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                 {metadata?.owner && <DataRow label="Owner" value={metadata.owner} />}
 
                 {/* Spatial Data */}
-                <div className="sb-section-title">{t('spatialData')}</div>
-                <DataRow label={t('altitude')} value={plane.onGround ? 'GROUND' : `${plane.altitude} m`} />
-                {plane.geoAltitude && (
-                    <DataRow label={t('gpsAlt')} value={`${plane.geoAltitude} m`} />
+                <div className={`sb-section-title accordion ${openSections.spatial ? 'open' : ''}`} onClick={() => toggleSection('spatial')}>
+                    {t('spatialData')}
+                    <span className="chevron"></span>
+                </div>
+                {openSections.spatial && (
+                    <div className="sb-section-content">
+                        <DataRow label={t('altitude')} value={plane.onGround ? 'GROUND' : `${plane.altitude} m`} />
+                        {plane.geoAltitude && (
+                            <DataRow label={t('gpsAlt')} value={`${plane.geoAltitude} m`} />
+                        )}
+                        <DataRow label={t('speed')} value={`${Math.round(plane.velocity * 3.6)} km/h`} />
+                        <DataRow label={t('heading')} value={`${Math.round(plane.heading)}°`} />
+                        <DataRow label={t('vertRate')} value={formatVerticalRate(plane.vRate)} />
+                        <DataRow label={t('position')} value={`${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}`} />
+                        <DataRow label={t('source')} value={posSourceMap[plane.positionSource] || 'Unknown'} />
+                    </div>
                 )}
-                <DataRow label={t('speed')} value={`${Math.round(plane.velocity * 3.6)} km/h`} />
-                <DataRow label={t('heading')} value={`${Math.round(plane.heading)}°`} />
-                <DataRow label={t('vertRate')} value={formatVerticalRate(plane.vRate)} />
-                <DataRow label={t('position')} value={`${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}`} />
-                <DataRow label={t('source')} value={posSourceMap[plane.positionSource] || 'Unknown'} />
 
                 {/* Status */}
-                <div className="sb-section-title">{t('status')}</div>
-                <DataRow label={t('squawk')} value={plane.squawk || '--'} />
-                <DataRow
-                    label={t('spiLabel')}
-                    value={plane.spi ? '⚠️ ACTIVE' : 'Normal'}
-                    valueClass={plane.spi ? 'spi-active' : ''}
-                />
-                <DataRow label={t('lastContact')} value={contactTime} />
-                <DataRow label={t('dataAge')} value={`${dataAge}s ago`} />
+                <div className={`sb-section-title accordion ${openSections.status ? 'open' : ''}`} onClick={() => toggleSection('status')}>
+                    {t('status')}
+                    <span className="chevron"></span>
+                </div>
+                {openSections.status && (
+                    <div className="sb-section-content">
+                        <DataRow label={t('squawk')} value={plane.squawk || '--'} />
+                        <DataRow
+                            label={t('spiLabel')}
+                            value={plane.spi ? '⚠️ ACTIVE' : 'Normal'}
+                            valueClass={plane.spi ? 'spi-active' : ''}
+                        />
+                        <DataRow label={t('lastContact')} value={contactTime} />
+                        <DataRow label={t('dataAge')} value={`${dataAge}s ago`} />
+                    </div>
+                )}
 
                 {/* Nearest Airport */}
                 {nearest && (
                     <>
-                        <div className="sb-section-title">{t('nearestAirport')}</div>
-                        <DataRow label={t('airport')} value={`${nearest.airport.icao} - ${nearest.airport.name}`} />
-                        <DataRow label={t('distance')} value={`${nearest.distance} km`} />
+                        <div className={`sb-section-title accordion ${openSections.nearest ? 'open' : ''}`} onClick={() => toggleSection('nearest')}>
+                            {t('nearestAirport')}
+                            <span className="chevron"></span>
+                        </div>
+                        {openSections.nearest && (
+                            <div className="sb-section-content">
+                                <DataRow label={t('airport')} value={`${nearest.airport.icao} - ${nearest.airport.name}`} />
+                                <DataRow label={t('distance')} value={`${nearest.distance} km`} />
+                            </div>
+                        )}
                     </>
                 )}
 

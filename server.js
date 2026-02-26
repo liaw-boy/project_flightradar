@@ -36,7 +36,8 @@ function getCached(key) {
         if (Date.now() - entry.timestamp < CACHE_TTL) {
             return entry.data;
         }
-        cache.delete(key);
+        // 不要刪除過期快取，因為這會摧毀發生 Timeout 時的 STALE 備援防護網
+        // cache.delete(key);
     }
     return null;
 }
@@ -170,6 +171,8 @@ app.get('/api/stats', function (req, res) {
 });
 
 // 取得飛機狀態（代理 OpenSky /states/all）
+const activeRequests = new Map();
+
 app.get('/api/states', async (req, res) => {
     const { lamin, lomin, lamax, lomax } = req.query;
 
@@ -182,74 +185,102 @@ app.get('/api/states', async (req, res) => {
     const cached = getCached(cacheKey);
     if (cached) {
         console.log(`✅ [CACHE HIT] ${cacheKey}`);
-        return res.json(cached);
+        return res.json({ time: Date.now(), states: cached.states, stats: apiStats });
     }
 
-    // 嘗試請求（支援失敗重試與帳號輪替）
-    let retries = ACCOUNTS.length;
-    let lastError = null;
-
-    while (retries > 0) {
+    if (activeRequests.has(cacheKey)) {
+        console.log(`⏳ [STAMPEDE PREVENT] Waiting for existing request for ${cacheKey}...`);
         try {
-            const url = isGlobal
-                ? `https://opensky-network.org/api/states/all`
-                : `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
-
-            console.log(`🌐 [API CALL] Fetching states... (Account: ${ACCOUNTS[currentAccountIndex].user})`);
-            apiStats.totalCalls++;
-            apiStats.stateCalls++;
-
-            const headers = await getAuthHeaders();
-            const response = await fetch(url, {
-                headers,
-                signal: AbortSignal.timeout(15000)
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-
-                // 429 Rate Check -> Rotate and Retry
-                if (response.status === 429) {
-                    console.warn(`⚠️ [RATE LIMIT] Account ${ACCOUNTS[currentAccountIndex].user} limited. Rotating...`);
-                    apiStats.rateLimits++;
-
-                    if (rotateAccount()) {
-                        retries--;
-                        continue; // Retry loop with new account
-                    } else {
-                        // No more accounts to rotate
-                        throw new Error('All accounts rate limited');
-                    }
-                }
-
-                throw new Error(`OpenSky API error: ${response.status} ${errorText.substring(0, 100)}`);
-            }
-
-            const data = await response.json();
-            apiStats.lastSuccessTime = new Date().toISOString();
-
-            // 存入快取
-            setCache(cacheKey, data);
-            console.log(`📦 [CACHED] ${cacheKey} | States: ${data.states ? data.states.length : 0}`);
-
-            return res.json(data); // Success!
-
+            const data = await activeRequests.get(cacheKey);
+            return res.json({ time: Date.now(), states: data.states, stats: apiStats });
         } catch (error) {
-            lastError = error;
-            console.error(`❌ [FETCH ERROR] ${error.message}`);
-            // If it was not a 429 (handled above), we might not want to retry, but let's be safe and fail out if not 429
-            if (!error.message.includes('Rate limited') && !error.message.includes('All accounts')) {
-                break;
+            // failed, fall through to stale cache below
+        }
+    } else {
+        const fetchPromise = (async () => {
+            let retries = ACCOUNTS.length;
+            let lastError = null;
+
+            while (retries > 0) {
+                try {
+                    const url = isGlobal
+                        ? `https://opensky-network.org/api/states/all`
+                        : `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
+
+                    console.log(`🌐 [API CALL] Fetching states... (Account: ${ACCOUNTS[currentAccountIndex].user})`);
+                    apiStats.totalCalls++;
+                    apiStats.stateCalls++;
+
+                    const headers = await getAuthHeaders();
+                    const response = await fetch(url, {
+                        headers,
+                        signal: AbortSignal.timeout(18000)
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+
+                        // 429 Rate Check -> Rotate and Retry
+                        if (response.status === 429) {
+                            console.warn(`⚠️ [RATE LIMIT] Account ${ACCOUNTS[currentAccountIndex].user} limited. Rotating...`);
+                            apiStats.rateLimits++;
+
+                            if (rotateAccount()) {
+                                retries--;
+                                continue; // Retry loop with new account
+                            } else {
+                                throw new Error('All accounts rate limited');
+                            }
+                        }
+
+                        throw new Error(`OpenSky API error: ${response.status} ${errorText.substring(0, 100)}`);
+                    }
+
+                    const data = await response.json();
+                    apiStats.lastSuccessTime = new Date().toISOString();
+
+                    // 存入快取
+                    setCache(cacheKey, data);
+                    console.log(`📦 [CACHED] ${cacheKey} | States: ${data.states ? data.states.length : 0}`);
+
+                    return data;
+
+                } catch (error) {
+                    lastError = error;
+                    console.error(`❌ [FETCH ERROR] ${error.message}`);
+                    if (!error.message.includes('Rate limited') && !error.message.includes('All accounts')) {
+                        break;
+                    }
+                    if (retries <= 0) break;
+                }
             }
-            if (retries <= 0) break;
+
+            apiStats.errors++;
+            apiStats.lastError = lastError ? lastError.message : 'Unknown error';
+            apiStats.lastErrorTime = new Date().toISOString();
+            throw lastError || new Error('Unknown error');
+        })();
+
+        activeRequests.set(cacheKey, fetchPromise);
+
+        try {
+            const data = await fetchPromise;
+            activeRequests.delete(cacheKey);
+            return res.json({ time: Date.now(), states: data.states, stats: apiStats });
+        } catch (err) {
+            activeRequests.delete(cacheKey);
+            // fail through to stale cache
         }
     }
 
-    // All retries failed
-    apiStats.errors++;
-    apiStats.lastError = lastError ? lastError.message : 'Unknown error';
-    apiStats.lastErrorTime = new Date().toISOString();
-    res.status(429).json({ error: 'Rate limited on all accounts or API error.', detail: apiStats.lastError });
+    // 終極備援：如果 API 超時斷線，嘗試回傳舊的快取資料 (即使已經過期)，避免前端飛機全部消失
+    const entry = cache.get(cacheKey);
+    if (entry && entry.data) {
+        console.log(`⚠️ [STALE CACHE] Returning outdated ${cacheKey} due to fetch error.`);
+        return res.json({ time: Date.now(), states: entry.data.states, stats: apiStats, stale: true });
+    }
+
+    res.status(429).json({ error: 'Rate limited on all accounts or API error.', detail: apiStats.lastError, stats: apiStats });
 });
 
 // 取得飛行軌跡（代理 OpenSky /tracks/all）
@@ -476,7 +507,8 @@ app.get('/api/route/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
     const callsign = req.query.callsign ? req.query.callsign.trim().toUpperCase() : '';
 
-    // 1. 優先查詢本地「靜態航班航線字典」 (Fixed Flight Route Database)
+    // 1. 極致靜態優先 (Ultimate Static Route Bypassing API)
+    // 直接強制從 routesDatabase 取資料，使用者要求：能用靜態就用靜態
     if (callsign && routesDatabase[callsign]) {
         console.log(`🗺️ [ROUTE DB] Local hit for ${callsign}: ${routesDatabase[callsign].dep} -> ${routesDatabase[callsign].arr}`);
         return res.json({
@@ -487,6 +519,8 @@ app.get('/api/route/:icao24', async (req, res) => {
             fromStaticDB: true
         });
     }
+
+
 
     // 2. 檢查記憶體動態快取
     const cached = routeCache.get(icao24);
@@ -553,30 +587,17 @@ app.get('/api/route/:icao24', async (req, res) => {
         let dep = latest ? latest.estDepartureAirport : null;
         let arr = latest ? latest.estArrivalAirport : null;
 
-        // 5. 終極靜態資料庫備援 (Ultimate Static Route Generator for Asian Airlines)
-        // 如果 OpenSky 完全沒資料，或是找到的歷史資料裡沒有起迄點 (dep/arr 為 null)，就使用啟發式靜態映射
-        if ((!dep || !arr) && callsign) {
-            if (callsign.startsWith('UIA')) { dep = 'RCSS'; arr = 'RCQC'; } // 立榮國內線預設：松山-馬公
-            else if (callsign.startsWith('MDA')) { dep = 'RCSS'; arr = 'RCKU'; } // 華信國內線預設：松山-嘉義
-            else if (callsign.startsWith('TTW')) { dep = 'RCTP'; arr = 'RJAA'; } // 虎航預設：桃機-成田
-            else if (callsign.startsWith('SJX')) { dep = 'RCTP'; arr = 'RJBB'; } // 星宇預設：桃機-關西
-            else if (callsign.startsWith('EVA')) { dep = 'RCTP'; arr = 'KLAX'; } // 長榮預設：桃機-洛杉磯
-            else if (callsign.startsWith('CAL')) { dep = 'RCTP'; arr = 'KJFK'; } // 華航預設：桃機-紐約
-            else if (callsign.startsWith('CPA')) { dep = 'VHHH'; arr = 'RCTP'; } // 國泰預設：香港-桃機
-            else if (callsign.startsWith('TGW')) { dep = 'WSSS'; arr = 'RCTP'; } // 酷航預設：樟宜-桃機
-
-            if (dep && arr) {
-                const fallbackResult = { icao24, callsign, departureAirport: dep, arrivalAirport: arr, noData: false, fromStaticDB: true };
-                routeCache.set(icao24, { data: fallbackResult, timestamp: Date.now() });
-                console.log(`🗺️ [ROUTE DB] Algorithmic static fallback for ${callsign}: ${dep} -> ${arr}`);
-                return res.json(fallbackResult);
-            }
-        }
-
-        if (!dep && !arr) {
+        if (!dep || !arr) {
             const noDataResult = { icao24, callsign, noData: true };
             routeCache.set(icao24, { data: noDataResult, timestamp: Date.now() });
             return res.json(noDataResult);
+        }
+
+        // 5. 將所有成功取得的歷史紀錄，無條件寫入終極靜態庫，實現全域永久靜態化
+        if (!routesDatabase[callsign]) {
+            routesDatabase[callsign] = { dep, arr };
+            saveRoutesDatabase();
+            console.log(`📦 [ROUTE DB] Saved historical route to static dictionary: ${callsign} -> ${dep}-${arr}`);
         }
 
         const routeData = {
@@ -589,7 +610,6 @@ app.get('/api/route/:icao24', async (req, res) => {
             fromHistorical: true
         };
 
-        // 如果從歷史抓到了一組完美的起迄，也可以選擇記錄進靜態庫 (可選，這裡先不放進靜態庫確保準確率)
         routeCache.set(icao24, { data: routeData, timestamp: Date.now() });
         console.log(`✈️ [ROUTE] Historical fallback ${icao24}: ${routeData.departureAirport} → ${routeData.arrivalAirport}`);
         res.json(routeData);
@@ -597,6 +617,59 @@ app.get('/api/route/:icao24', async (req, res) => {
     } catch (error) {
         console.error(`❌ [ROUTE ERROR] ${icao24} (${callsign}): ${error.message}`);
         res.json({ icao24, callsign, noData: true, error: error.message });
+    }
+});
+
+// ==========================================
+// 飛機軌跡 Tracks API (過去 24 小時的飛行路徑)
+// ==========================================
+const trackCache = new Map();
+const TRACK_CACHE_TTL = 30000; // 30 秒快取
+
+app.get('/api/tracks', async (req, res) => {
+    const icao24 = req.query.icao24;
+    const time = req.query.time || 0;
+    if (!icao24) return res.status(400).json({ error: 'Missing icao24' });
+
+    // 檢查快取
+    const cached = trackCache.get(icao24);
+    if (cached && (Date.now() - cached.timestamp < TRACK_CACHE_TTL)) {
+        return res.json(cached.data);
+    }
+
+    try {
+        console.log(`🗺️ [TRACKS] Fetching track history for ${icao24} at t=${time}...`);
+        const headers = await getAuthHeaders();
+        const url = `https://opensky-network.org/api/tracks/all?icao24=${icao24}&time=${time}`;
+
+        const response = await fetch(url, {
+            headers,
+            signal: AbortSignal.timeout(15000)
+        });
+
+        if (!response.ok) {
+            let msg = response.statusText;
+            if (response.status === 429) msg = 'Rate Limited (429)';
+            if (response.status === 404) {
+                msg = 'Flight not currently tracked (404)';
+                // Cache the 404 so we don't spam OpenSky for dead flights
+                trackCache.set(icao24, { data: { icao24, path: [], noData: true, error: msg }, timestamp: Date.now() });
+            }
+            console.warn(`⚠️ [TRACKS ERROR] ${icao24} failed: ${response.status} ${msg}`);
+            return res.json({ icao24, path: [], noData: true, error: msg });
+        }
+
+        const data = await response.json();
+        const result = { icao24, path: data.path || [] };
+
+        // 存入快取
+        trackCache.set(icao24, { data: result, timestamp: Date.now() });
+        console.log(`✅ [TRACKS] Fetched ${result.path.length} waypoints for ${icao24}`);
+
+        res.json(result);
+    } catch (error) {
+        console.error(`❌ [TRACKS ERROR] ${icao24}: ${error.message}`);
+        res.json({ icao24, path: [], noData: true, error: error.message });
     }
 });
 

@@ -4,5 +4,8 @@ echo =======================================
 echo     Starting Flightradar Server
 echo =======================================
 cd /d "%~dp0"
+cd .\client\
+npm run build
+cd ..
 npm start
 pause

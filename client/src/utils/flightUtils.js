@@ -53,6 +53,11 @@ export const AIRPORTS = [
 ];
 
 // ==========================================
+// 國際機場 IATA 與城市對照表 (從全球資料庫載入)
+// ==========================================
+export { getAirportDisplayData } from './airportMappings';
+
+// ==========================================
 // 航空公司資料庫
 // ==========================================
 const AIRLINE_DB = {
@@ -314,7 +319,7 @@ export function getPlaneExtraClass(isEmergency, onGround) {
 /**
  * 解析 OpenSky API 回傳資料
  */
-export function parseOpenSkyData(data) {
+export function parseOpenSkyData(data, isStale = false) {
     const planes = [];
     const nowUnix = Math.floor(Date.now() / 1000);
 
@@ -325,7 +330,8 @@ export function parseOpenSkyData(data) {
         const lastContact = plane[4] || nowUnix;
         const dataAgeSeconds = nowUnix - lastContact;
 
-        if (dataAgeSeconds > 120) return;
+        // 若非備援資料，且資料超過 120 秒未更新，則拋棄
+        if (!isStale && dataAgeSeconds > 120) return;
 
         const callsign = plane[1] ? plane[1].trim() : 'UNKNOWN';
         let altitude = plane[7] ? Math.round(plane[7]) : 'N/A';

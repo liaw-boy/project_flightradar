@@ -60,12 +60,18 @@ export function useFlightData(mapRef, showNotification) {
             }
 
             const data = await response.json();
-            const parsedPlanes = parseOpenSkyData(data);
+
+            // 同步提取後端綁定的 API 狀態，實現全裝置 100% 同步
+            if (data.stats) {
+                setApiStats(data.stats);
+            }
+
+            const parsedPlanes = parseOpenSkyData(data, data.stale === true);
 
             if (parsedPlanes.length > 0) {
                 processPlaneData(parsedPlanes);
-                setApiStatus('OpenSky');
-                setApiStatusClass('');
+                setApiStatus(data.stale ? 'STALE CACHE' : 'OpenSky');
+                setApiStatusClass(data.stale ? 'stat-warning' : '');
                 setLastUpdateTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
             } else {
                 setApiStatus('NO DATA');
@@ -112,7 +118,9 @@ export function useFlightData(mapRef, showNotification) {
                 else air++;
 
                 if (!history[icao24]) history[icao24] = [];
-                history[icao24].push([pData.lat, pData.lng]);
+                // 儲存 [時間戳, 緯度, 經度, 是否在地面]
+                const nowUnix = Math.floor(Date.now() / 1000);
+                history[icao24].push([nowUnix, pData.lat, pData.lng, pData.onGround]);
                 if (history[icao24].length > 500) history[icao24].shift(); // 保留 500 個點 (~83分鐘追蹤)
 
                 if (!next[icao24]) {
@@ -151,10 +159,10 @@ export function useFlightData(mapRef, showNotification) {
         });
     }, []);
 
-    // 取得飛行軌跡
     const fetchTrack = useCallback(async (icao24, lastContact) => {
         try {
-            const res = await fetch(`/api/tracks?icao24=${icao24}`);
+            const timeParam = lastContact ? `&time=${lastContact}` : '';
+            const res = await fetch(`/api/tracks?icao24=${icao24}${timeParam}`);
             if (!res.ok) throw new Error('API Error');
             const data = await res.json();
 
@@ -167,16 +175,19 @@ export function useFlightData(mapRef, showNotification) {
                 const validPoints = data.path.filter((p) => p[1] && p[2] && p[0] <= limitTime);
 
                 // 找出最新的飛行航段：
-                // 1. 時間間隔大於 15 分鐘 (900 秒)
-                // 2. 或者飛機處於地面狀態 (onGround == true)，代表上一趟已經結束
+                // 1. 絕對切斷：時間間隔大於 15 分鐘 (900 秒)，代表上一趟飛完停著沒關機
+                // 2. 條件切斷：如果現在飛機「正在地面 (目前點)」，我們把每一秒在地上滑行的都當作新的起點，不畫出長長的地面滑行線
                 let latestSegmentStartIdx = 0;
+                const isCurrentlyOnGround = validPoints[validPoints.length - 1][5] === true;
+
                 for (let i = 1; i < validPoints.length; i++) {
                     const timeDiff = validPoints[i][0] - validPoints[i - 1][0];
                     const isOnGround = validPoints[i][5] === true; // path[5] 是 onGround
 
-                    if (timeDiff > 900 || isOnGround) {
-                        // 如果因為 onGround 切斷，我們希望最新的軌跡「不包含」在地面滑行的漫長過去，
-                        // 所以最新的起點設在目前這個點。
+                    if (timeDiff > 900) {
+                        latestSegmentStartIdx = i;
+                    } else if (isOnGround && isCurrentlyOnGround) {
+                        // 如果飛機最終狀態停在地上，那我們遇到地面的點就切斷，避免畫出機場亂轉的線
                         latestSegmentStartIdx = i;
                     }
                 }
@@ -189,35 +200,26 @@ export function useFlightData(mapRef, showNotification) {
 
         // Fallback: 本地歷史
         const history = flightHistoryRef.current[icao24];
-        return history && history.length > 1 ? history : [];
-    }, []);
+        if (!history || history.length < 2) return [];
 
-    // 拉取 API 統計
-    const fetchApiStats = useCallback(async () => {
-        try {
-            const res = await fetch('/api/stats');
-            if (res.ok) {
-                const data = await res.json();
-                setApiStats(data);
+        let latestSegmentStartIdx = 0;
+        for (let i = 1; i < history.length; i++) {
+            const timeDiff = history[i][0] - history[i - 1][0];
+            const isOnGround = history[i][3] === true;
+
+            if (timeDiff > 900 || isOnGround) {
+                latestSegmentStartIdx = i;
             }
-        } catch (e) {
-            // 靜默失敗
         }
+        return history.slice(latestSegmentStartIdx).map((p) => [p[1], p[2]]);
     }, []);
 
-    // 定時更新飛機 (測試階段 60秒，上線改回 11000)
+    // 定時更新飛機 (正式上線 11秒)
     useEffect(() => {
         fetchPlanes();
-        const interval = setInterval(fetchPlanes, 60000);
+        const interval = setInterval(fetchPlanes, 11000);
         return () => clearInterval(interval);
     }, [fetchPlanes]);
-
-    // 定時拉取 API 統計 (每 30 秒)
-    useEffect(() => {
-        fetchApiStats();
-        const interval = setInterval(fetchApiStats, 30000);
-        return () => clearInterval(interval);
-    }, [fetchApiStats]);
 
     return {
         planesDict,

@@ -110,5 +110,61 @@
   "CAL504": {
     "dep": "ZSPD",
     "arr": "RCTP"
+  },
+  "CAL163": {
+    "dep": "RKSI",
+    "arr": "RCTP"
+  },
+  "CAL117": {
+    "dep": "RJFF",
+    "arr": "RCTP"
+  },
+  "CAL784": {
+    "dep": "VVTS",
+    "arr": "RCTP"
+  },
+  "HKE685": {
+    "dep": "RJGG",
+    "arr": "VHHH"
+  },
+  "CAL518": {
+    "dep": "ZBAA",
+    "arr": "RCTP"
+  },
+  "EVA195": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "APJ627": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "HVN440": {
+    "dep": "VVCR",
+    "arr": "RKSI"
+  },
+  "ANA849": {
+    "dep": "RJTT",
+    "arr": "VTBS"
+  },
+  "EVA696": {
+    "dep": "PANC",
+    "arr": "KDFW"
+  },
+  "CPA566": {
+    "dep": "VHHH",
+    "arr": "VTBP"
+  },
+  "XAX504": {
+    "dep": "WMKK",
+    "arr": "RKSI"
+  },
+  "JJA2108": {
+    "dep": "RKSI",
+    "arr": "RJFU"
+  },
+  "APJ620": {
+    "dep": "RCTP",
+    "arr": "RJAA"
   }
 }
