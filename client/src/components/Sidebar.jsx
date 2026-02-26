@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useI18n } from '../hooks/useI18n';
 import {
     getAirlineLogoUrl,
@@ -34,13 +34,40 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
     const registration = metadata?.registration || plane.registration || 'N/A';
 
     // 航線 (from route)
-    const dep = route?.departureAirport || null;
-    const arr = route?.arrivalAirport || null;
+    const isLoadingRoute = route === null;
+    const dep = route?.departureAirport || (route?.noData ? 'N/A' : '...');
+    const arr = route?.arrivalAirport || (route?.noData ? 'N/A' : '...');
+
+    const [photos, setPhotos] = useState([]);
+
+    useEffect(() => {
+        let isMounted = true;
+        setPhotos([]);
+        if (icao24) {
+            fetch(`https://api.planespotters.net/pub/photos/hex/${icao24}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (isMounted && data.photos && data.photos.length > 0) {
+                        setPhotos(data.photos);
+                    }
+                })
+                .catch(err => console.error("Error fetching photo:", err));
+        }
+        return () => { isMounted = false; };
+    }, [icao24]);
 
     return (
         <div className="sidebar active">
             <div className="sb-header">
-                <h2 className="sb-title">{plane.callsign || 'UNKNOWN'}</h2>
+                <div>
+                    <h2 className="sb-title">
+                        {plane.callsign || 'UNKNOWN'}
+                        {typecode && <span className="sb-badge">{typecode}</span>}
+                    </h2>
+                    <div className="sb-subtitle">
+                        {airlineName || 'Unknown Airline'}
+                    </div>
+                </div>
                 <div className="sb-close" onClick={onClose}>×</div>
             </div>
 
@@ -49,26 +76,59 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                     <div className="alert-box visible">🚨 EMERGENCY SQUAWK: {plane.squawk}</div>
                 )}
 
-                {/* Logo */}
-                {logoUrl && (
-                    <div className="sb-logo-container">
-                        <img src={logoUrl} alt="Airline Logo" className="airline-logo" onError={(e) => (e.target.style.display = 'none')} />
+                {/* Photo Banner / Carousel */}
+                {photos.length > 0 ? (
+                    <div className="sb-photo-carousel">
+                        {photos.map((photo, index) => (
+                            <div key={index} className="sb-photo-slide">
+                                <img src={photo.thumbnail_large?.src || photo.thumbnail?.src} alt={`Aircraft ${index + 1}`} className="aircraft-photo" />
+                                <a href={photo.link} target="_blank" rel="noopener noreferrer" className="sb-photo-credit">
+                                    © {photo.photographer} <span>↗</span>
+                                </a>
+                            </div>
+                        ))}
                     </div>
+                ) : (
+                    /* Fallback to Airline Logo */
+                    logoUrl && (
+                        <div className="sb-logo-container">
+                            <img src={logoUrl} alt="Airline Logo" onError={(e) => (e.target.style.display = 'none')} />
+                        </div>
+                    )
                 )}
 
-                {/* Route (出發 → 目的地) */}
-                {(dep || arr) && (
-                    <div className="sb-route-banner">
-                        <span className="sb-route-airport">{dep || '???'}</span>
-                        <span className="sb-route-arrow">✈ →</span>
-                        <span className="sb-route-airport">{arr || '???'}</span>
+                {/* Advanced Route Card (Dark Theme Symmetric Layout) */}
+                <div className="sb-route-card">
+                    <div className="sb-route-top">
+                        <div className="sb-route-half left">
+                            <div className="sb-airport-code">{dep}</div>
+                        </div>
+                        <div className="sb-route-center">
+                            <div className="route-plane-icon">
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                    <path d="M21,16V14L13,9V3.5A1.5,1.5 0 0,0 11.5,2A1.5,1.5 0 0,0 10,3.5V9L2,14V16L10,13.5V19L8,20.5V22L11.5,21L15,22V20.5L13,19V13.5L21,16Z" />
+                                </svg>
+                            </div>
+                        </div>
+                        <div className="sb-route-half right">
+                            <div className="sb-airport-code">{arr}</div>
+                        </div>
                     </div>
-                )}
-                {!dep && !arr && route === null && (
-                    <div className="sb-route-banner sb-route-loading">
-                        Loading route...
-                    </div>
-                )}
+                    {(dep || arr || (route && route.firstSeen)) && (
+                        <div className="sb-route-bottom">
+                            <div className="sb-route-time left">
+                                <span className="time-label">ACTUAL DEP:</span>
+                                <span className="time-val">
+                                    {route?.firstSeen ? new Date(route.firstSeen * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                                </span>
+                            </div>
+                            <div className="sb-route-time right" style={{ textAlign: 'right' }}>
+                                <span className="time-label">ESTIMATED:</span>
+                                <span className="time-val">TBD</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
 
                 {/* Flight Identity */}
                 <div className="sb-section-title">{t('flightIdentity')}</div>

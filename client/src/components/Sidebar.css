@@ -22,13 +22,14 @@
     transform: translateX(0);
 }
 
+/* Header Header & Badge */
 .sb-header {
     padding: 15px 20px;
     background: rgba(0, 0, 0, 0.6);
     border-bottom: 1px solid #444;
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     flex-shrink: 0;
 }
 
@@ -37,10 +38,32 @@
     font-weight: bold;
     color: #FFDC00;
     margin: 0;
-    letter-spacing: 1px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sb-badge {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: normal;
+}
+
+.sb-subtitle {
+    font-size: 12px;
+    color: #ccc;
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.sb-fr24-link {
+    display: none;
+    /* Removed as requested */
 }
 
 .sb-close {
@@ -52,6 +75,7 @@
     font-weight: bold;
     flex-shrink: 0;
     margin-left: 12px;
+    margin-top: -5px;
 }
 
 .sb-close:hover {
@@ -60,15 +84,20 @@
 }
 
 .sb-content {
-    padding: 20px;
+    padding: 0;
+    /* Removing padding to allow full-width photos */
     overflow-y: auto;
     flex-grow: 1;
     -webkit-overflow-scrolling: touch;
 }
 
+.alert-box {
+    margin: 15px;
+}
+
 .sb-logo-container {
     text-align: center;
-    margin-bottom: 15px;
+    margin: 15px;
     padding: 12px;
     background: rgba(255, 255, 255, 0.85);
     border-radius: 8px;
@@ -81,36 +110,171 @@
     object-fit: contain;
 }
 
-/* Route Banner (DEP → ARR) */
-.sb-route-banner {
+/* Photo Carousel */
+.sb-photo-carousel {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    width: 100%;
+    height: 180px;
+    background: #111;
+    border-bottom: 2px solid #FFDC00;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}
+
+.sb-photo-carousel::-webkit-scrollbar {
+    height: 4px;
+}
+
+.sb-photo-carousel::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+}
+
+.sb-photo-slide {
+    flex: 0 0 100%;
+    scroll-snap-align: start;
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.aircraft-photo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.sb-photo-credit {
+    position: absolute;
+    bottom: 5px;
+    left: 10px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 10px;
+    text-decoration: none;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 2px 6px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.sb-photo-credit:hover {
+    color: #fff;
+    background: rgba(0, 0, 0, 0.8);
+}
+
+/* Advanced Route Card (Dark Theme) */
+.sb-route-card {
+    background: rgba(255, 255, 255, 0.08);
+    /* Dark glass */
+    color: #fff;
+    margin: 15px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.sb-route-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 24px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    position: relative;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.sb-route-half {
+    flex: 1;
+    z-index: 2;
+}
+
+.sb-route-half.left {
+    text-align: left;
+}
+
+.sb-route-half.right {
+    text-align: right;
+}
+
+.sb-airport-code {
+    font-size: 38px;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1;
+    letter-spacing: 1px;
+}
+
+.sb-airport-name {
+    font-size: 10px;
+    color: #aaa;
+    margin-top: 4px;
+}
+
+.sb-route-center {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    padding: 10px;
-    margin-bottom: 15px;
-    background: rgba(0, 191, 255, 0.08);
-    border: 1px solid rgba(0, 191, 255, 0.3);
-    border-radius: 8px;
-    font-size: 16px;
+    z-index: 1;
+    width: 100%;
+}
+
+.route-plane-icon {
+    font-size: 24px;
+    color: #FFDC00;
+    /* Removed transform: rotate(90deg); */
+    background: #111;
+    z-index: 2;
+    padding: 6px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sb-route-bottom {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 12px;
+}
+
+.sb-route-time {
+    display: flex;
+    flex-direction: column;
+}
+
+.time-label {
+    color: #aaa;
+    font-size: 10px;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+}
+
+.time-val {
     font-weight: bold;
-}
-
-.sb-route-airport {
-    color: #00BFFF;
-    font-size: 18px;
-    letter-spacing: 2px;
-}
-
-.sb-route-arrow {
     color: #FFDC00;
     font-size: 14px;
 }
 
-.sb-route-loading {
-    color: #666;
-    font-size: 12px;
-    font-weight: normal;
+/* Generic inner padding */
+.sb-section-title,
+.sb-data-row,
+.route-btn {
+    margin-left: 15px;
+    margin-right: 15px;
 }
 
 .sb-section-title {

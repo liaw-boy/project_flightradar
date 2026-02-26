@@ -57,8 +57,8 @@ export const AIRPORTS = [
 // ==========================================
 const AIRLINE_DB = {
     // Taiwan
-    'CAL': 'China Airlines', 'EVA': 'EVA Air', 'UIA': 'Mandarin Airlines', 'TNA': 'TransAsia Airways',
-    'TTW': 'Tigerair Taiwan', 'SJX': 'StarLux Airlines', 'FEA': 'Far Eastern Air Transport',
+    'CAL': 'China Airlines', 'EVA': 'EVA Air', 'MDA': 'Mandarin Airlines', 'TNA': 'TransAsia Airways',
+    'TTW': 'Tigerair Taiwan', 'SJX': 'StarLux Airlines', 'FEA': 'Far Eastern Air Transport', 'UIA': 'Mandarin Airlines',
     // Japan
     'JAL': 'Japan Airlines', 'ANA': 'All Nippon Airways', 'JJP': 'Jetstar Japan',
     'APJ': 'Peach Aviation', 'SFJ': 'StarFlyer', 'ADO': 'Air Do', 'SNJ': 'Solaseed Air',
@@ -106,6 +106,38 @@ const CATEGORY_NAMES = {
     9: 'Glider', 10: 'Lighter-than-air', 11: 'Skydiver',
     12: 'Ultralight', 14: 'UAV', 15: 'Space Vehicle',
     17: 'Surface Emergency', 18: 'Surface Service', 19: 'Point Obstacle',
+};
+
+// ==========================================
+// 航空公司 Logo Map (使用 IATA 縮寫)
+// ==========================================
+const AIRLINE_LOGOS = {
+    // Taiwan
+    'CAL': 'CI', 'EVA': 'BR', 'MDA': 'AE', 'SJX': 'JX', 'TTW': 'IT', 'FEA': 'FE',
+    // Japan
+    'JAL': 'JL', 'ANA': 'NH', 'JJP': 'GK', 'APJ': 'MM', 'SFJ': '7G', 'ADO': 'HD', 'SNJ': '6J',
+    // Korea
+    'KAL': 'KE', 'AAR': 'OZ', 'JNA': 'LJ', 'TWB': 'TW', 'JJA': '7C', 'ABL': 'BX', 'ESR': 'ZE',
+    // China
+    'CCA': 'CA', 'CES': 'MU', 'CSN': 'CZ', 'HXA': 'HX', 'CPA': 'CX', 'HDA': 'LD', 'SHQ': '9C',
+    'CSZ': 'ZH', 'CDG': 'SC', 'CHH': 'HU',
+    // Southeast Asia
+    'SIA': 'SQ', 'THA': 'TG', 'MAS': 'MH', 'AXM': 'AK', 'GIA': 'GA', 'PAL': 'PR',
+    'CEB': '5J', 'VJC': 'VJ', 'HVN': 'VN', 'JSA': '3K', 'SLK': 'MI', 'SCO': 'TR',
+    // Middle East
+    'UAE': 'EK', 'ETD': 'EY', 'QTR': 'QR', 'THY': 'TK', 'SVA': 'SV', 'GFA': 'GF',
+    // Europe
+    'BAW': 'BA', 'DLH': 'LH', 'AFR': 'AF', 'KLM': 'KL', 'SAS': 'SK', 'FIN': 'AY',
+    'SWR': 'LX', 'AUA': 'OS', 'TAP': 'TP', 'IBE': 'IB', 'AZA': 'AZ', 'LOT': 'LO',
+    'EZY': 'U2', 'RYR': 'FR', 'WZZ': 'W6',
+    // Americas
+    'AAL': 'AA', 'DAL': 'DL', 'UAL': 'UA', 'SWA': 'WN', 'JBU': 'B6', 'ASA': 'AS',
+    'ACA': 'AC', 'TAM': 'LA', 'AVA': 'AV',
+    // Oceania
+    'QFA': 'QF', 'ANZ': 'NZ', 'JST': 'JQ', 'VOZ': 'VA',
+    // Cargo
+    'FDX': 'FX', 'UPS': '5X', 'GTI': '5Y', 'CLX': 'CV', 'CKS': 'K4', 'ABW': 'RU',
+    'AHK': 'AHK', 'CAO': 'CA',
 };
 
 // ==========================================
@@ -198,6 +230,22 @@ export function getAltitudeColor(altitude, onGround, isEmergency) {
 
 /**
  * 產生飛機 SVG HTML
+ * OpenSky Categories:
+ * 1: No ADS-B Emitter Category Info
+ * 2: Light (< 15500 lbs)
+ * 3: Small (15500 to 75000 lbs)
+ * 4: Large (75000 to 300000 lbs)
+ * 5: High Vortex Large
+ * 6: Heavy (> 300000 lbs)
+ * 7: High Performance (> 5g acceleration and > 400 kts)
+ * 8: Rotorcraft (Helicopter)
+ * 9: Glider / Sailplane
+ * 10: Lighter-than-air
+ * 14: UAV (Drone)
+ * 15: Space / Trans-atmospheric
+ * 16: Surface Vehicle - Emergency
+ * 17: Surface Vehicle - Service
+ * 18: Point Obstacle
  */
 export function createPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category) {
     const color = getAltitudeColor(altitude, onGround, isEmergency);
@@ -205,17 +253,50 @@ export function createPlaneSVG(heading, altitude, isSelected, onGround, isEmerge
     const glow = isSelected ? 'drop-shadow(0 0 15px #FFDC00)' : `drop-shadow(0 0 6px ${color})`;
     const planeColor = isSelected ? '#FFDC00' : color;
 
-    // Rotorcraft (helicopter icon)
-    const isRotorcraft = category === 8;
-    const path = isRotorcraft
-        ? `M12,2A2,2 0 0,1 14,4V6H16V4H18V6.5L14,10.5V12H18L20,14V15H18V17A2,2 0 0,1 16,19H14V21H12V19H10A2,2 0 0,1 8,17V15H6V14L8,12V10.5L4,6.5V4H6V6H8V4A2,2 0 0,1 10,2H12Z`
-        : `M21,16V14L13,9V3.5A1.5,1.5 0 0,0 11.5,2A1.5,1.5 0 0,0 10,3.5V9L2,14V16L10,13.5V19L8,20.5V22L11.5,21L15,22V20.5L13,19V13.5L21,16Z`;
+    // SVG paths centered in a 24x24 viewBox pointing straight UP (to be rotated by CSS)
+    const SVG_PATHS = {
+        // Standard Jet (Default / Cat 4 large)
+        default: 'M21,16V14L13,9V3.5A1.5,1.5 0 0,0 11.5,2A1.5,1.5 0 0,0 10,3.5V9L2,14V16L10,13.5V19L8,20.5V22L11.5,21L15,22V20.5L13,19V13.5L21,16Z',
+        // Heavy / Quad Engine Jet (Cat 5, 6)
+        heavy: 'M13.5,9L21.5,15V17L13.5,13.5V19.5L16.5,21.5V23L12,22L7.5,23V21.5L10.5,19.5V13.5L2.5,17V15L10.5,9V3.5C10.5,2 11.5,1 12,1C12.5,1 13.5,2 13.5,3.5Z',
+        // Light / Small Propeller (Cat 2, 3)
+        light: 'M13.5,9.5L20,13.5V15L13.5,12V18.5L15.5,20.5V22L12,21L8.5,22V20.5L10.5,18.5V12L4,15V13.5L10.5,9.5V3.5C10.5,2.5 11,2 12,2C13,2 13.5,2.5 13.5,3.5Z',
+        // Rotorcraft / Helicopter (Cat 8)
+        rotorcraft: 'M12,2A2,2 0 0,1 14,4V6H16V4H18V6.5L14,10.5V12H18L20,14V15H18V17A2,2 0 0,1 16,19H14V21H12V19H10A2,2 0 0,1 8,17V15H6V14L8,12V10.5L4,6.5V4H6V6H8V4A2,2 0 0,1 10,2H12Z',
+        // Glider / Sailplane (Cat 9) - very long thin wings
+        glider: 'M12,2 C13,2 13.5,3 13.5,4 V8 L23.5,9 V10 L13.5,11 V18 L15,19 V20 L12,19 L9,20 V19 L10.5,18 V11 L0.5,10 V9 L10.5,8 V4 C10.5,3 11,2 12,2 Z',
+        // UAV / Drone Quadcopter (Cat 14)
+        drone: 'M12,10 A2,2 0 1,0 12,14 A2,2 0 1,0 12,10 M4.5,2 A2.5,2.5 0 1,1 4.5,7 A2.5,2.5 0 1,1 4.5,2 M19.5,2 A2.5,2.5 0 1,1 19.5,7 A2.5,2.5 0 1,1 19.5,2 M4.5,17 A2.5,2.5 0 1,1 4.5,22 A2.5,2.5 0 1,1 4.5,17 M19.5,17 A2.5,2.5 0 1,1 19.5,22 A2.5,2.5 0 1,1 19.5,17 M6.5,6 L10,10.5 M17.5,6 L14,10.5 M6.5,18 L10,13.5 M17.5,18 L14,13.5',
+        // Ground Vehicle (Cat 16, 17)
+        ground: 'M5,11 V19 H19 V11 Z M7,13 H17 V17 H7 Z M10,5 V11 H14 V5 Z M8,19 V21 H10 V19 M14,19 V21 H16 V19'
+    };
+
+    let selectedPath = SVG_PATHS.default;
+
+    // Explicit Ground overrides
+    if (onGround) {
+        // If it's a known service vehicle category or literally on the ground
+        if (category === 16 || category === 17) selectedPath = SVG_PATHS.ground;
+    }
+
+    if (category === 2 || category === 3) selectedPath = SVG_PATHS.light;
+    else if (category === 5 || category === 6) selectedPath = SVG_PATHS.heavy;
+    else if (category === 8) selectedPath = SVG_PATHS.rotorcraft;
+    else if (category === 9) selectedPath = SVG_PATHS.glider;
+    else if (category === 14) selectedPath = SVG_PATHS.drone;
+    else if (category === 16 || category === 17) selectedPath = SVG_PATHS.ground;
+
+    // Scale drone or small things up slightly or down so they match the visual weight of the jets
+    let scaleTransform = '';
+    if (selectedPath === SVG_PATHS.drone) scaleTransform = 'scale(0.85) translate(2, 2)';
+    if (selectedPath === SVG_PATHS.heavy) scaleTransform = 'scale(1.1) translate(-1, -1)';
 
     const svg = `
     <svg viewBox="0 0 24 24" width="${size}" height="${size}" style="filter: ${glow};">
-      <path fill="${planeColor}"
-            d="${path}"
-            transform="rotate(${heading} 12 12)" />
+      <g transform="rotate(${heading} 12 12)">
+         <path fill="${planeColor}" stroke="${isSelected ? '#fff' : 'none'}" stroke-width="${isSelected ? 0.5 : 0}"
+               d="${selectedPath}" transform="${scaleTransform}" />
+      </g>
     </svg>
   `;
     return { svg, size };

@@ -1,0 +1,86 @@
+{
+  "CAL100": {
+    "dep": "RCTP",
+    "arr": "RJAA"
+  },
+  "CAL101": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "CAL104": {
+    "dep": "RCTP",
+    "arr": "RJAA"
+  },
+  "CAL105": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "CAL156": {
+    "dep": "RCTP",
+    "arr": "RJBB"
+  },
+  "CAL157": {
+    "dep": "RJBB",
+    "arr": "RCTP"
+  },
+  "EVA192": {
+    "dep": "TSA",
+    "arr": "HND"
+  },
+  "EVA191": {
+    "dep": "HND",
+    "arr": "TSA"
+  },
+  "EVA198": {
+    "dep": "RCTP",
+    "arr": "RJAA"
+  },
+  "EVA197": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "SJX800": {
+    "dep": "RCTP",
+    "arr": "RJAA"
+  },
+  "SJX801": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "TTW204": {
+    "dep": "RCTP",
+    "arr": "RJAA"
+  },
+  "TTW205": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "ICV4093": {
+    "dep": "VHHH",
+    "arr": "RCTP"
+  },
+  "CAL5118": {
+    "dep": "RCTP",
+    "arr": "KLAX"
+  },
+  "EVA12": {
+    "dep": "RCTP",
+    "arr": "KLAX"
+  },
+  "EVA11": {
+    "dep": "KLAX",
+    "arr": "RCTP"
+  },
+  "MDA345": {
+    "dep": "MZG",
+    "arr": "KHH"
+  },
+  "UAL871": {
+    "dep": "KSFO",
+    "arr": "RCTP"
+  },
+  "CAL131": {
+    "dep": "RJCC",
+    "arr": "RCTP"
+  }
+}

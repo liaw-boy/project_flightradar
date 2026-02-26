@@ -343,11 +343,20 @@ export default function MapView({
         }
 
         if (trackPoints && trackPoints.length > 1) {
-            trackLineRef.current = L.polyline(trackPoints, {
+            // Dynamically append the plane's live position to the static history track
+            // so the line doesn't fall behind as the plane moves.
+            const livePoints = [...trackPoints];
+            if (selectedIcao24 && planesDict[selectedIcao24]) {
+                const livePlane = planesDict[selectedIcao24];
+                livePoints.push([livePlane.lat, livePlane.lng]);
+            }
+
+            trackLineRef.current = L.polyline(livePoints, {
                 color: '#FFDC00',
                 weight: 3,
                 opacity: 0.8,
                 dashArray: '10, 5',
+                lineCap: 'round',
             }).addTo(map);
         }
     }, [trackPoints, planesDict, selectedIcao24]);

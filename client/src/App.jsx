@@ -94,9 +94,10 @@ export default function App() {
                 .then(data => { if (!data.noData) setSelectedMetadata(data); })
                 .catch(() => { });
 
-            fetch(`/api/route/${icao24}`)
+            const callsignQuery = plane.callsign ? `?callsign=${plane.callsign.trim()}` : '';
+            fetch(`/api/route/${icao24}${callsignQuery}`)
                 .then(r => r.json())
-                .then(data => { if (!data.noData) setSelectedRoute(data); })
+                .then(data => { setSelectedRoute(data); })
                 .catch(() => { });
         },
         [fetchTrack, showNotification]

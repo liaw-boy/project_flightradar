@@ -446,26 +446,90 @@ app.post('/api/metadata/batch', async function (req, res) {
 });
 
 // ==========================================
-// 航班來源/目的地 API (flights/aircraft)
+// 航班來源/目的地 API (flights/aircraft & routes)
+// 實作: 固定航班航線字典 (Flight Route Database)
 // ==========================================
-const routeCache = new Map(); // icao24 -> { data, timestamp }
+const ROUTES_CACHE_FILE = path.join(__dirname, 'routes-cache.json');
+let routesDatabase = {};
+
+try {
+    if (fs.existsSync(ROUTES_CACHE_FILE)) {
+        routesDatabase = JSON.parse(fs.readFileSync(ROUTES_CACHE_FILE, 'utf8'));
+        console.log(`🗺️ [ROUTE DB] Loaded ${Object.keys(routesDatabase).length} routes from local dictionary`);
+    }
+} catch (e) {
+    console.error('❌ [ROUTE DB] Failed to load routes-cache.json:', e.message);
+}
+
+function saveRoutesDatabase() {
+    try {
+        fs.writeFileSync(ROUTES_CACHE_FILE, JSON.stringify(routesDatabase, null, 2));
+    } catch (e) {
+        console.error('❌ Error saving routes-cache.json:', e.message);
+    }
+}
+
+const routeCache = new Map(); // icao24 -> { data, timestamp } (動態航線快取)
 const ROUTE_CACHE_TTL = 1800000; // 30 分鐘
 
 app.get('/api/route/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
+    const callsign = req.query.callsign ? req.query.callsign.trim().toUpperCase() : '';
 
-    // 檢查快取
+    // 1. 優先查詢本地「靜態航班航線字典」 (Fixed Flight Route Database)
+    if (callsign && routesDatabase[callsign]) {
+        console.log(`🗺️ [ROUTE DB] Local hit for ${callsign}: ${routesDatabase[callsign].dep} -> ${routesDatabase[callsign].arr}`);
+        return res.json({
+            icao24,
+            callsign,
+            departureAirport: routesDatabase[callsign].dep,
+            arrivalAirport: routesDatabase[callsign].arr,
+            fromStaticDB: true
+        });
+    }
+
+    // 2. 檢查記憶體動態快取
     const cached = routeCache.get(icao24);
     if (cached && (Date.now() - cached.timestamp < ROUTE_CACHE_TTL)) {
         return res.json(cached.data);
     }
 
     try {
+        // 3. 嘗試使用 OpenSky 輕量化 Route API (使用 callsign 取得表定航線)
+        if (callsign) {
+            console.log(`✈️ [ROUTE] Fetching static route for callsign: ${callsign}...`);
+            const url = `https://api.opensky-network.org/api/routes?callsign=${callsign}`;
+            const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+
+            if (response.ok) {
+                const routeData = await response.json();
+                if (routeData && routeData.route && routeData.route.length >= 2) {
+                    routesDatabase[callsign] = {
+                        dep: routeData.route[0],
+                        arr: routeData.route[1]
+                    };
+                    saveRoutesDatabase();
+                    console.log(`📦 [ROUTE DB] Cached new scheduled route: ${callsign} -> ${routesDatabase[callsign].dep}-${routesDatabase[callsign].arr}`);
+
+                    const result = {
+                        icao24,
+                        callsign,
+                        departureAirport: routeData.route[0],
+                        arrivalAirport: routeData.route[1],
+                        fromStaticDB: false
+                    };
+                    routeCache.set(icao24, { data: result, timestamp: Date.now() });
+                    return res.json(result);
+                }
+            }
+        }
+
+        // 4. 重度回退：如果 API 找不到表定航班，使用原來的 flights/aircraft 抓這台飛機過去 24 小時紀錄
+        console.log(`✈️ [ROUTE] Fallback to historical flight for ${icao24}...`);
         const now = Math.floor(Date.now() / 1000);
         const begin = now - 86400; // 過去 24 小時
         const url = `https://opensky-network.org/api/flights/aircraft?icao24=${icao24}&begin=${begin}&end=${now}`;
 
-        console.log(`✈️ [ROUTE] Fetching route for ${icao24}...`);
         const headers = await getAuthHeaders();
         const response = await fetch(url, {
             headers,
@@ -474,37 +538,39 @@ app.get('/api/route/:icao24', async (req, res) => {
 
         if (!response.ok) {
             if (response.status === 429) {
-                return res.json({ icao24, noData: true, reason: 'rate_limited' });
+                return res.json({ icao24, callsign, noData: true, reason: 'rate_limited' });
             }
-            return res.json({ icao24, noData: true });
+            return res.json({ icao24, callsign, noData: true });
         }
 
         const flights = await response.json();
 
         if (!flights || flights.length === 0) {
-            const noDataResult = { icao24, noData: true };
+            const noDataResult = { icao24, callsign, noData: true };
             routeCache.set(icao24, { data: noDataResult, timestamp: Date.now() });
             return res.json(noDataResult);
         }
 
-        // 取最新一筆航班
-        const latest = flights[flights.length - 1];
+        // 取最新一筆已知的出發/抵達機場
+        const latest = flights.reverse().find(f => f.estDepartureAirport || f.estArrivalAirport) || flights[0];
         const routeData = {
             icao24,
-            callsign: (latest.callsign || '').trim(),
+            callsign: (latest.callsign || callsign).trim(),
             departureAirport: latest.estDepartureAirport || null,
             arrivalAirport: latest.estArrivalAirport || null,
             firstSeen: latest.firstSeen,
             lastSeen: latest.lastSeen,
+            fromHistorical: true
         };
 
+        // 如果從歷史抓到了一組完美的起迄，也可以選擇記錄進靜態庫 (可選，這裡先不放進靜態庫確保準確率)
         routeCache.set(icao24, { data: routeData, timestamp: Date.now() });
-        console.log(`✈️ [ROUTE] ${icao24}: ${routeData.departureAirport} → ${routeData.arrivalAirport}`);
+        console.log(`✈️ [ROUTE] Historical fallback ${icao24}: ${routeData.departureAirport} → ${routeData.arrivalAirport}`);
         res.json(routeData);
 
     } catch (error) {
-        console.error(`❌ [ROUTE ERROR] ${icao24}: ${error.message}`);
-        res.json({ icao24, noData: true, error: error.message });
+        console.error(`❌ [ROUTE ERROR] ${icao24} (${callsign}): ${error.message}`);
+        res.json({ icao24, callsign, noData: true, error: error.message });
     }
 });
 
