@@ -18,6 +18,8 @@ export default function MapView({
     onDeselectPlane,
     onMapReady,
     onMapMove,
+    t,
+    translateMetar,
 }) {
     const mapContainerRef = useRef(null);
     const mapRef = useRef(null);
@@ -45,34 +47,39 @@ export default function MapView({
             const data = await res.json();
 
             if (data.error) {
-                popup.setContent(`<div class="ap-card"><div class="ap-name">${ap.name}</div><div class="ap-icao">${ap.icao}</div><div class="ap-no-data">No weather data available</div></div>`);
+                popup.setContent(`<div class="ap-card"><div class="ap-name">${ap.name}</div><div class="ap-icao">${ap.icao}</div><div class="ap-no-data">${t?.('weatherData') || 'No weather data available'}</div></div>`);
                 return;
             }
 
-            const windDir = data.wdir === 'VRB' ? 'Variable' : `${data.wdir}°`;
+            const windDir = data.wdir === 'VRB' ? (translateMetar?.('Variable') || 'Variable') : `${data.wdir}°`;
             const windSpd = data.wspd || 0;
+            const windDisplay = translateMetar?.(`${windSpd}kt`) || `${windSpd}kt`;
             const fltCatClass = data.fltCat === 'VFR' ? 'ap-vfr' : data.fltCat === 'MVFR' ? 'ap-mvfr' : 'ap-ifr';
-            const cloudStr = data.clouds?.map(c => `${c.cover} ${c.base}ft`).join(', ') || '--';
+            let cloudStr = data.clouds?.map(c => `${c.cover} ${c.base}ft`).join(', ') || '--';
+            cloudStr = translateMetar?.(cloudStr) || cloudStr;
             const elevM = data.elev ? Math.round(data.elev * 0.3048) : '--';
+            const elevLabel = translateMetar?.('Elev') || 'Elev';
+            const visibDisplay = translateMetar?.(`${data.visib ?? '--'} SM`) || `${data.visib ?? '--'} SM`;
+            const altimDisplay = translateMetar?.(`${data.altim ?? '--'} hPa`) || `${data.altim ?? '--'} hPa`;
 
             popup.setContent(`
                         <div class="ap-card">
                             <div class="ap-name">${ap.name}</div>
-                            <div class="ap-icao">${ap.icao} · Elev ${data.elev || '--'}ft (${elevM}m)</div>
+                            <div class="ap-icao">${ap.icao} · ${elevLabel} ${data.elev || '--'}ft (${elevM}m)</div>
                             <div class="ap-fltcat ${fltCatClass}">${data.fltCat || '--'}</div>
                             <div class="ap-grid">
                                 <div class="ap-item"><span class="ap-label">🌡</span><span class="ap-val">${data.temp ?? '--'}°C</span></div>
                                 <div class="ap-item"><span class="ap-label">💧</span><span class="ap-val">${data.dewp ?? '--'}°C</span></div>
-                                <div class="ap-item"><span class="ap-label">🌬</span><span class="ap-val">${windDir} ${windSpd}kt</span></div>
-                                <div class="ap-item"><span class="ap-label">👁</span><span class="ap-val">${data.visib ?? '--'} SM</span></div>
+                                <div class="ap-item"><span class="ap-label">🌬</span><span class="ap-val">${windDir} ${windDisplay}</span></div>
+                                <div class="ap-item"><span class="ap-label">👁</span><span class="ap-val">${visibDisplay}</span></div>
                                 <div class="ap-item"><span class="ap-label">☁</span><span class="ap-val">${cloudStr}</span></div>
-                                <div class="ap-item"><span class="ap-label">📊</span><span class="ap-val">${data.altim ?? '--'} hPa</span></div>
+                                <div class="ap-item"><span class="ap-label">📊</span><span class="ap-val">${altimDisplay}</span></div>
                             </div>
                             <div class="ap-metar">${data.rawOb || '--'}</div>
                         </div>
                     `);
         } catch (err) {
-            popup.setContent(`<div class="ap-card"><div class="ap-name">${ap.name}</div><div class="ap-no-data">Failed to load weather</div></div>`);
+            popup.setContent(`<div class="ap-card"><div class="ap-name">${ap.name}</div><div class="ap-no-data">${t?.('weatherFailed') || 'Failed to load weather'}</div></div>`);
         }
     };
 

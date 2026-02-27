@@ -8,9 +8,11 @@ import NotificationContainer from './components/NotificationContainer';
 import MapView from './components/MapView';
 import { useFlightData } from './hooks/useFlightData';
 import { useNotification } from './hooks/useNotification';
+import { useI18n } from './hooks/useI18n';
 import './App.css';
 
 export default function App() {
+    const { t, translateMetar } = useI18n();
     const [loading, setLoading] = useState(true);
     const [selectedIcao24, setSelectedIcao24] = useState(null);
     const [trackPoints, setTrackPoints] = useState([]);
@@ -129,6 +131,8 @@ export default function App() {
                 onDeselectPlane={handleDeselectPlane}
                 onMapReady={handleMapReady}
                 onMapMove={handleMapMove}
+                t={t}
+                translateMetar={translateMetar}
             />
 
             <SearchBar

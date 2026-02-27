@@ -36,7 +36,7 @@ export default function Dashboard({
         <div className="dashboard">
             <div className="title-container">
                 <div className={`live-dot ${isOnline ? '' : 'offline'}`} />
-                <h2>{t('radarSystem')} <span style={{ fontSize: '0.6em', color: '#01FF70', opacity: 0.8, marginLeft: '8px', verticalAlign: 'middle', border: '1px solid rgba(1,255,112,0.3)', padding: '2px 4px', borderRadius: '4px' }}>v1.1.0</span></h2>
+                <h2>{t('radarSystem')} <span style={{ fontSize: '0.6em', color: '#01FF70', opacity: 0.8, marginLeft: '8px', verticalAlign: 'middle', border: '1px solid rgba(1,255,112,0.3)', padding: '2px 4px', borderRadius: '4px' }}>v1.1.1</span></h2>
                 <button className="lang-toggle" onClick={toggleLang}>
                     {lang === 'en' ? 'EN/中' : '中/EN'}
                 </button>
@@ -123,7 +123,7 @@ export default function Dashboard({
                             <div className="account-header">
                                 <span className="account-name">ID: {acc.user?.split('-')[0] || `ACC-${index + 1}`}</span>
                                 <span className={`account-status ${isLimited ? 'danger' : 'healthy'}`}>
-                                    {isLimited ? 'RESTRICTED' : 'HEALTHY'}
+                                    {isLimited ? t('restricted') : t('active')}
                                 </span>
                             </div>
                             <div className="account-body">
@@ -144,21 +144,21 @@ export default function Dashboard({
                                 </div>
                                 <div className="account-details">
                                     <div className="detail-row">
-                                        <span>QUOTA:</span>
+                                        <span>{t('quota')}</span>
                                         <span style={{ color: ringColor }}>
                                             {isLimited ? '0' : (acc.remainingCredits ?? '--')}
                                         </span>
                                     </div>
                                     {isLimited ? (
                                         <div className="detail-row">
-                                            <span style={{ color: '#FFDC00' }}>UNLOCKS:</span>
+                                            <span style={{ color: '#FFDC00' }}>{t('unlocks')}</span>
                                             <span style={{ color: '#FFDC00' }}>
                                                 {new Date(acc.unlockTime).toLocaleTimeString('en-US', { hour12: false })}
                                             </span>
                                         </div>
                                     ) : (
                                         <div className="detail-row">
-                                            <span>RESETS:</span>
+                                            <span>{t('resets')}</span>
                                             <span style={{ color: 'rgba(255,255,255,0.7)' }}>{resetTimeString}</span>
                                         </div>
                                     )}

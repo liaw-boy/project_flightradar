@@ -837,7 +837,7 @@ app.listen(PORT, () => {
     console.log('╔══════════════════════════════════════════╗');
     console.log('║   ✈️  Flight Radar Backend Server        ║');
     console.log(`║   🌐 http://localhost:${PORT}               ║`);
-    console.log(`║   📁 Serving: ./public                   ║`);
+    console.log(`║   📁 Serving: ./public-react             ║`);
     console.log(`║   🔑 Auth: ${process.env.OPENSKY_USER ? 'Enabled' : 'Disabled (no credentials)'}             ║`);
     console.log('╚══════════════════════════════════════════╝');
     console.log('');

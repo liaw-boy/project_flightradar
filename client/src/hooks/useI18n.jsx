@@ -1,6 +1,24 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 
 /**
+ * METAR 專用氣象術語字典
+ */
+const metarDict = {
+    cn: {
+        'FEW': '疏雲',
+        'SCT': '散雲',
+        'BKN': '裂雲',
+        'OVC': '密雲',
+        'CAVOK': '晴空萬里',
+        'kt': '節',
+        'SM': '哩',
+        'hPa': '百帕',
+        'Variable': '微風不定',
+        'Elev': '標高'
+    }
+};
+
+/**
  * 多語言翻譯資料庫 (EN / 中文)
  */
 const translations = {
@@ -18,6 +36,12 @@ const translations = {
         apiCalls: '📊 API CALLS',
         rateLimits: '⚠️ RATE LIMITS',
         dbCache: '💾 DB CACHE',
+        quota: 'QUOTA:',
+        unlocks: 'UNLOCKS:',
+        resets: 'RESETS:',
+        limitsHit: 'LIMITS HIT:',
+        restricted: 'RESTRICTED',
+        active: 'ACTIVE',
         // Filters
         filters: '🎛️ FILTERS',
         showGround: 'Show Ground',
@@ -53,6 +77,9 @@ const translations = {
         searchPlaceholder: '🔍 Search flight (eg: CX123)',
         // Notification
         radarStarted: '🚀 Radar system started',
+        // Weather
+        weatherData: 'No weather data available',
+        weatherFailed: 'Failed to load weather',
     },
     cn: {
         // Dashboard
@@ -68,6 +95,12 @@ const translations = {
         apiCalls: '📊 API 呼叫',
         rateLimits: '⚠️ 限流次數',
         dbCache: '💾 快取數量',
+        quota: '剩餘配額:',
+        unlocks: '解鎖時間:',
+        resets: '重置時間:',
+        limitsHit: '限流累計:',
+        restricted: '存取受限',
+        active: '正常運作',
         // Filters
         filters: '🎛️ 篩選器',
         showGround: '顯示地面',
@@ -103,6 +136,9 @@ const translations = {
         searchPlaceholder: '🔍 搜尋航班號 (例: CX123)',
         // Notification
         radarStarted: '🚀 雷達系統已啟動',
+        // Weather
+        weatherData: '無氣象觀測資料',
+        weatherFailed: '氣象資料載入失敗',
     },
 };
 
@@ -120,8 +156,19 @@ export function I18nProvider({ children }) {
         [lang]
     );
 
+    const translateMetar = useCallback((str) => {
+        if (lang === 'en' || !str) return str;
+        let translated = str;
+        const dict = metarDict.cn;
+        for (const [key, val] of Object.entries(dict)) {
+            // Use regex to replace exact whole words to avoid partial matching issues
+            translated = translated.replace(new RegExp(`\\b${key}\\b`, 'g'), val);
+        }
+        return translated;
+    }, [lang]);
+
     return (
-        <I18nContext.Provider value={{ lang, toggleLang, t }}>
+        <I18nContext.Provider value={{ lang, toggleLang, t, translateMetar }}>
             {children}
         </I18nContext.Provider>
     );
