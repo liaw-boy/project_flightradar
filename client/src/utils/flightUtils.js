@@ -5,58 +5,25 @@
 const EARTH_RADIUS = 6371000;
 
 // ==========================================
-// 全球主要機場資料庫
+// 全球主要機場資料庫 (現在由伺服器動態提供)
 // ==========================================
-export const AIRPORTS = [
-    { icao: 'RCTP', name: 'Taoyuan Intl', lat: 25.0777, lng: 121.2325, type: 'large', timezone: 'Asia/Taipei' },
-    { icao: 'RCSS', name: 'Songshan', lat: 25.0694, lng: 121.5525, type: 'medium', timezone: 'Asia/Taipei' },
-    { icao: 'RCKH', name: 'Kaohsiung Intl', lat: 22.5771, lng: 120.3500, type: 'large', timezone: 'Asia/Taipei' },
-    { icao: 'RCMQ', name: 'Taichung', lat: 24.2647, lng: 120.6208, type: 'medium', timezone: 'Asia/Taipei' },
-    { icao: 'RCNN', name: 'Tainan', lat: 22.9504, lng: 120.2057, type: 'small', timezone: 'Asia/Taipei' },
-    { icao: 'RCFN', name: 'Hualien', lat: 24.0231, lng: 121.6162, type: 'small', timezone: 'Asia/Taipei' },
-    { icao: 'RCQC', name: 'Makung', lat: 23.5687, lng: 119.6283, type: 'small', timezone: 'Asia/Taipei' },
-    { icao: 'RJTT', name: 'Tokyo Haneda', lat: 35.5533, lng: 139.7811, type: 'large', timezone: 'Asia/Tokyo' },
-    { icao: 'RJAA', name: 'Tokyo Narita', lat: 35.7647, lng: 140.3864, type: 'large', timezone: 'Asia/Tokyo' },
-    { icao: 'RJBB', name: 'Kansai Intl', lat: 34.4347, lng: 135.2441, type: 'large', timezone: 'Asia/Tokyo' },
-    { icao: 'RJFF', name: 'Fukuoka', lat: 33.5859, lng: 130.4514, type: 'large', timezone: 'Asia/Tokyo' },
-    { icao: 'RJCC', name: 'Sapporo CTS', lat: 42.7752, lng: 141.6925, type: 'large', timezone: 'Asia/Tokyo' },
-    { icao: 'ROAH', name: 'Naha Okinawa', lat: 26.1958, lng: 127.6459, type: 'medium', timezone: 'Asia/Tokyo' },
-    { icao: 'RKSI', name: 'Seoul Incheon', lat: 37.4602, lng: 126.4407, type: 'large', timezone: 'Asia/Seoul' },
-    { icao: 'RKSS', name: 'Seoul Gimpo', lat: 37.5583, lng: 126.7906, type: 'medium', timezone: 'Asia/Seoul' },
-    { icao: 'RKPK', name: 'Busan Gimhae', lat: 35.1794, lng: 128.9382, type: 'large', timezone: 'Asia/Seoul' },
-    { icao: 'ZBAA', name: 'Beijing Capital', lat: 40.0801, lng: 116.5846, type: 'large', timezone: 'Asia/Shanghai' },
-    { icao: 'ZSPD', name: 'Shanghai Pudong', lat: 31.1434, lng: 121.8052, type: 'large', timezone: 'Asia/Shanghai' },
-    { icao: 'ZSSS', name: 'Shanghai Hongqiao', lat: 31.1979, lng: 121.3362, type: 'large', timezone: 'Asia/Shanghai' },
-    { icao: 'ZGGG', name: 'Guangzhou Baiyun', lat: 23.3924, lng: 113.2988, type: 'large', timezone: 'Asia/Shanghai' },
-    { icao: 'ZGSZ', name: 'Shenzhen Baoan', lat: 22.6393, lng: 113.8107, type: 'large', timezone: 'Asia/Shanghai' },
-    { icao: 'VHHH', name: 'Hong Kong Intl', lat: 22.3089, lng: 113.9146, type: 'large', timezone: 'Asia/Hong_Kong' },
-    { icao: 'WSSS', name: 'Singapore Changi', lat: 1.3502, lng: 103.9944, type: 'large', timezone: 'Asia/Singapore' },
-    { icao: 'VTBS', name: 'Bangkok Suvarnabhumi', lat: 13.6900, lng: 100.7501, type: 'large', timezone: 'Asia/Bangkok' },
-    { icao: 'WMKK', name: 'Kuala Lumpur KLIA', lat: 2.7456, lng: 101.7099, type: 'large', timezone: 'Asia/Kuala_Lumpur' },
-    { icao: 'RPLL', name: 'Manila NAIA', lat: 14.5086, lng: 121.0198, type: 'large', timezone: 'Asia/Manila' },
-    { icao: 'WIII', name: 'Jakarta Soekarno', lat: -6.1256, lng: 106.6558, type: 'large', timezone: 'Asia/Jakarta' },
-    { icao: 'VVNB', name: 'Hanoi Noi Bai', lat: 21.2212, lng: 105.8072, type: 'large', timezone: 'Asia/Ho_Chi_Minh' },
-    { icao: 'VVTS', name: 'Ho Chi Minh', lat: 10.8188, lng: 106.6519, type: 'large', timezone: 'Asia/Ho_Chi_Minh' },
-    { icao: 'VIDP', name: 'Delhi Intl', lat: 28.5665, lng: 77.1031, type: 'large', timezone: 'Asia/Kolkata' },
-    { icao: 'OMDB', name: 'Dubai Intl', lat: 25.2528, lng: 55.3644, type: 'large', timezone: 'Asia/Dubai' },
-    { icao: 'OTHH', name: 'Doha Hamad', lat: 25.2731, lng: 51.6082, type: 'large', timezone: 'Asia/Qatar' },
-    { icao: 'EGLL', name: 'London Heathrow', lat: 51.4700, lng: -0.4543, type: 'large', timezone: 'Europe/London' },
-    { icao: 'LFPG', name: 'Paris CDG', lat: 49.0097, lng: 2.5479, type: 'large', timezone: 'Europe/Paris' },
-    { icao: 'EDDF', name: 'Frankfurt', lat: 50.0379, lng: 8.5622, type: 'large', timezone: 'Europe/Berlin' },
-    { icao: 'EHAM', name: 'Amsterdam Schiphol', lat: 52.3086, lng: 4.7639, type: 'large', timezone: 'Europe/Amsterdam' },
-    { icao: 'LTFM', name: 'Istanbul', lat: 41.2611, lng: 28.7419, type: 'large', timezone: 'Europe/Istanbul' },
-    { icao: 'KJFK', name: 'New York JFK', lat: 40.6413, lng: -73.7781, type: 'large', timezone: 'America/New_York' },
-    { icao: 'KLAX', name: 'Los Angeles LAX', lat: 33.9416, lng: -118.4085, type: 'large', timezone: 'America/Los_Angeles' },
-    { icao: 'KORD', name: 'Chicago OHare', lat: 41.9742, lng: -87.9073, type: 'large', timezone: 'America/Chicago' },
-    { icao: 'KATL', name: 'Atlanta', lat: 33.6407, lng: -84.4277, type: 'large', timezone: 'America/New_York' },
-    { icao: 'YSSY', name: 'Sydney', lat: -33.9461, lng: 151.1772, type: 'large', timezone: 'Australia/Sydney' },
-    { icao: 'NZAA', name: 'Auckland', lat: -37.0082, lng: 174.7850, type: 'large', timezone: 'Pacific/Auckland' },
-];
+export const AIRPORTS = [];
 
 // ==========================================
-// 國際機場 IATA 與城市對照表 (從全球資料庫載入)
+// 國際機場 IATA 與城市對照表 (從伺服器 API 載入)
 // ==========================================
-export { getAirportDisplayData } from './airportMappings';
+export const getAirportDisplayData = async (code) => {
+    if (!code) return null;
+    try {
+        const response = await fetch(`/api/airport/${code}`);
+        if (response.ok) {
+            return await response.json();
+        }
+    } catch (e) {
+        console.warn(`[AIRPORT] Failed to fetch data for ${code}:`, e.message);
+    }
+    return null;
+};
 
 // ==========================================
 // 航空公司資料庫
@@ -193,16 +160,22 @@ export function getCountryFlag(country) {
 }
 
 /**
- * Haversine 大圓距離
+ * 格式化當地時間 (支援時區)
  */
-function haversine(lat1, lng1, lat2, lng2) {
-    const toRad = (d) => (d * Math.PI) / 180;
-    const dLat = toRad(lat2 - lat1);
-    const dLng = toRad(lng2 - lng1);
-    const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+export function formatLocalTime(timestamp, timeZone) {
+    if (!timestamp) return '--:--';
+    try {
+        const formatter = new Intl.DateTimeFormat([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+            timeZone: timeZone || undefined,
+            timeZoneName: 'short'
+        });
+        return formatter.format(new Date(timestamp * 1000));
+    } catch (e) {
+        return new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
 }
 
 /**

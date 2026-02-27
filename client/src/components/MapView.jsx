@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl } from '../utils/flightUtils';
+import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData } from '../utils/flightUtils';
 import { GLOBAL_AIRPORTS } from '../utils/airportMappings';
 
 /**
@@ -218,10 +218,11 @@ export default function MapView({
                 if (apCard) {
                     const icaoMatch = el.querySelector('.ap-icao')?.textContent.split(' · ')[0];
                     if (icaoMatch) {
-                        const apData = GLOBAL_AIRPORTS.find(a => a.icao === icaoMatch);
-                        if (apData) {
-                            renderMetarPopup(apData, map, openPopup);
-                        }
+                        getAirportDisplayData(icaoMatch).then(apData => {
+                            if (apData && openPopup.isOpen()) {
+                                renderMetarPopup(apData, map, openPopup);
+                            }
+                        });
                     }
                 }
             }
@@ -433,36 +434,34 @@ export default function MapView({
         if (selectedIcao24 && planesDict[selectedIcao24] && selectedRoute) {
             const livePlane = planesDict[selectedIcao24];
             const livePos = [livePlane.lat, livePlane.lng];
-            const predPoints = [];
 
-            // Helper to find airport coordinates from the massive GLOBAL_AIRPORTS array
-            const getApCoords = (icao) => {
-                if (!icao) return null;
-                const ap = GLOBAL_AIRPORTS.find(a => a.icao === icao.toUpperCase());
-                return ap ? [ap.lat, ap.lng] : null;
-            };
+            // Async coordinates fetching
+            const drawPredictiveLine = async () => {
+                const origin = await getAirportDisplayData(selectedRoute.origin);
+                const destination = await getAirportDisplayData(selectedRoute.destination);
 
-            const originCoords = getApCoords(selectedRoute.origin);
-            const destCoords = getApCoords(selectedRoute.destination);
+                if (!predictiveLineRef.current && mapRef.current) {
+                    const points = [];
+                    if (origin) points.push([origin.lat, origin.lng]);
+                    points.push(livePos);
+                    if (destination) points.push([destination.lat, destination.lng]);
 
-            if (originCoords) predPoints.push(originCoords);
-            predPoints.push(livePos);
-            if (destCoords) predPoints.push(destCoords);
-
-            if (predPoints.length > 1) {
-                predictiveLineRef.current = L.polyline(predPoints, {
-                    color: '#888888',
-                    weight: 2,
-                    opacity: 0.5,
-                    dashArray: '5, 10',
-                    lineCap: 'round',
-                }).addTo(map);
-
-                // Make sure the yellow actual track renders *above* the grey prediction line
-                if (trackLineRef.current) {
-                    trackLineRef.current.bringToFront();
+                    if (points.length >= 2) {
+                        predictiveLineRef.current = L.polyline(points, {
+                            color: '#FFDC00',
+                            weight: 2,
+                            opacity: 0.5,
+                            dashArray: '5, 10',
+                            lineCap: 'round',
+                        }).addTo(mapRef.current);
+                    }
                 }
-            }
+            };
+            drawPredictiveLine();
+        }
+        // Make sure the yellow actual track renders *above* the grey prediction line
+        if (trackLineRef.current) {
+            trackLineRef.current.bringToFront();
         }
     }, [trackPoints, planesDict, selectedIcao24, selectedRoute]);
 

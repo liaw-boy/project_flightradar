@@ -11,7 +11,6 @@ const PORT = process.env.PORT || 3000;
 // ==========================================
 app.use(cors());
 app.use(express.json());
-
 // 提供前端靜態檔案
 app.use(express.static(path.join(__dirname, 'public-react'), {
     setHeaders: (res, filePath) => {
@@ -592,9 +591,48 @@ app.post('/api/metadata/batch', async function (req, res) {
 const ROUTES_CACHE_FILE = path.join(__dirname, 'routes-cache.json');
 const LOCAL_ROUTES_FILE = path.join(__dirname, 'data', 'local_routes.json');
 const SCHEDULES_STATIC_FILE = path.join(__dirname, 'data', 'schedules_static.json');
+const GLOBAL_AIRPORTS_FILE = path.join(__dirname, 'data', 'processed', 'airports_global.json');
+const GLOBAL_AIRLINES_FILE = path.join(__dirname, 'data', 'processed', 'airlines.json');
+
 let routesDatabase = {};
-let localRoutesDB = {}; // Ultimate Offline Dictionary
+let localRoutesDB = {};
 let schedulesStaticDB = {};
+let globalAirportsDB = {};
+let globalAirlinesDB = {};
+
+function loadGlobalData() {
+    try {
+        if (fs.existsSync(GLOBAL_AIRPORTS_FILE)) {
+            globalAirportsDB = JSON.parse(fs.readFileSync(GLOBAL_AIRPORTS_FILE, 'utf8'));
+            console.log(`🌍 [GLOBAL] Loaded ${Object.keys(globalAirportsDB).length} airports.`);
+        }
+        if (fs.existsSync(GLOBAL_AIRLINES_FILE)) {
+            globalAirlinesDB = JSON.parse(fs.readFileSync(GLOBAL_AIRLINES_FILE, 'utf8'));
+            console.log(`✈️ [GLOBAL] Loaded ${Object.keys(globalAirlinesDB).length} airline aliases.`);
+        }
+    } catch (e) {
+        console.error('❌ [GLOBAL DATA ERROR] Failed to load global JSON files:', e.message);
+    }
+}
+
+loadGlobalData();
+
+// Helper to resolve airline aliases (e.g., APJ -> MM, TTW -> IT)
+function resolveAirlineAlias(callsign) {
+    if (!callsign) return null;
+    const match = callsign.match(/^([A-Z]{2,3})(\d+)$/);
+    if (!match) return callsign;
+
+    const code = match[1];
+    const num = match[2];
+    const alias = globalAirlinesDB[code];
+
+    if (alias && (alias.iata || alias.icao)) {
+        const otherCode = alias.iata || alias.icao;
+        return { original: callsign, alias: otherCode + num };
+    }
+    return callsign;
+}
 
 try {
     if (fs.existsSync(ROUTES_CACHE_FILE)) {
@@ -624,49 +662,83 @@ function saveRoutesDatabase() {
 const routeCache = new Map(); // icao24 -> { data, timestamp } (動態航線快取)
 const ROUTE_CACHE_TTL = 1800000; // 30 分鐘
 
+app.get('/api/airport/:code', (req, res) => {
+    const code = req.params.code.toUpperCase();
+
+    // Check Global Database first
+    if (globalAirportsDB[code]) {
+        return res.json(globalAirportsDB[code]);
+    }
+
+    // Check METAR cache (Fallback)
+    if (metarCache.data) {
+        const metarAirport = metarCache.data.find(m => m.icaoId === code || m.iataId === code);
+        if (metarAirport) {
+            return res.json({
+                icao: metarAirport.icaoId,
+                iata: metarAirport.iataId,
+                name: metarAirport.name,
+                city: metarAirport.city,
+                country: metarAirport.country,
+                lat: metarAirport.lat,
+                lon: metarAirport.lon,
+                source: 'metar_cache'
+            });
+        }
+    }
+
+    return res.status(404).json({ error: 'Airport not found' });
+});
+
 app.get('/api/route/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
-    const callsign = req.query.callsign ? req.query.callsign.trim().toUpperCase() : '';
+    const queryCallsign = (req.query.callsign || '').toUpperCase();
+    const cleanCallsign = queryCallsign.replace(/[^A-Z0-9]/g, '');
 
-    // 1. 極致靜態優先 (Ultimate Static Route Bypassing API)
-    // 檢查官方字典 schedules_static.json
-    if (callsign && schedulesStaticDB[callsign]) {
-        console.log(`🗺️ [SCHEDULES STATIC HIT] ${callsign}`);
+    // 1. Try static schedules and local routes first (Higher Priority)
+    // Now with Airline Alias Support!
+    let searchCallsigns = [cleanCallsign];
+    const resolved = resolveAirlineAlias(cleanCallsign);
+    if (resolved && resolved.alias) {
+        searchCallsigns.push(resolved.alias);
+    }
+
+    let route = null;
+    let matchSource = '';
+
+    for (const cs of searchCallsigns) {
+        if (!cs) continue;
+        if (schedulesStaticDB[cs]) {
+            route = { dep: schedulesStaticDB[cs].dep, arr: schedulesStaticDB[cs].arr };
+            matchSource = 'static_db';
+            break;
+        }
+        if (localRoutesDB[cs]) {
+            route = { dep: localRoutesDB[cs][0], arr: localRoutesDB[cs][1] };
+            matchSource = 'local_dict';
+            break;
+        }
+        if (routesDatabase[cs]) {
+            route = routesDatabase[cs];
+            matchSource = 'cache';
+            break;
+        }
+    }
+
+    if (route) {
+        // Enforce 4-letter ICAO codes for consistency
+        if (route.dep && route.dep.length === 3) route.dep = globalAirportsDB[route.dep]?.icao || route.dep;
+        if (route.arr && route.arr.length === 3) route.arr = globalAirportsDB[route.arr]?.icao || route.arr;
+
         return res.json({
             icao24,
-            callsign,
-            departureAirport: schedulesStaticDB[callsign].dep,
-            arrivalAirport: schedulesStaticDB[callsign].arr,
+            callsign: cleanCallsign,
+            departureAirport: route.dep,
+            arrivalAirport: route.arr,
             fromStaticDB: true,
-            isVerfied: true
+            source: matchSource
         });
     }
-
-    // 檢查手動修正字典 local_routes.json
-    if (callsign && localRoutesDB[callsign]) {
-        console.log(`🗺️ [STATIC DICT DB] Hit for ${callsign}: ${localRoutesDB[callsign][0]} -> ${localRoutesDB[callsign][1]}`);
-        return res.json({
-            icao24,
-            callsign,
-            departureAirport: localRoutesDB[callsign][0], // IATA directly
-            arrivalAirport: localRoutesDB[callsign][1],
-            fromStaticDB: true,
-            isIata: true
-        });
-    }
-
-    if (callsign && routesDatabase[callsign]) {
-        console.log(`🗺️ [ROUTE DB] Local hit for ${callsign}: ${routesDatabase[callsign].dep} -> ${routesDatabase[callsign].arr}`);
-        return res.json({
-            icao24,
-            callsign,
-            departureAirport: routesDatabase[callsign].dep,
-            arrivalAirport: routesDatabase[callsign].arr,
-            fromStaticDB: true
-        });
-    }
-
-
 
     // 2. 檢查記憶體動態快取
     const cached = routeCache.get(icao24);
@@ -675,25 +747,25 @@ app.get('/api/route/:icao24', async (req, res) => {
     }
 
     try {
-        // 3. 嘗試使用 OpenSky 輕量化 Route API (使用 callsign 取得表定航線)
-        if (callsign) {
-            console.log(`✈️ [ROUTE] Fetching static route for callsign: ${callsign}...`);
-            const url = `https://api.opensky-network.org/api/routes?callsign=${callsign}`;
+        // 3. 嘗試使用 OpenSky 輕量化 Route API
+        if (cleanCallsign) {
+            console.log(`✈️ [ROUTE] Fetching static route for callsign: ${cleanCallsign}...`);
+            const url = `https://api.opensky-network.org/api/routes?callsign=${cleanCallsign}`;
             const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
 
             if (response.ok) {
                 const routeData = await response.json();
                 if (routeData && routeData.route && routeData.route.length >= 2) {
-                    routesDatabase[callsign] = {
+                    routesDatabase[cleanCallsign] = {
                         dep: routeData.route[0],
                         arr: routeData.route[1]
                     };
                     saveRoutesDatabase();
-                    console.log(`📦 [ROUTE DB] Cached new scheduled route: ${callsign} -> ${routesDatabase[callsign].dep}-${routesDatabase[callsign].arr}`);
+                    console.log(`📦 [ROUTE DB] Cached new scheduled route: ${cleanCallsign} -> ${routesDatabase[cleanCallsign].dep}-${routesDatabase[cleanCallsign].arr}`);
 
                     const result = {
                         icao24,
-                        callsign,
+                        callsign: cleanCallsign,
                         departureAirport: routeData.route[0],
                         arrivalAirport: routeData.route[1],
                         fromStaticDB: false
@@ -704,27 +776,19 @@ app.get('/api/route/:icao24', async (req, res) => {
             }
         }
 
-        // 4. 重度回退：如果 API 找不到表定航班，使用原來的 flights/aircraft 抓這台飛機過去 24 小時紀錄
+        // 4. Fallback to historical flight
         console.log(`✈️ [ROUTE] Fallback to historical flight for ${icao24}...`);
         const now = Math.floor(Date.now() / 1000);
-        const begin = now - 86400; // 過去 24 小時
+        const begin = now - 86400;
         const url = `https://opensky-network.org/api/flights/aircraft?icao24=${icao24}&begin=${begin}&end=${now}`;
-
         const headers = await getAuthHeaders();
-        const response = await fetch(url, {
-            headers,
-            signal: AbortSignal.timeout(15000)
-        });
+        const response = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
 
         if (!response.ok) {
-            if (response.status === 429) {
-                return res.json({ icao24, callsign, noData: true, reason: 'rate_limited' });
-            }
-            return res.json({ icao24, callsign, noData: true });
+            return res.json({ icao24, callsign: cleanCallsign, noData: true });
         }
 
         const flights = await response.json();
-
         let latest = null;
         if (flights && flights.length > 0) {
             latest = flights.reverse().find(f => f.estDepartureAirport || f.estArrivalAirport) || flights[0];
@@ -734,35 +798,27 @@ app.get('/api/route/:icao24', async (req, res) => {
         let arr = latest ? latest.estArrivalAirport : null;
 
         if (!dep || !arr) {
-            const noDataResult = { icao24, callsign, noData: true };
+            const noDataResult = { icao24, callsign: cleanCallsign, noData: true };
             routeCache.set(icao24, { data: noDataResult, timestamp: Date.now() });
             return res.json(noDataResult);
         }
 
-        // 5. 將所有成功取得的歷史紀錄，無條件寫入終極靜態庫，實現全域永久靜態化
-        if (!routesDatabase[callsign]) {
-            routesDatabase[callsign] = { dep, arr };
+        if (cleanCallsign && !routesDatabase[cleanCallsign]) {
+            routesDatabase[cleanCallsign] = { dep, arr };
             saveRoutesDatabase();
-            console.log(`📦 [ROUTE DB] Saved historical route to static dictionary: ${callsign} -> ${dep}-${arr}`);
         }
 
-        const routeData = {
+        const routeResult = {
             icao24,
-            callsign: (latest.callsign || callsign).trim(),
+            callsign: cleanCallsign,
             departureAirport: dep,
             arrivalAirport: arr,
-            firstSeen: latest.firstSeen,
-            lastSeen: latest.lastSeen,
             fromHistorical: true
         };
-
-        routeCache.set(icao24, { data: routeData, timestamp: Date.now() });
-        console.log(`✈️ [ROUTE] Historical fallback ${icao24}: ${routeData.departureAirport} → ${routeData.arrivalAirport}`);
-        res.json(routeData);
-
-    } catch (error) {
-        console.error(`❌ [ROUTE ERROR] ${icao24} (${callsign}): ${error.message}`);
-        res.json({ icao24, callsign, noData: true, error: error.message });
+        routeCache.set(icao24, { data: routeResult, timestamp: Date.now() });
+        res.json(routeResult);
+    } catch (e) {
+        res.json({ icao24, callsign: cleanCallsign, noData: true, error: e.message });
     }
 });
 

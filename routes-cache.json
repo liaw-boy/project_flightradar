@@ -24,12 +24,12 @@
     "arr": "RCTP"
   },
   "EVA192": {
-    "dep": "TSA",
-    "arr": "HND"
+    "dep": "RCSS",
+    "arr": "RJTT"
   },
   "EVA191": {
-    "dep": "HND",
-    "arr": "TSA"
+    "dep": "RJTT",
+    "arr": "RCSS"
   },
   "EVA198": {
     "dep": "RCTP",
@@ -72,8 +72,8 @@
     "arr": "RCTP"
   },
   "MDA345": {
-    "dep": "MZG",
-    "arr": "KHH"
+    "dep": "RCQC",
+    "arr": "RCKH"
   },
   "UAL871": {
     "dep": "KSFO",
@@ -150,10 +150,6 @@
   "EVA696": {
     "dep": "PANC",
     "arr": "KDFW"
-  },
-  "CPA566": {
-    "dep": "VHHH",
-    "arr": "VTBP"
   },
   "XAX504": {
     "dep": "WMKK",
@@ -235,10 +231,6 @@
     "dep": "VTBD",
     "arr": "VTUO"
   },
-  "AIQ764": {
-    "dep": "VTBD",
-    "arr": "VTBP"
-  },
   "EVA805": {
     "dep": "RCTP",
     "arr": "VHHH"
@@ -270,10 +262,6 @@
   "UIA8977": {
     "dep": "RCSS",
     "arr": "RCQC"
-  },
-  "JJA2315": {
-    "dep": "RCTP",
-    "arr": "RKSG"
   },
   "MDA1277": {
     "dep": "RCKH",
@@ -335,12 +323,28 @@
     "dep": "RCTP",
     "arr": "WBGJ"
   },
-  "VJC861": {
-    "dep": "VVTS",
-    "arr": "VV02"
+  "CPA2025": {
+    "dep": "RCTP",
+    "arr": "VHHH"
   },
-  "ESR987": {
+  "JJA2104": {
     "dep": "RKSI",
-    "arr": "RKD1"
+    "arr": "RJFU"
+  },
+  "UAE387": {
+    "dep": "VHHH",
+    "arr": "OMDB"
+  },
+  "ANA850": {
+    "dep": "VTBS",
+    "arr": "RJTT"
+  },
+  "CEB310": {
+    "dep": "RPLL",
+    "arr": "RPVV"
+  },
+  "CAL6876": {
+    "dep": "RCTP",
+    "arr": "WMAU"
   }
 }

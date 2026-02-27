@@ -58,5 +58,17 @@
     "AFR006": [
         "CDG",
         "JFK"
+    ],
+    "APJ30": [
+        "RCTP",
+        "RJBB"
+    ],
+    "APJ31": [
+        "RJBB",
+        "RCTP"
+    ],
+    "CAL6876": [
+        "VVNB",
+        "RCTP"
     ]
 }

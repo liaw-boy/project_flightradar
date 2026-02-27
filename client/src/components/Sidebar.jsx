@@ -9,31 +9,14 @@ import {
     getAirportDisplayData,
     createPlaneSVG,
     AIRLINE_LOGOS,
-    AIRPORTS
+    AIRPORTS,
+    formatLocalTime
 } from '../utils/flightUtils';
 import { useI18n } from '../hooks/useI18n';
 import { logToServer } from '../utils/logger';
 import './Sidebar.css';
 
-// Helper to format time in a specific timezone
-const formatLocalTime = (timestamp, icao) => {
-    if (!timestamp) return '--:--';
-    const airport = AIRPORTS.find(a => a.icao === icao);
-    const timeZone = airport?.timezone || undefined;
 
-    try {
-        const formatter = new Intl.DateTimeFormat([], {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false,
-            timeZone,
-            timeZoneName: 'short'
-        });
-        return formatter.format(new Date(timestamp * 1000));
-    } catch (e) {
-        return new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-    }
-};
 export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
     if (!plane || !icao24) return null;
 
@@ -63,12 +46,30 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
 
     // 航線 (from route)
     const isLoadingRoute = route === null;
-    const dep = route?.departureAirport || (route?.noData ? 'N/A' : '...');
-    const arr = route?.arrivalAirport || (route?.noData ? 'N/A' : '...');
+    const depCode = route?.departureAirport || (route?.noData ? 'N/A' : null);
+    const arrCode = route?.arrivalAirport || (route?.noData ? 'N/A' : null);
 
-    // Convert ICAO to IATA and get City Name
-    const depData = getAirportDisplayData(dep);
-    const arrData = getAirportDisplayData(arr);
+    const [depInfo, setDepInfo] = useState(null);
+    const [arrInfo, setArrInfo] = useState(null);
+
+    useEffect(() => {
+        if (depCode && depCode !== 'N/A') {
+            getAirportDisplayData(depCode).then(setDepInfo);
+        } else {
+            setDepInfo(null);
+        }
+    }, [depCode]);
+
+    useEffect(() => {
+        if (arrCode && arrCode !== 'N/A') {
+            getAirportDisplayData(arrCode).then(setArrInfo);
+        } else {
+            setArrInfo(null);
+        }
+    }, [arrCode]);
+
+    const depName = depInfo ? (depInfo.city || depInfo.name) : (depCode || '...');
+    const arrName = arrInfo ? (arrInfo.city || arrInfo.name) : (arrCode || '...');
 
     const [photos, setPhotos] = useState([]);
     const [openSections, setOpenSections] = useState({
@@ -84,18 +85,41 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
     useEffect(() => {
         let isMounted = true;
         setPhotos([]);
-        if (icao24) {
-            fetch(`https://api.planespotters.net/pub/photos/hex/${icao24}`)
-                .then(res => res.json())
-                .then(data => {
-                    if (isMounted && data.photos && data.photos.length > 0) {
-                        setPhotos(data.photos);
+        if (!icao24 && !registration) return;
+
+        const fetchPhotos = async () => {
+            const results = [];
+
+            // Try HEX first
+            if (icao24) {
+                try {
+                    const res = await fetch(`https://api.planespotters.net/pub/photos/hex/${icao24}`);
+                    const data = await res.json();
+                    if (data.photos) results.push(...data.photos);
+                } catch (e) { console.warn("HEX photo fetch failed"); }
+            }
+
+            // Try Registration as fallback or supplement
+            if (registration && registration !== 'N/A') {
+                try {
+                    const res = await fetch(`https://api.planespotters.net/pub/photos/reg/${registration}`);
+                    const data = await res.json();
+                    if (data.photos) {
+                        // Avoid duplicates and prioritize registration matches
+                        const existingIds = new Set(results.map(p => p.id));
+                        data.photos.forEach(p => {
+                            if (!existingIds.has(p.id)) results.push(p);
+                        });
                     }
-                })
-                .catch(err => console.error("Error fetching photo:", err));
-        }
+                } catch (e) { console.warn("REG photo fetch failed"); }
+            }
+
+            if (isMounted) setPhotos(results);
+        };
+
+        fetchPhotos();
         return () => { isMounted = false; };
-    }, [icao24]);
+    }, [icao24, registration]);
 
     return (
         <div className="sidebar active">
@@ -140,10 +164,10 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
 
                 {/* Advanced Route Card (Dark Theme Symmetric Layout) */}
                 <div className="sb-route-card">
-                    <div className="sb-route-top">
+                    <div className="sb-route-display">
                         <div className="sb-route-left">
-                            <div className="route-iata">{getAirportDisplayData(route?.departureAirport).code}</div>
-                            <div className="route-city">{getAirportDisplayData(route?.departureAirport).city}</div>
+                            <div className="route-iata">{depInfo?.iata || depCode || '...'}</div>
+                            <div className="route-city">{depName}</div>
                         </div>
                         <div className="sb-route-center">
                             <div className="route-plane-icon">
@@ -153,22 +177,22 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                             </div>
                         </div>
                         <div className="sb-route-right">
-                            <div className="route-iata">{getAirportDisplayData(route?.arrivalAirport).code}</div>
-                            <div className="route-city">{getAirportDisplayData(route?.arrivalAirport).city}</div>
+                            <div className="route-iata">{arrInfo?.iata || arrCode || '...'}</div>
+                            <div className="route-city">{arrName}</div>
                         </div>
                     </div>
-                    {(dep || arr || (route && route.firstSeen)) && (
+                    {(route?.firstSeen || route?.lastSeen) && (
                         <div className="sb-route-bottom">
                             <div className="sb-route-time left">
                                 <span className="time-label">ACTUAL DEP:</span>
                                 <span className="time-val">
-                                    {formatLocalTime(route?.firstSeen, route?.departureAirport)}
+                                    {formatLocalTime(route?.firstSeen, depInfo?.timezone)}
                                 </span>
                             </div>
                             <div className="sb-route-time right" style={{ textAlign: 'right' }}>
                                 <span className="time-label">ESTIMATED:</span>
                                 <span className="time-val">
-                                    {formatLocalTime(route?.lastSeen, route?.arrivalAirport)}
+                                    {formatLocalTime(route?.lastSeen, arrInfo?.timezone)}
                                 </span>
                             </div>
                         </div>
