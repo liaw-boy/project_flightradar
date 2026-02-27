@@ -15,6 +15,7 @@ export function useFlightData(mapRef, showNotification) {
     const [groundCount, setGroundCount] = useState(0);
     const [apiStatus, setApiStatus] = useState('INIT');
     const [apiStatusClass, setApiStatusClass] = useState('');
+    const [apiErrorDetail, setApiErrorDetail] = useState('');
     const [latency, setLatency] = useState(null);
     const [lastUpdateTime, setLastUpdateTime] = useState(null);
     const [apiStats, setApiStats] = useState(null);
@@ -51,12 +52,18 @@ export function useFlightData(mapRef, showNotification) {
             setLatency(elapsed);
 
             if (!response.ok) {
+                let errorMsg = `Error ${response.status} (${response.statusText})`;
+                try {
+                    const text = await response.text();
+                    if (text) errorMsg = `Error ${response.status}: ${text.substring(0, 100)}`;
+                } catch (e) { }
+
                 if (response.status === 429) {
-                    setApiStatus('RATE LIMITED');
+                    setApiStatus(`RATE LIMITED`);
                     setApiStatusClass('stat-warning');
-                    throw new Error('API Rate Limited');
+                    throw new Error('429 Rate Limited (Daily limits exhausted)');
                 }
-                throw new Error(`API Error: ${response.status}`);
+                throw new Error(errorMsg);
             }
 
             const data = await response.json();
@@ -72,10 +79,12 @@ export function useFlightData(mapRef, showNotification) {
                 processPlaneData(parsedPlanes);
                 setApiStatus(data.stale ? 'STALE CACHE' : 'OpenSky');
                 setApiStatusClass(data.stale ? 'stat-warning' : '');
+                setApiErrorDetail('');
                 setLastUpdateTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
             } else {
                 setApiStatus('NO DATA');
                 setApiStatusClass('stat-warning');
+                setApiErrorDetail('API reached successfully but returned 0 planes.');
             }
         } catch (error) {
             const elapsed = Math.round(performance.now() - startTime);
@@ -84,8 +93,12 @@ export function useFlightData(mapRef, showNotification) {
 
             if (error.name === 'AbortError') {
                 setApiStatus('TIMEOUT');
+                setApiErrorDetail('Request took longer than 20s to resolve.');
             } else if (!apiStatusRef.current || apiStatusRef.current === 'INIT') {
                 setApiStatus('ERROR');
+                setApiErrorDetail(error.message);
+            } else {
+                setApiErrorDetail(error.message);
             }
             setApiStatusClass('stat-error');
 
@@ -254,6 +267,7 @@ export function useFlightData(mapRef, showNotification) {
         groundCount,
         apiStatus,
         apiStatusClass,
+        apiErrorDetail,
         latency,
         lastUpdateTime,
         apiStats,

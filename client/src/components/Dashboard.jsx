@@ -8,6 +8,7 @@ export default function Dashboard({
     groundCount,
     apiStatus,
     apiStatusClass,
+    apiErrorDetail,
     latency,
     lastUpdateTime,
     nextRefresh,
@@ -75,6 +76,12 @@ export default function Dashboard({
                     {nextRefresh !== null ? `${nextRefresh}s` : '--'}
                 </span>
             </div>
+
+            {apiErrorDetail && (
+                <div style={{ marginTop: '10px', fontSize: '11px', color: '#ff4136', wordBreak: 'break-all', border: '1px solid rgba(255,65,54,0.3)', padding: '6px', borderRadius: '4px', background: 'rgba(255,65,54,0.1)' }}>
+                    {apiErrorDetail}
+                </div>
+            )}
 
             <div className="stat-divider" />
             <div className="stat-row">

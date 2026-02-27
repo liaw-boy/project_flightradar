@@ -33,6 +33,7 @@ export default function App() {
         groundCount,
         apiStatus,
         apiStatusClass,
+        apiErrorDetail,
         latency,
         lastUpdateTime,
         apiStats,
@@ -161,6 +162,7 @@ export default function App() {
                 groundCount={groundCount}
                 apiStatus={apiStatus}
                 apiStatusClass={apiStatusClass}
+                apiErrorDetail={apiErrorDetail}
                 latency={latency}
                 lastUpdateTime={lastUpdateTime}
                 nextRefresh={nextRefresh}
