@@ -10,7 +10,8 @@
     color: #fff;
     box-shadow: 0 0 20px rgba(0, 0, 0, 0.8), inset 0 0 10px rgba(1, 255, 112, 0.1);
     backdrop-filter: blur(10px);
-    min-width: 220px;
+    width: 325px;
+    /* 增加到 325px 提供更好的視覺呼吸空間與可讀性 */
     font-family: 'Share Tech Mono', monospace;
 }
 
@@ -21,16 +22,19 @@
 }
 
 .lang-toggle {
-    margin-left: auto;
+    margin-left: 10px;
     background: rgba(1, 255, 112, 0.15);
     border: 1px solid #01FF70;
     color: #01FF70;
     font-family: 'Share Tech Mono', monospace;
     font-size: 11px;
-    padding: 3px 8px;
+    padding: 4px 8px;
     border-radius: 4px;
     cursor: pointer;
     transition: 0.2s;
+    white-space: nowrap;
+    /* 這裡最重要：防止中英文按鈕文字換行 */
+    flex-shrink: 0;
 }
 
 .lang-toggle:hover {
@@ -74,21 +78,35 @@
     margin: 0;
     font-size: 18px;
     color: #01FF70;
-    letter-spacing: 2px;
+    letter-spacing: 0.5px;
+    /* 進一步縮減間距以騰出空間 */
+    white-space: nowrap;
+    flex: 1;
+}
+
+.version-label {
+    font-size: 0.6em;
+    color: #01FF70;
+    opacity: 0.6;
+    margin-left: 8px;
+    font-weight: normal;
 }
 
 .stat-row {
     display: flex;
     justify-content: space-between;
     margin-bottom: 8px;
-    font-size: 14px;
-    color: #aaa;
+    font-size: 15px;
+    /* 從 14px 調大 */
+    color: #ccc;
+    /* 稍微調亮顏色 */
 }
 
 .stat-value {
     font-weight: bold;
     color: #01FF70;
-    font-size: 16px;
+    font-size: 18px;
+    /* 從 16px 調大 */
 }
 
 .stat-warning {
@@ -153,8 +171,8 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 10px;
-    margin-top: 5px;
+    padding: 10px 12px;
+    margin-top: 10px;
     background: rgba(1, 255, 112, 0.05);
     border: 1px solid rgba(1, 255, 112, 0.2);
     border-radius: 4px;
@@ -162,6 +180,13 @@
     font-size: 13px;
     color: #01FF70;
     transition: all 0.3s ease;
+}
+
+.api-stats-provider {
+    font-size: 11px;
+    opacity: 0.8;
+    color: #fff;
+    margin-left: 5px;
 }
 
 .api-stats-header:hover {
@@ -186,13 +211,37 @@
 
 .api-stats-content.open {
     max-height: 400px;
-    /* Increased to fit multiple accounts */
     padding-top: 8px;
     opacity: 1;
+    overflow-y: auto;
+    padding-right: 5px;
+    /* 為滾動條留出空間 */
+}
+
+/* 自定義 API 統計面板滾動條 (Neon Green Theme) */
+.api-stats-content::-webkit-scrollbar {
+    width: 4px;
+}
+
+.api-stats-content::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 10px;
+}
+
+.api-stats-content::-webkit-scrollbar-thumb {
+    background: rgba(1, 255, 112, 0.4);
+    border-radius: 10px;
+    box-shadow: 0 0 5px rgba(1, 255, 112, 0.2);
+}
+
+.api-stats-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(1, 255, 112, 0.8);
 }
 
 .api-stats-content .stat-row {
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+    font-size: 13px;
+    /* 調大字體增強可讀性 */
 }
 
 /* ===== Multi-Account Dashboard Cards ===== */
@@ -211,7 +260,8 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     padding-bottom: 4px;
     margin-bottom: 8px;
-    font-size: 11px;
+    font-size: 13px;
+    /* 從 11px 調大 */
 }
 
 .account-name {
@@ -223,7 +273,8 @@
 .account-status {
     padding: 2px 6px;
     border-radius: 3px;
-    font-size: 9px;
+    font-size: 11px;
+    /* 從 9px 調大 */
 }
 
 .account-status.healthy {
@@ -271,7 +322,8 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    font-size: 10px;
+    font-size: 12px;
+    /* 從 10px 調大 */
     font-weight: bold;
 }
 
@@ -285,9 +337,11 @@
 .detail-row {
     display: flex;
     justify-content: space-between;
-    font-size: 11px;
+    font-size: 13px;
+    /* 從 11px 調大 */
 }
 
 .detail-row span:first-child {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.85);
+    /* 增加亮度從 0.6 提高到 0.85 增強對比 */
 }

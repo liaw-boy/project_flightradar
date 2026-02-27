@@ -60,7 +60,10 @@ function setCache(key, data) {
 // ==========================================
 const ACCOUNTS = [
     { user: process.env.OPENSKY_USER, pass: process.env.OPENSKY_PASS },
-    { user: process.env.OPENSKY_USER2, pass: process.env.OPENSKY_PASS2 }
+    { user: process.env.OPENSKY_USER2, pass: process.env.OPENSKY_PASS2 },
+    { user: process.env.OPENSKY_USER3, pass: process.env.OPENSKY_PASS3 },
+    { user: process.env.OPENSKY_USER4, pass: process.env.OPENSKY_PASS4 },
+    { user: process.env.OPENSKY_USER5, pass: process.env.OPENSKY_PASS5 }
 ].filter(acc => acc.user && acc.pass);
 
 let accountStates = ACCOUNTS.map(() => ({
@@ -77,8 +80,24 @@ function rotateAccount() {
     return true;
 }
 
+const SAFE_RESERVE_CAP = 30; // 每個帳號保留至少 30 次額度，不讓它歸零
+
 async function getAuthHeaders() {
     if (ACCOUNTS.length === 0) return {};
+
+    // 檢查目前帳號是否還有足夠的安全餘額
+    const currentStats = apiStats.accounts[currentAccountIndex];
+    if (currentStats.remainingCredits !== null && currentStats.remainingCredits <= SAFE_RESERVE_CAP) {
+        // 如果目前帳號正在冷卻中就不特別處理（交由後續 429 機制），
+        // 否則如果還在 ACTIVE 但餘額不足，嘗試主動輪替
+        const isCurrentlyLimited = currentStats.unlockTime && new Date(currentStats.unlockTime).getTime() > Date.now();
+        if (!isCurrentlyLimited) {
+            console.log(`🛡️ [RESERVE] Account ${ACCOUNTS[currentAccountIndex].user} hit safe floor (${currentStats.remainingCredits}). Rotating preemptively...`);
+            if (rotateAccount()) {
+                return await getAuthHeaders();
+            }
+        }
+    }
 
     const account = ACCOUNTS[currentAccountIndex];
     const state = accountStates[currentAccountIndex];
@@ -190,16 +209,16 @@ function calculateRecommendedInterval() {
     if (currentAcc.remainingCredits === null || currentAcc.remainingCredits === undefined) return minInterval;
 
     const remaining = currentAcc.remainingCredits;
-    // 如果剩餘額度低到危險值 (例如剩不到 20 次)，強制拉長間距到 5 分鐘
-    if (remaining < 20) return 300;
+    // 如果剩餘額度低到危險值 (例如剩不到 30 次)，強制拉長間距到 5 分鐘
+    if (remaining <= SAFE_RESERVE_CAP) return 300;
 
     // 計算距離今日 UTC 00:00 的剩餘秒數
     const now = new Date();
     const tomorrowUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
     const secondsUntilReset = Math.floor((tomorrowUTC.getTime() - now.getTime()) / 1000);
 
-    // 留 100 次當作緊急緩衝，剩下的額度平分給剩下的秒數
-    const safeCredits = Math.max(1, remaining - 100);
+    // 留預留額度作為緊急緩衝，剩下的額度平分給剩下的秒數
+    const safeCredits = Math.max(1, remaining - SAFE_RESERVE_CAP);
     const calculatedInterval = Math.ceil(secondsUntilReset / safeCredits);
 
     // 限制在 15秒 到 300秒 之間
@@ -292,9 +311,16 @@ app.get('/api/states', async (req, res) => {
 
                     const remainingStr = response.headers.get('x-rate-limit-remaining');
                     if (remainingStr) {
-                        apiStats.accounts[currentAccountIndex].remainingCredits = parseInt(remainingStr, 10);
+                        const remainingNum = parseInt(remainingStr, 10);
+                        apiStats.accounts[currentAccountIndex].remainingCredits = remainingNum;
                         // 如果成功獲得 quota，就清空這個帳號的解鎖時間
                         apiStats.accounts[currentAccountIndex].unlockTime = null;
+
+                        // [PROACTIVE ROTATION] 如果請求完發現剩餘額度已破底線，下次請求前先換帳號
+                        if (remainingNum <= SAFE_RESERVE_CAP && retries > 1) {
+                            console.log(`🛡️ [RESERVE] Post-call check: Account ${ACCOUNTS[currentAccountIndex].user} is low (${remainingNum}). Rotating...`);
+                            rotateAccount();
+                        }
                     }
 
                     const data = await response.json();

@@ -115,8 +115,8 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                 <div className="sb-route-card">
                     <div className="sb-route-top">
                         <div className="sb-route-left">
-                            <div className="route-iata">{getAirportDisplayInfo(route?.departureAirport, route?.isIata).code}</div>
-                            <div className="route-city">{getAirportDisplayInfo(route?.departureAirport, route?.isIata).name}</div>
+                            <div className="route-iata">{getAirportDisplayData(route?.departureAirport).code}</div>
+                            <div className="route-city">{getAirportDisplayData(route?.departureAirport).city}</div>
                         </div>
                         <div className="sb-route-center">
                             <div className="route-plane-icon">
@@ -126,8 +126,8 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                             </div>
                         </div>
                         <div className="sb-route-right">
-                            <div className="route-iata">{getAirportDisplayInfo(route?.arrivalAirport, route?.isIata).code}</div>
-                            <div className="route-city">{getAirportDisplayInfo(route?.arrivalAirport, route?.isIata).name}</div>
+                            <div className="route-iata">{getAirportDisplayData(route?.arrivalAirport).code}</div>
+                            <div className="route-city">{getAirportDisplayData(route?.arrivalAirport).city}</div>
                         </div>
                     </div>
                     {(dep || arr || (route && route.firstSeen)) && (

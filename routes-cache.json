@@ -198,5 +198,61 @@
   "SIA608": {
     "dep": "WSSS",
     "arr": "RKSI"
+  },
+  "CAL162": {
+    "dep": "RCTP",
+    "arr": "RKSI"
+  },
+  "CAL153": {
+    "dep": "RJBB",
+    "arr": "RCTP"
+  },
+  "CES508": {
+    "dep": "VHHH",
+    "arr": "ZSPD"
+  },
+  "EVA716": {
+    "dep": "RCTP",
+    "arr": "ZBAA"
+  },
+  "KAL442": {
+    "dep": "VVNB",
+    "arr": "RKSI"
+  },
+  "TLM539": {
+    "dep": "VTBD",
+    "arr": "VYKG"
+  },
+  "THA917": {
+    "dep": "EGLL",
+    "arr": "VTBS"
+  },
+  "TLM628": {
+    "dep": "VTBD",
+    "arr": "VTUU"
+  },
+  "AIQ3520": {
+    "dep": "VTBD",
+    "arr": "VTUO"
+  },
+  "AIQ764": {
+    "dep": "VTBD",
+    "arr": "VTBP"
+  },
+  "EVA805": {
+    "dep": "RCTP",
+    "arr": "VHHH"
+  },
+  "CAL116": {
+    "dep": "RCTP",
+    "arr": "RJFF"
+  },
+  "EVA266": {
+    "dep": "VDPP",
+    "arr": "RCTP"
+  },
+  "EVA392": {
+    "dep": "VVTS",
+    "arr": "RCTP"
   }
 }

@@ -2,7 +2,8 @@
     position: absolute;
     top: 0;
     left: 0;
-    width: 340px;
+    width: 360px;
+    /* 固定寬度防止中英文切換時產生縮放效應 */
     height: 100vh;
     height: 100dvh;
     z-index: 2000;
@@ -16,6 +17,8 @@
     flex-direction: column;
     color: #fff;
     font-family: 'Share Tech Mono', monospace;
+    overflow-x: hidden;
+    /* 防止出現底部滑動條 */
 }
 
 .sidebar.active {
@@ -284,12 +287,14 @@
 }
 
 .sb-section-title {
-    font-size: 12px;
+    font-size: 15px;
+    /* 從 12px 調大標題 */
     color: #01FF70;
     border-bottom: 1px solid #333;
     padding-bottom: 5px;
     margin: 20px 0 12px 0;
-    letter-spacing: 1px;
+    letter-spacing: 1.5px;
+    font-weight: bold;
 }
 
 .sb-data-row {
@@ -297,6 +302,8 @@
     justify-content: space-between;
     margin-bottom: 12px;
     font-size: 15px;
+    gap: 15px;
+    /* 增加間隔確保長文字不會擠在一起 */
 }
 
 .sb-data-label {
@@ -369,6 +376,8 @@
     align-items: center;
     user-select: none;
     transition: background 0.2s, color 0.2s;
+    padding: 12px 18px 12px 0;
+    /* 加大右側內距防止摺疊圖示被切掉 */
 }
 
 .sb-section-title.accordion:hover {
@@ -379,16 +388,19 @@
 .sb-section-title .chevron {
     transition: transform 0.3s ease;
     border-style: solid;
-    border-width: 0.15em 0.15em 0 0;
+    border-width: 0.18em 0.18em 0 0;
+    /* 稍微加粗圖示 */
     content: '';
     display: inline-block;
-    height: 0.45em;
+    height: 0.5em;
     position: relative;
-    top: -0.1em;
+    top: -0.05em;
     transform: rotate(135deg);
     vertical-align: middle;
-    width: 0.45em;
-    opacity: 0.6;
+    width: 0.5em;
+    opacity: 0.8;
+    margin-right: 5px;
+    /* 確保離邊緣有距離 */
 }
 
 .sb-section-title.accordion.open .chevron {

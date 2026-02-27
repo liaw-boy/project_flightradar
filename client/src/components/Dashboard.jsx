@@ -36,7 +36,7 @@ export default function Dashboard({
         <div className="dashboard">
             <div className="title-container">
                 <div className={`live-dot ${isOnline ? '' : 'offline'}`} />
-                <h2>{t('radarSystem')} <span style={{ fontSize: '0.6em', color: '#01FF70', opacity: 0.8, marginLeft: '8px', verticalAlign: 'middle', border: '1px solid rgba(1,255,112,0.3)', padding: '2px 4px', borderRadius: '4px' }}>v1.1.1</span></h2>
+                <h2>{t('radarSystem')} <span className="version-label">v1.1.8</span></h2>
                 <button className="lang-toggle" onClick={toggleLang}>
                     {lang === 'en' ? 'EN/中' : '中/EN'}
                 </button>
@@ -55,16 +55,6 @@ export default function Dashboard({
                 <span>{t('airGround')}</span>
                 <span className="stat-value">
                     {planeCount > 0 ? `${airCount} / ${groundCount}` : '-- / --'}
-                </span>
-            </div>
-            <div className="stat-row">
-                <span>{t('apiStatus')}</span>
-                <span className={`stat-value ${apiStatusClass}`}>{apiStatus}</span>
-            </div>
-            <div className="stat-row">
-                <span>{t('latency')}</span>
-                <span className="stat-value">
-                    {latency !== null ? `${latency}ms` : '--'}
                 </span>
             </div>
             <div className="stat-row">
@@ -90,14 +80,24 @@ export default function Dashboard({
                 className={`api-stats-header ${showApiStats ? 'open' : ''}`}
                 onClick={() => setShowApiStats(!showApiStats)}
             >
-                <span>💻 API STATS</span>
+                <span>💻 API STATS <span className="api-stats-provider">[{apiStatus}]</span></span>
                 <span className="api-stats-icon">▼</span>
             </div>
 
             <div className={`api-stats-content ${showApiStats ? 'open' : ''}`}>
                 <div className="stat-row">
+                    <span>{t('apiStatus')}</span>
+                    <span className={`stat-value ${apiStatusClass}`} style={{ fontSize: '13px' }}>{apiStatus}</span>
+                </div>
+                <div className="stat-row">
+                    <span>{t('latency')}</span>
+                    <span className="stat-value" style={{ fontSize: '13px' }}>
+                        {latency !== null ? `${latency}ms` : '--'}
+                    </span>
+                </div>
+                <div className="stat-row">
                     <span>{t('apiCalls')}</span>
-                    <span className="stat-value">{apiStats?.totalCalls ?? 0}</span>
+                    <span className="stat-value" style={{ fontSize: '13px' }}>{apiStats?.totalCalls ?? 0}</span>
                 </div>
 
                 {apiStats?.accounts?.map((acc, index) => {
