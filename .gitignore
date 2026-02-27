@@ -4,21 +4,8 @@ opensky-credentials.json
 *.log
 .DS_Store
 Thumbs.db
-credentials.json
+credentials1.json
 credentials2.json
 credentials3.json
-OpenSky REST API — The OpenSky Network API 1.4.0 documentation.html
-OpenSky REST API — The OpenSky Network API 1.4.0 documentation_files/custom.css
-OpenSky REST API — The OpenSky Network API 1.4.0 documentation_files/doctools.js.下載
-OpenSky REST API — The OpenSky Network API 1.4.0 documentation_files/documentation_options.js.下載
-OpenSky REST API — The OpenSky Network API 1.4.0 documentation_files/pygments.css
-OpenSky REST API — The OpenSky Network API 1.4.0 documentation_files/radar_small.png
-OpenSky REST API — The OpenSky Network API 1.4.0 documentation_files/sphinx_highlight.js.下載
-OpenSky REST API — The OpenSky Network API 1.4.0 documentation_files/tex-mml-chtml.js.下載
-OpenSky REST API — The OpenSky Network API 1.4.0 documentation_files/theme.css
-OpenSky REST API — The OpenSky Network API 1.4.0 documentation_files/theme.js.下載
+doc/
 public/
-OpenSky.pdf
-OpenSky1.pdf
-The OpenSky Network API documentation — The OpenSky Network API 1.4.0 documentation.pdf
-OpenSky REST API — The OpenSky Network API 1.4.0 documentation.pdf
