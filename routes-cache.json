@@ -330,5 +330,17 @@
   "EVA715": {
     "dep": "ZBAA",
     "arr": "RCTP"
+  },
+  "EVA095": {
+    "dep": "RCTP",
+    "arr": "WBGJ"
+  },
+  "VJC861": {
+    "dep": "VVTS",
+    "arr": "VV02"
+  },
+  "ESR987": {
+    "dep": "RKSI",
+    "arr": "RKD1"
   }
 }

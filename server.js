@@ -870,6 +870,9 @@ async function fetchMetarData() {
 // 啟動時抓取 (如果快取過期)
 if (Date.now() - metarCache.timestamp > METAR_TTL) {
     fetchMetarData();
+} else {
+    const cachedTime = new Date(metarCache.timestamp).toLocaleTimeString();
+    console.log(`📡 [METAR] System ready. Using cached weather data from ${cachedTime}.`);
 }
 
 // 每小時定時更新
@@ -898,12 +901,14 @@ app.use((req, res) => {
 // 啟動伺服器
 // ==========================================
 app.listen(PORT, () => {
+    const readyTime = new Date().toLocaleTimeString();
     console.log('');
     console.log('╔══════════════════════════════════════════╗');
     console.log('║   ✈️  Flight Radar Backend Server        ║');
     console.log(`║   🌐 http://localhost:${PORT}               ║`);
     console.log(`║   📁 Serving: ./public-react             ║`);
-    console.log(`║   🔑 Auth: ${process.env.OPENSKY_USER ? 'Enabled' : 'Disabled (no credentials)'}             ║`);
+    console.log(`║   🔑 Auth: ${process.env.OPENSKY_USER ? 'Enabled' : 'Disabled'}                    ║`);
+    console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
     console.log('╚══════════════════════════════════════════╝');
     console.log('');
 });
