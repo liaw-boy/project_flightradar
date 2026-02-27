@@ -194,5 +194,9 @@
   "ANA813": {
     "dep": "RJAA",
     "arr": "VYYY"
+  },
+  "SIA608": {
+    "dep": "WSSS",
+    "arr": "RKSI"
   }
 }

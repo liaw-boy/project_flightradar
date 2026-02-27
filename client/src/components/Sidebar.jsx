@@ -114,20 +114,20 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                 {/* Advanced Route Card (Dark Theme Symmetric Layout) */}
                 <div className="sb-route-card">
                     <div className="sb-route-top">
-                        <div className="sb-route-half left">
-                            <div className="sb-airport-code">{depData.code}</div>
-                            {depData.city && <div className="sb-airport-city">{depData.city}</div>}
+                        <div className="sb-route-left">
+                            <div className="route-iata">{getAirportDisplayInfo(route?.departureAirport, route?.isIata).code}</div>
+                            <div className="route-city">{getAirportDisplayInfo(route?.departureAirport, route?.isIata).name}</div>
                         </div>
                         <div className="sb-route-center">
                             <div className="route-plane-icon">
-                                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                                    <path d="M21,16V14L13,9V3.5A1.5,1.5 0 0,0 11.5,2A1.5,1.5 0 0,0 10,3.5V9L2,14V16L10,13.5V19L8,20.5V22L11.5,21L15,22V20.5L13,19V13.5L21,16Z" />
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                                    <path d="M22,12 L18,8 L15,8 L16,11 L6,11 L3,6 L1,6 L4,12 L1,18 L3,18 L6,13 L16,13 L15,16 L18,16 L22,12 Z" />
                                 </svg>
                             </div>
                         </div>
-                        <div className="sb-route-half right">
-                            <div className="sb-airport-code">{arrData.code}</div>
-                            {arrData.city && <div className="sb-airport-city">{arrData.city}</div>}
+                        <div className="sb-route-right">
+                            <div className="route-iata">{getAirportDisplayInfo(route?.arrivalAirport, route?.isIata).code}</div>
+                            <div className="route-city">{getAirportDisplayInfo(route?.arrivalAirport, route?.isIata).name}</div>
                         </div>
                     </div>
                     {(dep || arr || (route && route.firstSeen)) && (

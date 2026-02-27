@@ -1,0 +1,58 @@
+{
+    "DAL521": [
+        "DTW",
+        "ATL"
+    ],
+    "EVA95": [
+        "TPE",
+        "MXP"
+    ],
+    "CAL111": [
+        "TPE",
+        "FUK"
+    ],
+    "CPA489": [
+        "TPE",
+        "HKG"
+    ],
+    "CPA411": [
+        "ICN",
+        "HKG"
+    ],
+    "SJX100": [
+        "TPE",
+        "NRT"
+    ],
+    "SIA879": [
+        "TPE",
+        "SIN"
+    ],
+    "JAL96": [
+        "TSA",
+        "HND"
+    ],
+    "ANA851": [
+        "HND",
+        "TSA"
+    ],
+    "UAL871": [
+        "SFO",
+        "TPE"
+    ],
+    "THY24": [
+        "IST",
+        "TPE"
+    ],
+    "UAE366": [
+        "DXB",
+        "TPE"
+    ],
+    "AFR252": [
+        "CDG",
+        "TPE"
+    ],
+    "KLM807": [
+        "AMS",
+        "TPE"
+    ]
+}

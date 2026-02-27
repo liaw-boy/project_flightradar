@@ -172,6 +172,7 @@ app.get('/api/stats', function (req, res) {
 
 // 取得飛機狀態（代理 OpenSky /states/all）
 const activeRequests = new Map();
+let globalRateLimitCooldown = 0; // The timestamp when we are allowed to ping OpenSky again
 
 app.get('/api/states', async (req, res) => {
     const { lamin, lomin, lamax, lomax } = req.query;
@@ -180,6 +181,16 @@ app.get('/api/states', async (req, res) => {
     const cacheKey = isGlobal
         ? 'states_global'
         : `states_${parseFloat(lamin).toFixed(1)}_${parseFloat(lomin).toFixed(1)}_${parseFloat(lamax).toFixed(1)}_${parseFloat(lomax).toFixed(1)}`;
+
+    // 檢查全域封鎖倒數定時器 (Global 429 Cooldown)
+    if (Date.now() < globalRateLimitCooldown) {
+        console.log(`⏳ [GLOBAL COOLDOWN] OpenSky Daily Limits reached. Sleeping for ${Math.round((globalRateLimitCooldown - Date.now()) / 1000)}s...`);
+        const cached = getCached(cacheKey);
+        if (cached && cached.states) {
+            return res.json({ time: Date.now(), states: cached.states, stats: apiStats, stale: true });
+        }
+        return res.status(429).json({ error: "Rate Limited" });
+    }
 
     // 檢查快取
     const cached = getCached(cacheKey);
@@ -229,6 +240,8 @@ app.get('/api/states', async (req, res) => {
                                 retries--;
                                 continue; // Retry loop with new account
                             } else {
+                                globalRateLimitCooldown = Date.now() + 5 * 60 * 1000; // 5 min penalty box
+                                console.error(`🛑 [FATAL] ALL OPEN SKY ACCOUNTS RATE LIMITED. Halting requests for 5 minutes.`);
                                 throw new Error('All accounts rate limited');
                             }
                         }
@@ -481,15 +494,21 @@ app.post('/api/metadata/batch', async function (req, res) {
 // 實作: 固定航班航線字典 (Flight Route Database)
 // ==========================================
 const ROUTES_CACHE_FILE = path.join(__dirname, 'routes-cache.json');
+const LOCAL_ROUTES_FILE = path.join(__dirname, 'data', 'local_routes.json');
 let routesDatabase = {};
+let localRoutesDB = {}; // Ultimate Offline Dictionary
 
 try {
     if (fs.existsSync(ROUTES_CACHE_FILE)) {
         routesDatabase = JSON.parse(fs.readFileSync(ROUTES_CACHE_FILE, 'utf8'));
-        console.log(`🗺️ [ROUTE DB] Loaded ${Object.keys(routesDatabase).length} routes from local dictionary`);
+        console.log(`🗺️ [ROUTE DB] Loaded ${Object.keys(routesDatabase).length} routes from cache`);
+    }
+    if (fs.existsSync(LOCAL_ROUTES_FILE)) {
+        localRoutesDB = JSON.parse(fs.readFileSync(LOCAL_ROUTES_FILE, 'utf8'));
+        console.log(`🗺️ [LOCAL ROUTES] Loaded ${Object.keys(localRoutesDB).length} routes from static dictionary`);
     }
 } catch (e) {
-    console.error('❌ [ROUTE DB] Failed to load routes-cache.json:', e.message);
+    console.error('❌ [ROUTE DB] Failed to load route JSONs:', e.message);
 }
 
 function saveRoutesDatabase() {
@@ -508,7 +527,19 @@ app.get('/api/route/:icao24', async (req, res) => {
     const callsign = req.query.callsign ? req.query.callsign.trim().toUpperCase() : '';
 
     // 1. 極致靜態優先 (Ultimate Static Route Bypassing API)
-    // 直接強制從 routesDatabase 取資料，使用者要求：能用靜態就用靜態
+    // 優先檢查我們在 data/local_routes.json 中定義的無延遲靜態航班表
+    if (callsign && localRoutesDB[callsign]) {
+        console.log(`🗺️ [STATIC DICT DB] Hit for ${callsign}: ${localRoutesDB[callsign][0]} -> ${localRoutesDB[callsign][1]}`);
+        return res.json({
+            icao24,
+            callsign,
+            departureAirport: localRoutesDB[callsign][0], // IATA directly
+            arrivalAirport: localRoutesDB[callsign][1],
+            fromStaticDB: true,
+            isIata: true
+        });
+    }
+
     if (callsign && routesDatabase[callsign]) {
         console.log(`🗺️ [ROUTE DB] Local hit for ${callsign}: ${routesDatabase[callsign].dep} -> ${routesDatabase[callsign].arr}`);
         return res.json({

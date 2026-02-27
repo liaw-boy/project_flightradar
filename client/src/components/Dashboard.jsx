@@ -34,7 +34,7 @@ export default function Dashboard({
         <div className="dashboard">
             <div className="title-container">
                 <div className={`live-dot ${isOnline ? '' : 'offline'}`} />
-                <h2>{t('radarSystem')} <span style={{ fontSize: '0.6em', color: '#01FF70', opacity: 0.8, marginLeft: '8px', verticalAlign: 'middle', border: '1px solid rgba(1,255,112,0.3)', padding: '2px 4px', borderRadius: '4px' }}>v1.0.23</span></h2>
+                <h2>{t('radarSystem')} <span style={{ fontSize: '0.6em', color: '#01FF70', opacity: 0.8, marginLeft: '8px', verticalAlign: 'middle', border: '1px solid rgba(1,255,112,0.3)', padding: '2px 4px', borderRadius: '4px' }}>v1.0.26</span></h2>
                 <button className="lang-toggle" onClick={toggleLang}>
                     {lang === 'en' ? 'EN/中' : '中/EN'}
                 </button>

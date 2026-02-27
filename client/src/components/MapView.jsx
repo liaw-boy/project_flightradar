@@ -80,16 +80,10 @@ export default function MapView({
     useEffect(() => {
         if (mapRef.current) return;
 
-        // 防止無限縮小與平移的邊界限制
-        const southWest = L.latLng(-89.98155760646617, -180);
-        const northEast = L.latLng(89.99346179538875, 180);
-        const maxBounds = L.latLngBounds(southWest, northEast);
-
         const map = L.map(mapContainerRef.current, {
             zoomControl: false,
             minZoom: 3,
-            maxBounds: maxBounds,
-            maxBoundsViscosity: 1.0
+            worldCopyJump: true // IMPORTANT: Makes markers wrap cleanly around infinite horizontal scrolls
         }).setView([25.17, 121.44], 10);
 
         // 加入右下角的縮放按鈕

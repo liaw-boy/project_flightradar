@@ -1,21 +1,24 @@
-# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - React 終極完整版 v1.0.11
+# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - React 終極完整版 v1.0.26
 
-基於 OpenSky Network API、React (Vite) 與 Leaflet 開發的即時全球航空雷達系統。本專案經歷了從純 HTML/JS 升級至現代化 React 框架的重大重構，並針對亞洲區域航班資料缺失、舊設備 (iOS 12) 相容性問題提出了深度的客製化解決方案。
+基於 OpenSky Network API、React (Vite) 與 Leaflet 開發的即時全球航空雷達系統。本專案經歷了從純 HTML/JS 升級至現代化 React 框架的重大重構，並針對亞洲區域航班資料缺失、API 限流無限迴圈、舊設備 (iOS 12) 相容性等問題提出了深度的客製化解決方案。
 
-系統採用 **Node.js Express 後端** 作為反向代理與快取層，有效隱藏 API 金鑰，具備完整的認證機制與「終極靜態航線生成器」，搭配 **React 前端** 打造出零延遲、高質感的暗黑科技風追蹤體驗。
+系統採用 **Node.js Express 後端** 作為反向代理與快取層，有效保護 API 金鑰，具備完整的認證輪替機制、**5分鐘懲罰冷卻保護**與「本地端靜態航線字典檔 (`local_routes.json`)」，搭配 **React 前端** (30秒智慧輪詢) 打造出零延遲、高質感的暗黑科技風追蹤體驗。
 
 ---
 
 ## ✨ 核心特色與技術突破
 
 - **⚛️ 現代化 React + Vite 架構**：全站組件化 (Components) 重構，狀態集中管理，支援多語言 (i18n) 與流暢的 UI 渲染。
-- **📱 舊設備完美向下相容 (iOS 12+)**：導入 `@vitejs/plugin-legacy`，在前端編譯時自動生成 ES5 Polyfills (`polyfills-legacy.js`)。即使是 iPad mini (iOS 12.5.8)、舊版 Safari，也能完美無錯誤執行現代 JavaScript 語法。
-- **🛡️ 終極靜態航線備援 (Ultimate Static Route Database)**：
-  - **痛點解法**：OpenSky API 對於台灣國內線 (立榮 UIA、華信 MDA) 以及部分亞洲航班 (虎航 TTW、星宇 SJX、國泰 CPA、酷航 TGW) 嚴重缺乏起終點歷史資料，導致畫面經常顯示 "N/A"。
-  - **創新實作**：在後端 `server.js` 實作自動攔截器，當 API 回傳的機場資料為空 (Null) 時，系統會針對特定呼號啟發式配發最真實的亞洲預設航線 (例如：UIA 強制對應 松山-馬公)，徹底消滅 N/A 破圖現象。
-- **✈️ 動態長尾歷史軌跡**：前端將飛行座標的記憶體保留上限大幅擴充至 **500 個點 (約 83 分鐘)**，解決了盯著飛機看時軌跡線突然消失的 Bug。即使 API 回傳 404，也能從本地記憶體立刻畫出實況軌跡。
-- **🚀 零延遲順暢平移 (Zero-Latency Panning)**：地圖縮放或拖曳時不再頻繁發送 API 請求。由客戶端直接從已載入的全球資料庫中瞬間篩選可見範圍。
-- **🎨 精準的航空公司與機型圖示**：修正了立榮 (Uni Air) 與華信 (Mandarin Airlines) 的 ICAO 代碼衝突，並依據飛機類別 (商用客機、直升機、無人機、輕型機) 渲染不同形狀的 SVG。
+- **📱 舊設備完美向下相容 (iOS 12+)**：導入 `@vitejs/plugin-legacy`，在前端編譯時自動生成 ES5 Polyfills。即使是 iPad mini (iOS 12.5.8)、舊版 Safari，也能完美無錯誤執行現代 JavaScript 語法。
+- **🛡️ 零延遲本地航線字典 (Offline Static Route Dictionary)**：
+  - **痛點解法**：OpenSky API 常常缺失各家航空的起降點 (例如 `DAL521` 顯示 `N/A`)。
+  - **創新實作**：在後端建立 `data/local_routes.json`。當 OpenSky 查無此航班時，系統會**0 毫秒**直接攔截，翻譯成 3 碼 IATA (如 `DTW ✈ ATL`) 傳回前端展示，徹底消滅 N/A 且完全文字置中對齊。
+- **⏳ 智慧 API 限流防護 (Rate Limit Penalty Box)**：
+  - 前端輪詢頻率已由 11 秒大幅放寬至 **30 秒**，以節省每日 1000 次的 API 額度。
+  - 當所有備用帳號皆耗盡單日額度 (HTTP 429) 時，後端 `server.js` 會自動進入 **5 分鐘全域懲罰冷卻 (Global Cooldown)**，期間攔截所有 OpenSky 請求並以「最後一次已知地圖快取」直接回應，完美達成優雅降級 (Graceful Degradation)，終止前端 5 秒瘋狂重試的迴圈轟炸。
+- **🌍 無界橫向地圖 (Infinite Horizontal Map)**：解除 Leaflet 的 `maxBounds` 限制並開啟 `worldCopyJump`，實現真正的地球無限平移與飛機地標無縫接軌。
+- **✈️ 動態長尾歷史軌跡**：保留最新的 500 個飛行座標點點跡。並新增防震跳 (Anti-Teleportation) 邏輯，避免跨日資料夾雜導致經緯度出現時速超音速 (> 400m/s) 的誇張畫面撕裂。
+- **🎨 精準的航空公司與機型圖示**：修正 ICAO 代碼衝突，並讀取飛機種類 (`category`) 去渲染不同的 SVG 形狀，如商用客機、直升機、私人小飛機、無人機與地勤拖車。
 
 ---
 
@@ -23,8 +26,10 @@
 
 ```text
 project_flightradar/
-├── server.js               # Express 後端核心 (API 代理、快取機制、終極航線生成器)
-├── routes-cache.json       # 🗺️ 靜態航線字典檔 (手動擴充的亞洲備援航線)
+├── server.js               # Express 後端核心 (API 代理、快取機制、全域防護冷卻)
+├── routes-cache.json       # 🗺️ 舊版自動暫存歷史航線紀錄
+├── data/
+│   └── local_routes.json   # 📚 零延遲本地航線字典 (手動擴充的絕對來源)
 ├── aircraft-cache.json     # ✈️ 飛機 Metadata 永久離線快取
 ├── metar-cache.json        # ⛅ 機場天氣快取
 ├── .env                    # 🔑 環境變數 (存放 OpenSky 帳密)
@@ -33,10 +38,10 @@ project_flightradar/
 │   ├── vite.config.js      # Vite 配置 (包含 legacy plugin 設定)
 │   ├── package.json        # 前端相依套件 (Leaflet, React 等)
 │   └── src/
-│       ├── App.jsx         # React 主程式
+│       ├── App.jsx         # React 主程式 (30秒輪詢間隔設定處)
 │       ├── App.css         # 全域暗黑主題樣式
 │       ├── hooks/          # useFlightData (軌跡與航班資料邏輯)
-│       ├── utils/          # flightUtils (航空公司字典、ICAO 對應、距離計算)
+│       ├── utils/          # flightUtils (IATA 對應、圖標渲染引擎)
 │       └── components/     # UI 組件 (MapView, Sidebar, Dashboard, FilterPanel)
 └── public-react/           # ⚛️ 前端建置輸出檔 (供 Express 提供靜態網頁服務)
 ```
@@ -63,7 +68,7 @@ npm install
 ```
 
 ### 步驟 2：設定 API 憑證 (環境變數)
-1. 前往 [OpenSky Network](https://opensky-network.org/) 註冊帳號並建立 API Client 取得 credentials。
+1. 前往 [OpenSky Network](https://opensky-network.org/) 註冊帳號並建立 API Client 取得 credentials (免費用戶每日限額 500 次呼叫)。
 2. 回到專案根目錄 (不是 client 裡面)，確認是否存在 `.env` 檔案。
 3. 填入您的 OpenSky 帳號與密碼 (支援多帳號以突破 API 限流)：
 
@@ -72,7 +77,7 @@ OPENSKY_USER=您的帳號名稱或client_id
 OPENSKY_PASS=您的密碼或client_secret
 PORT=3000
 
-# (選用) 備用帳號自動輪替
+# (選用) 備用帳號自動輪替機制
 OPENSKY_USER2=第二組帳號
 OPENSKY_PASS2=第二組密碼
 ```
@@ -97,7 +102,7 @@ cd ..
 npm start
 # (等同於執行 node server.js)
 ```
-*(看到終端機出現 `✅ React Flight Radar Server running on port 3000` 即代表啟動成功。)*
+*(看到終端機顯示啟動成功、各帳號快取檔案載入紀錄，即代表啟動成功。)*
 
 ### 步驟 5：開始追蹤航班
 打開您的瀏覽器 (電腦、手機、iPad 皆可)，輸入以下網址：
@@ -110,23 +115,23 @@ npm start
 
 ## 🛠️ 維護與除錯指南 (Troubleshooting)
 
-### 1. 畫面顯示 N/A 或找不到航班
-- **限流問題**：OpenSky API 相當嚴格。若剛啟動伺服器，可能正處於 HTTP 429 限流狀態。請耐心等待 2~3 分鐘，系統的自動輪替機制會在限流解除後將全地球的飛機抓取下來。
-- **終極備援失效？**：如果你點擊了台灣虎航 (TTW) 卻還是顯示 N/A，請退回專案終端機按下 `Ctrl + C`，然後重新執行 `npm start`，確保後端載入的是最新的 `server.js` 邏輯。
+### 1. 畫面顯示 N/A 或找不到航班？
+- **如何手動新增靜態航線？**：如果你知道該航班的起降點，請直接打開 `project_flightradar/data/local_routes.json`，依樣畫葫蘆輸入 `{"航班號": ["起飛地IATA", "降落地IATA"]}`。存檔後，在終端機按下 `Ctrl + C`，重新執行 `npm start` 即可永久生效！
+- **限流保護冷卻中**：若剛啟動伺服器，且帳號皆已超過每日限制，伺服器會自動將前端請求封鎖 5 分鐘，這之間畫面會「凍結」播放舊快取檔。請耐心等待解鎖，或等待 UTC 換日。
 
-### 2. 不同設備的「資料更新倒數」不同步？
-本系統架構採 **客戶端輪詢 (Client Polling)** 機制。每個設備 (iPad, 手機, 電腦) 是依照自己打開網頁的當下時間開始計時「每 10 秒打一次 API」。因此，不同設備的更新時間與 API 累計次數有 3~5 秒的落差是**完全正常**的行為。
+### 2. 為什麼計時器是跑到 30 秒？
+因為 OpenSky 免費版極為珍貴的 1000 次每日限制，我們將 API 輪詢間隔設定為 30 秒，不僅能流暢追蹤整個台灣的航空領域，又能讓這 1000 次的使用壽命維持長達 **8 小時連續監看**。
 
 ### 3. 如何更新版本號以強制清除舊設備快取？
-如果您修改了程式碼（例如在 `flightUtils.js` 中新增了一家航空公司），舊版 iOS Safari 很容易因為快取而看不到新畫面。
+如果您修改了程式碼（例如加入了新的 CSS，或是更改了 `local_routes.json` 後想要確保各裝置載入最新邏輯），舊版 iOS Safari 很容易因為快取而看不到新畫面。
 1. 前往 `client/src/components/Dashboard.jsx`。
-2. 找到 `v1.0.11` 的字樣，將其修改為 `v1.0.12`。
+2. 找到 `<span ...>v1.0.xx</span>` 的字樣，將其 + 1。
 3. 執行 `cd client` -> `npm run build`。
-4. 您的使用者進入網頁時看到新版號，就代表快取已成功刷新！
+4. 您的使用者進入網頁時看到新版號，或者強制按 **Ctrl + F5**，就代表快取已成功刷新！
 
 ---
-**版本紀錄:**
-- `v1.0.11` - 解決 OpenSky 歷史資料出發/抵達地為 null 導致備援失效問題；新增 TGW (酷航) 等亞洲各級航空識別支援。
-- `v1.0.9` - 導入「終極靜態航線生成機制」(Ultimate Static Fallback)，修復立榮(UIA)圖標衝突。
-- `v1.0.8` - 飛行軌跡記憶體從 50 擴充至 500；發布 iOS 12 polyfills。
+**近期版本紀錄:**
+- `v1.0.26` - API 輪詢拉長至 30 秒、支援 `local_routes.json` 靜態字典零延遲秒開、修復 OpenSky 429 前後端無限迴圈重試 Bug、新增 5 分鐘全域防護冷卻機制、Sidebar 航線卡文字完美置中、解放地圖無界限無限滾動。
+- `v1.0.11` - 解決 OpenSky 歷史資料出發/抵達地為 null 導致備援失效問題；新增跨亞航空識別庫。
+- `v1.0.8` - 導入防震跳邏輯；發佈 iOS 12 polyfills。
 - `v1.0.0` - 全面從 HTML 轉型至 React/Vite 架構。

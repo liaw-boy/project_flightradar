@@ -41,7 +41,7 @@ export default function App() {
     } = useFlightData(mapInstanceRef, showNotification);
 
     // NEXT REFRESH 倒數計時器
-    const POLL_INTERVAL = 11;
+    const POLL_INTERVAL = 30;
     useEffect(() => {
         let countdown = POLL_INTERVAL;
         setNextRefresh(countdown);
@@ -52,6 +52,13 @@ export default function App() {
         }, 1000);
         return () => clearInterval(timer);
     }, [lastUpdateTime]);
+
+    // 後端 30 秒自動更新
+    useEffect(() => {
+        fetchPlanes();
+        const interval = setInterval(fetchPlanes, 30000);
+        return () => clearInterval(interval);
+    }, [fetchPlanes]);
 
     // 載入動畫
     useEffect(() => {
@@ -136,6 +143,7 @@ export default function App() {
                 selectedIcao24={selectedIcao24}
                 trackPoints={trackPoints}
                 filters={filters}
+                selectedRoute={selectedRoute}
                 onSelectPlane={handleSelectPlane}
                 onDeselectPlane={handleDeselectPlane}
                 onMapReady={handleMapReady}

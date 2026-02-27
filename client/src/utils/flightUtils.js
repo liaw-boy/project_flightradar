@@ -279,17 +279,19 @@ export function createPlaneSVG(heading, altitude, isSelected, onGround, isEmerge
     let selectedPath = SVG_PATHS.default;
 
     // Explicit Ground overrides
-    if (onGround) {
-        // If it's a known service vehicle category or literally on the ground
-        if (category === 16 || category === 17) selectedPath = SVG_PATHS.ground;
+    if (onGround || altitude === 'GROUND' || category === 16 || category === 17) {
+        selectedPath = SVG_PATHS.ground;
+    } else if (category === 2 || category === 3) {
+        selectedPath = SVG_PATHS.light;
+    } else if (category === 5 || category === 6) {
+        selectedPath = SVG_PATHS.heavy;
+    } else if (category === 8) {
+        selectedPath = SVG_PATHS.rotorcraft;
+    } else if (category === 9) {
+        selectedPath = SVG_PATHS.glider;
+    } else if (category === 14) {
+        selectedPath = SVG_PATHS.drone;
     }
-
-    if (category === 2 || category === 3) selectedPath = SVG_PATHS.light;
-    else if (category === 5 || category === 6) selectedPath = SVG_PATHS.heavy;
-    else if (category === 8) selectedPath = SVG_PATHS.rotorcraft;
-    else if (category === 9) selectedPath = SVG_PATHS.glider;
-    else if (category === 14) selectedPath = SVG_PATHS.drone;
-    else if (category === 16 || category === 17) selectedPath = SVG_PATHS.ground;
 
     // Scale drone or small things up slightly or down so they match the visual weight of the jets
     let scaleTransform = '';
