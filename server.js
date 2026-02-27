@@ -416,11 +416,13 @@ app.get('/api/tracks', async (req, res) => {
 });
 
 // ==========================================
-// 飛機 Metadata（機型/製造商/註冊號）— 永久快取
+// 飛機 Metadata（機型/製造商/註冊號）— 永久快取與靜態字典
 // ==========================================
 const fs = require('fs');
 const METADATA_CACHE_FILE = path.join(__dirname, 'aircraft-cache.json');
+const AIRCRAFT_STATIC_FILE = path.join(__dirname, 'data', 'aircraft_static.json');
 let aircraftMetadataCache = {};
+let aircraftStaticDB = {};
 
 // 啟動時載入快取檔案
 try {
@@ -428,8 +430,12 @@ try {
         aircraftMetadataCache = JSON.parse(fs.readFileSync(METADATA_CACHE_FILE, 'utf8'));
         console.log(`📂 [METADATA] Loaded ${Object.keys(aircraftMetadataCache).length} cached aircraft`);
     }
+    if (fs.existsSync(AIRCRAFT_STATIC_FILE)) {
+        aircraftStaticDB = JSON.parse(fs.readFileSync(AIRCRAFT_STATIC_FILE, 'utf8'));
+        console.log(`📂 [METADATA STATIC] Loaded ${Object.keys(aircraftStaticDB).length} aircraft from static DB`);
+    }
 } catch (e) {
-    console.warn('⚠️ Failed to load metadata cache:', e.message);
+    console.warn('⚠️ Failed to load metadata files:', e.message);
 }
 
 function saveMetadataCache() {
@@ -443,7 +449,13 @@ function saveMetadataCache() {
 app.get('/api/metadata/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
 
-    // 檢查永久快取
+    // 1. 優先檢查靜態字典 (Static First)
+    if (aircraftStaticDB[icao24]) {
+        console.log(`📦 [METADATA STATIC HIT] ${icao24}`);
+        return res.json({ ...aircraftStaticDB[icao24], fromStatic: true });
+    }
+
+    // 2. 檢查永久快取
     if (aircraftMetadataCache[icao24]) {
         return res.json(aircraftMetadataCache[icao24]);
     }
@@ -496,7 +508,8 @@ app.post('/api/metadata/batch', async function (req, res) {
 
     // 過濾已快取的
     var uncached = icao24List.filter(function (id) {
-        return !aircraftMetadataCache[id.toLowerCase()];
+        const key = id.toLowerCase();
+        return !aircraftMetadataCache[key] && !aircraftStaticDB[key];
     });
 
     if (uncached.length === 0) {
@@ -571,8 +584,10 @@ app.post('/api/metadata/batch', async function (req, res) {
 // ==========================================
 const ROUTES_CACHE_FILE = path.join(__dirname, 'routes-cache.json');
 const LOCAL_ROUTES_FILE = path.join(__dirname, 'data', 'local_routes.json');
+const SCHEDULES_STATIC_FILE = path.join(__dirname, 'data', 'schedules_static.json');
 let routesDatabase = {};
 let localRoutesDB = {}; // Ultimate Offline Dictionary
+let schedulesStaticDB = {};
 
 try {
     if (fs.existsSync(ROUTES_CACHE_FILE)) {
@@ -582,6 +597,10 @@ try {
     if (fs.existsSync(LOCAL_ROUTES_FILE)) {
         localRoutesDB = JSON.parse(fs.readFileSync(LOCAL_ROUTES_FILE, 'utf8'));
         console.log(`🗺️ [LOCAL ROUTES] Loaded ${Object.keys(localRoutesDB).length} routes from static dictionary`);
+    }
+    if (fs.existsSync(SCHEDULES_STATIC_FILE)) {
+        schedulesStaticDB = JSON.parse(fs.readFileSync(SCHEDULES_STATIC_FILE, 'utf8'));
+        console.log(`🗺️ [SCHEDULES STATIC] Loaded ${Object.keys(schedulesStaticDB).length} routes from static DB`);
     }
 } catch (e) {
     console.error('❌ [ROUTE DB] Failed to load route JSONs:', e.message);
@@ -603,7 +622,20 @@ app.get('/api/route/:icao24', async (req, res) => {
     const callsign = req.query.callsign ? req.query.callsign.trim().toUpperCase() : '';
 
     // 1. 極致靜態優先 (Ultimate Static Route Bypassing API)
-    // 優先檢查我們在 data/local_routes.json 中定義的無延遲靜態航班表
+    // 檢查官方字典 schedules_static.json
+    if (callsign && schedulesStaticDB[callsign]) {
+        console.log(`🗺️ [SCHEDULES STATIC HIT] ${callsign}`);
+        return res.json({
+            icao24,
+            callsign,
+            departureAirport: schedulesStaticDB[callsign].dep,
+            arrivalAirport: schedulesStaticDB[callsign].arr,
+            fromStaticDB: true,
+            isVerfied: true
+        });
+    }
+
+    // 檢查手動修正字典 local_routes.json
     if (callsign && localRoutesDB[callsign]) {
         console.log(`🗺️ [STATIC DICT DB] Hit for ${callsign}: ${localRoutesDB[callsign][0]} -> ${localRoutesDB[callsign][1]}`);
         return res.json({

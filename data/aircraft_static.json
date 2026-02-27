@@ -1,0 +1,101 @@
+{
+    "89907a": {
+        "icao24": "89907a",
+        "registration": "B-16722",
+        "manufacturerName": "Boeing",
+        "model": "777-35E(ER)",
+        "typecode": "B773",
+        "owner": "EVA Air",
+        "operator": "EVA",
+        "built": "2015",
+        "categoryDescription": "Heavy"
+    },
+    "899066": {
+        "icao24": "899066",
+        "registration": "B-16718",
+        "manufacturerName": "Boeing",
+        "model": "777-35E(ER)",
+        "typecode": "B773",
+        "owner": "EVA Air",
+        "operator": "EVA",
+        "built": "2014",
+        "categoryDescription": "Heavy"
+    },
+    "89907b": {
+        "icao24": "89907b",
+        "registration": "B-16723",
+        "manufacturerName": "Boeing",
+        "model": "777-35E(ER)",
+        "typecode": "B773",
+        "owner": "EVA Air",
+        "operator": "EVA",
+        "built": "2015",
+        "categoryDescription": "Heavy"
+    },
+    "89905c": {
+        "icao24": "89905c",
+        "registration": "B-16709",
+        "manufacturerName": "Boeing",
+        "model": "777-35E(ER)",
+        "typecode": "B773",
+        "owner": "EVA Air",
+        "operator": "EVA",
+        "built": "2007",
+        "categoryDescription": "Heavy"
+    },
+    "899042": {
+        "icao24": "899042",
+        "registration": "B-18001",
+        "manufacturerName": "Boeing",
+        "model": "777-309(ER)",
+        "typecode": "B773",
+        "owner": "China Airlines",
+        "operator": "CAL",
+        "built": "2014",
+        "categoryDescription": "Heavy"
+    },
+    "899043": {
+        "icao24": "899043",
+        "registration": "B-18002",
+        "manufacturerName": "Boeing",
+        "model": "777-309(ER)",
+        "typecode": "B773",
+        "owner": "China Airlines",
+        "operator": "CAL",
+        "built": "2014",
+        "categoryDescription": "Heavy"
+    },
+    "899adc": {
+        "icao24": "899adc",
+        "registration": "B-58201",
+        "manufacturerName": "Airbus",
+        "model": "A321-251NX",
+        "typecode": "A21N",
+        "owner": "STARLUX Airlines",
+        "operator": "SJX",
+        "built": "2019",
+        "categoryDescription": "Large"
+    },
+    "899ade": {
+        "icao24": "899ade",
+        "registration": "B-58202",
+        "manufacturerName": "Airbus",
+        "model": "A321-251NX",
+        "typecode": "A21N",
+        "owner": "STARLUX Airlines",
+        "operator": "SJX",
+        "built": "2019",
+        "categoryDescription": "Large"
+    },
+    "89930f": {
+        "icao24": "89930f",
+        "registration": "B-11111",
+        "manufacturerName": "ATR",
+        "model": "ATR-72-600",
+        "typecode": "AT76",
+        "owner": "Mandarin Airlines",
+        "operator": "MDA",
+        "built": "2017",
+        "categoryDescription": "Light"
+    }
+}

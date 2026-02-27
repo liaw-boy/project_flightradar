@@ -254,5 +254,41 @@
   "EVA392": {
     "dep": "VVTS",
     "arr": "RCTP"
+  },
+  "EVA647": {
+    "dep": "KDFW",
+    "arr": "RCTP"
+  },
+  "CPA531": {
+    "dep": "RCTP",
+    "arr": "VHHH"
+  },
+  "SJX851": {
+    "dep": "RCTP",
+    "arr": "RJCC"
+  },
+  "UIA8977": {
+    "dep": "RCSS",
+    "arr": "RCQC"
+  },
+  "JJA2315": {
+    "dep": "RCTP",
+    "arr": "RKSG"
+  },
+  "MDA1277": {
+    "dep": "RCKH",
+    "arr": "RCWA"
+  },
+  "EVA809": {
+    "dep": "RCTP",
+    "arr": "VHHH"
+  },
+  "EVA396": {
+    "dep": "VVTS",
+    "arr": "RCTP"
+  },
+  "CRK261": {
+    "dep": "VHHH",
+    "arr": "ZSFZ"
   }
 }

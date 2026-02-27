@@ -53,14 +53,14 @@ export default function MapView({
 
             const windDir = data.wdir === 'VRB' ? (translateMetar?.('Variable') || 'Variable') : `${data.wdir}°`;
             const windSpd = data.wspd || 0;
-            const windDisplay = translateMetar?.(`${windSpd}kt`) || `${windSpd}kt`;
+            const windDisplay = translateMetar?.(`${windDir} ${windSpd}kt`, 'WIND') || `${windDir} ${windSpd}kt`;
             const fltCatClass = data.fltCat === 'VFR' ? 'ap-vfr' : data.fltCat === 'MVFR' ? 'ap-mvfr' : 'ap-ifr';
             let cloudStr = data.clouds?.map(c => `${c.cover} ${c.base}ft`).join(', ') || '--';
-            cloudStr = translateMetar?.(cloudStr) || cloudStr;
+            cloudStr = translateMetar?.(cloudStr, 'CLOUDS') || cloudStr;
             const elevM = data.elev ? Math.round(data.elev * 0.3048) : '--';
             const elevLabel = translateMetar?.('Elev') || 'Elev';
-            const visibDisplay = translateMetar?.(`${data.visib ?? '--'} SM`) || `${data.visib ?? '--'} SM`;
-            const altimDisplay = translateMetar?.(`${data.altim ?? '--'} hPa`) || `${data.altim ?? '--'} hPa`;
+            const visibDisplay = translateMetar?.(`${data.visib ?? '--'} SM`, 'VISIB') || `${data.visib ?? '--'} SM`;
+            const altimDisplay = translateMetar?.(`${data.altim ?? '--'} hPa`, 'ALTIM') || `${data.altim ?? '--'} hPa`;
 
             popup.setContent(`
                         <div class="ap-card">
@@ -68,12 +68,12 @@ export default function MapView({
                             <div class="ap-icao">${ap.icao} · ${elevLabel} ${data.elev || '--'}ft (${elevM}m)</div>
                             <div class="ap-fltcat ${fltCatClass}">${data.fltCat || '--'}</div>
                             <div class="ap-grid">
-                                <div class="ap-item"><span class="ap-label">🌡</span><span class="ap-val">${data.temp ?? '--'}°C</span></div>
-                                <div class="ap-item"><span class="ap-label">💧</span><span class="ap-val">${data.dewp ?? '--'}°C</span></div>
-                                <div class="ap-item"><span class="ap-label">🌬</span><span class="ap-val">${windDir} ${windDisplay}</span></div>
-                                <div class="ap-item"><span class="ap-label">👁</span><span class="ap-val">${visibDisplay}</span></div>
-                                <div class="ap-item"><span class="ap-label">☁</span><span class="ap-val">${cloudStr}</span></div>
-                                <div class="ap-item"><span class="ap-label">📊</span><span class="ap-val">${altimDisplay}</span></div>
+                                <div class="ap-item"><span class="ap-label">🌡</span><span class="ap-desc">${t('metarTemp')}:</span><span class="ap-val">${data.temp ?? '--'}°C</span></div>
+                                <div class="ap-item"><span class="ap-label">💧</span><span class="ap-desc">${t('metarDew')}:</span><span class="ap-val">${data.dewp ?? '--'}°C</span></div>
+                                <div class="ap-item"><span class="ap-label">🌬</span><span class="ap-desc">${t('metarWind')}:</span><span class="ap-val">${windDisplay}</span></div>
+                                <div class="ap-item"><span class="ap-label">👁</span><span class="ap-desc">${t('metarVis')}:</span><span class="ap-val">${visibDisplay}</span></div>
+                                <div class="ap-item"><span class="ap-label">☁</span><span class="ap-desc">${t('metarClouds')}:</span><span class="ap-val">${cloudStr}</span></div>
+                                <div class="ap-item"><span class="ap-label">📊</span><span class="ap-desc">${t('metarBaro')}:</span><span class="ap-val">${altimDisplay}</span></div>
                             </div>
                             <div class="ap-metar">${data.rawOb || '--'}</div>
                         </div>
@@ -188,11 +188,14 @@ export default function MapView({
         }
     }
 
-    // 監聽 showAirports filter 變化
+    // 監聽 showAirports filter 與 語系 (t) 變化
     useEffect(() => {
         const map = mapRef.current;
-        if (map) updateAirportVisibility(map);
-    }, [filters.showAirports]);
+        if (map) {
+            map.closePopup(); // 語系切換時關閉舊氣泡，防止殘留舊語言內容
+            updateAirportVisibility(map);
+        }
+    }, [filters.showAirports, t, translateMetar]);
 
     // ===== 過濾器：判斷是否顯示飛機 =====
     const shouldShowPlane = useCallback(

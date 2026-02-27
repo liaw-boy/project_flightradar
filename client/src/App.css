@@ -216,25 +216,35 @@
 
 .ap-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    margin-bottom: 10px;
+    grid-template-columns: 1fr;
+    /* 切換為單欄位確保長中文標籤不被擠壓 */
+    gap: 8px;
+    margin-bottom: 12px;
 }
 
 .ap-item {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 12px;
+    gap: 8px;
+    font-size: 13px;
+    /* 稍微放大字體 */
 }
 
 .ap-label {
-    font-size: 14px;
+    font-size: 16px;
     flex-shrink: 0;
+    width: 20px;
+    text-align: center;
+}
+
+.ap-desc {
+    color: #888;
+    min-width: 50px;
 }
 
 .ap-val {
-    color: #ddd;
+    color: #fff;
+    /* 調亮數值顏色 */
     font-weight: bold;
 }
 

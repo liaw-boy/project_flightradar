@@ -1,0 +1,82 @@
+{
+    "EVA191": {
+        "dep": "HND",
+        "arr": "TSA",
+        "name": "羽田 ✈️ 松山"
+    },
+    "EVA192": {
+        "dep": "TSA",
+        "arr": "HND",
+        "name": "松山 ✈️ 羽田"
+    },
+    "EVA261": {
+        "dep": "MNL",
+        "arr": "TPE",
+        "name": "馬尼拉 ✈️ 桃園"
+    },
+    "EVA262": {
+        "dep": "TPE",
+        "arr": "MNL",
+        "name": "桃園 ✈️ 馬尼拉"
+    },
+    "CAL100": {
+        "dep": "TPE",
+        "arr": "NRT",
+        "name": "桃園 ✈️ 成田"
+    },
+    "CAL101": {
+        "dep": "NRT",
+        "arr": "TPE",
+        "name": "成田 ✈️ 桃園"
+    },
+    "CAL220": {
+        "dep": "TSA",
+        "arr": "HND",
+        "name": "松山 ✈️ 羽田"
+    },
+    "CAL221": {
+        "dep": "HND",
+        "arr": "TSA",
+        "name": "羽田 ✈️ 松山"
+    },
+    "SJX800": {
+        "dep": "TPE",
+        "arr": "NRT",
+        "name": "桃園 ✈️ 成田"
+    },
+    "SJX801": {
+        "dep": "NRT",
+        "arr": "TPE",
+        "name": "成田 ✈️ 桃園"
+    },
+    "ANA851": {
+        "dep": "HND",
+        "arr": "TSA",
+        "name": "羽田 ✈️ 松山"
+    },
+    "ANA852": {
+        "dep": "TSA",
+        "arr": "HND",
+        "name": "松山 ✈️ 羽田"
+    },
+    "JAL96": {
+        "dep": "TSA",
+        "arr": "HND",
+        "name": "松山 ✈️ 羽田"
+    },
+    "JAL97": {
+        "dep": "HND",
+        "arr": "TSA",
+        "name": "羽田 ✈️ 松山"
+    },
+    "CPA400": {
+        "dep": "HKG",
+        "arr": "TPE",
+        "name": "香港 ✈️ 桃園"
+    },
+    "CPA401": {
+        "dep": "TPE",
+        "arr": "HKG",
+        "name": "桃園 ✈️ 香港"
+    }
+}

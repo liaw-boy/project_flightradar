@@ -36,7 +36,7 @@ export default function Dashboard({
         <div className="dashboard">
             <div className="title-container">
                 <div className={`live-dot ${isOnline ? '' : 'offline'}`} />
-                <h2>{t('radarSystem')} <span className="version-label">v1.1.8</span></h2>
+                <h2>{t('radarSystem')} <span className="version-label">v1.1.13</span></h2>
                 <button className="lang-toggle" onClick={toggleLang}>
                     {lang === 'en' ? 'EN/中' : '中/EN'}
                 </button>

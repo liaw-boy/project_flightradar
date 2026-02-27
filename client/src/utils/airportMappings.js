@@ -63287,6 +63287,14 @@ export const AIRPORT_IATA_DB = {
     "lat": 40.542524,
     "lng": 122.3586,
     "type": "medium"
+  },
+  "RKSG": {
+    "iata": "HIN",
+    "city": "SACHEON",
+    "name": "Sacheon Airport",
+    "lat": 35.0886,
+    "lng": 128.083,
+    "type": "medium"
   }
 };
 
@@ -134492,11 +134500,31 @@ export const GLOBAL_AIRPORTS = [
   }
 ];
 
-export function getAirportDisplayData(icao) {
-    if (!icao || icao.length !== 4) return { code: icao || 'N/A', city: '' };
-    const upper = icao.toUpperCase();
+/**
+ * 取得機場顯示資料 (優先回傳 IATA)
+ */
+export function getAirportDisplayData(code) {
+  if (!code) return { code: 'N/A', city: '' };
+  const upper = code.toUpperCase();
+
+  // 1. 如果是 4 位碼，嘗試 ICAO 查 IATA
+  if (upper.length === 4) {
     if (AIRPORT_IATA_DB[upper]) {
-        return { code: AIRPORT_IATA_DB[upper].iata, city: AIRPORT_IATA_DB[upper].city };
+      return {
+        code: AIRPORT_IATA_DB[upper].iata || upper,
+        city: AIRPORT_IATA_DB[upper].city
+      };
     }
-    return { code: upper, city: '' };
+  }
+
+  // 2. 如果是 3 位碼或是 ICAO 沒查到，嘗試用 IATA 反向查 City
+  if (upper.length === 3 || upper.length === 4) {
+    // 為了效能，這裡直接找看看是否有對應的 IATA 入口
+    const entry = Object.values(AIRPORT_IATA_DB).find(a => a.iata === upper);
+    if (entry) {
+      return { code: upper, city: entry.city };
+    }
+  }
+
+  return { code: upper, city: '' };
 }

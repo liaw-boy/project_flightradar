@@ -1,20 +1,40 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 
 /**
- * METAR 專用氣象術語字典
+ * METAR 專用氣象術語字典 (解碼對照表)
  */
-const metarDict = {
+const metarDictionary = {
     cn: {
         'FEW': '疏雲',
         'SCT': '散雲',
         'BKN': '裂雲',
         'OVC': '密雲',
         'CAVOK': '晴空萬里',
-        'kt': '節',
-        'SM': '哩',
-        'hPa': '百帕',
-        'Variable': '微風不定',
-        'Elev': '標高'
+        'NSC': '無顯著雲層',
+        'SKC': '晴朗',
+        'CLR': '晴朗',
+        'Variable': '風向不定',
+        'Elev': '標高',
+        // 天氣現象
+        'RA': '降雨',
+        'SN': '降雪',
+        'TS': '雷暴',
+        'FG': '霧',
+        'BR': '薄霧',
+        'HZ': '霾',
+        'DZ': '毛毛雨',
+        'VC': '附近有',
+        // 風向方位
+        'N': '北風', 'NNE': '北北東風', 'NE': '東北風', 'ENE': '東北東風',
+        'E': '東風', 'ESE': '東南東風', 'SE': '東南風', 'SSE': '南南東風',
+        'S': '南風', 'SSW': '南南西風', 'SW': '西南風', 'WSW': '西南西風',
+        'W': '西風', 'WNW': '西北西風', 'NW': '西北風', 'NNW': '北北西風'
+    },
+    en: {
+        'Variable': 'Variable',
+        'Elev': 'Elev',
+        'N': 'North', 'NE': 'Northeast', 'E': 'East', 'SE': 'Southeast',
+        'S': 'South', 'SW': 'Southwest', 'W': 'West', 'NW': 'Northwest'
     }
 };
 
@@ -80,6 +100,12 @@ const translations = {
         // Weather
         weatherData: 'No weather data available',
         weatherFailed: 'Failed to load weather',
+        metarTemp: 'Temp',
+        metarDew: 'Dewpt',
+        metarWind: 'Wind',
+        metarVis: 'Visib',
+        metarClouds: 'Clouds',
+        metarBaro: 'Baro'
     },
     cn: {
         // Dashboard
@@ -128,7 +154,7 @@ const translations = {
         spiLabel: 'SPI',
         lastContact: '最後聯繫',
         dataAge: '資料年齡',
-        nearestAirport: '🏗️ 最近機場',
+        nearestAirport: '🏗️ NEAREST AIRPORT',
         airport: '機場',
         distance: '距離',
         trackOnFR24: '🔍 在 Flightradar24 追蹤 ↗',
@@ -139,6 +165,12 @@ const translations = {
         // Weather
         weatherData: '無氣象觀測資料',
         weatherFailed: '氣象資料載入失敗',
+        metarTemp: '溫度',
+        metarDew: '露點',
+        metarWind: '風向',
+        metarVis: '能見度',
+        metarClouds: '雲層',
+        metarBaro: '氣壓'
     },
 };
 
@@ -156,15 +188,65 @@ export function I18nProvider({ children }) {
         [lang]
     );
 
-    const translateMetar = useCallback((str) => {
-        if (lang === 'en' || !str) return str;
-        let translated = str;
-        const dict = metarDict.cn;
-        for (const [key, val] of Object.entries(dict)) {
-            // Use regex to replace exact whole words to avoid partial matching issues
-            translated = translated.replace(new RegExp(`\\b${key}\\b`, 'g'), val);
+    /**
+     * 人性化氣象譯碼器 (METAR Decoder)
+     */
+    const translateMetar = useCallback((str, type) => {
+        if (!str) return '';
+        const isCn = lang === 'cn';
+        const dict = metarDictionary[lang] || {};
+
+        const getDirName = (deg) => {
+            if (deg === 'VRB') return dict['Variable'] || 'Variable';
+            const d = parseFloat(deg);
+            const sectors = isCn
+                ? ['北', '北北東', '東北', '東北東', '東', '東南東', '東南', '南南東', '南', '南南西', '西南', '西南西', '西', '西北西', '西北', '北北西']
+                : ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+            return (sectors[Math.round(d / 22.5) % 16] || '') + (isCn ? '風' : '');
+        };
+
+        switch (type) {
+            case 'WIND': // Input: "280° 6kt"
+                const wParts = str.split(' ');
+                const deg = wParts[0]?.replace('°', '');
+                const spd = wParts[1]?.replace('kt', '');
+                const dirName = getDirName(deg);
+                return isCn ? `${dirName} ${spd}節` : `${dirName} ${spd}kts`;
+
+            case 'VISIB': // Input: "6+ SM"
+                const vMatch = str.match(/(\d+)\+?\s*SM/);
+                if (vMatch) {
+                    const sm = parseInt(vMatch[1]);
+                    const km = Math.round(sm * 1.609);
+                    if (str.includes('+')) {
+                        return isCn ? `大於 ${km}公里` : `Greater than ${km}km`;
+                    }
+                    return isCn ? `${km}公里` : `${km}km`;
+                }
+                return str;
+
+            case 'CLOUDS': // Input: "FEW 2000ft, SCT 4500ft"
+                return str.split(', ').map(c => {
+                    const cParts = c.split(' ');
+                    const cover = dict[cParts[0]] || cParts[0];
+                    const base = cParts[1]?.replace('ft', '') || '';
+                    return isCn ? `${base}呎 ${cover}` : `${cover} at ${base}ft`;
+                }).join(', ');
+
+            case 'ALTIM': // Input: "1009 hPa"
+                const hpa = str.replace(' hPa', '');
+                return isCn ? `${hpa} 百帕` : `${hpa} hPa`;
+
+            default:
+                // Fallback direct dictionary replacement (Only if CN)
+                if (!isCn) return str;
+                let translated = str;
+                const cnDict = metarDictionary.cn;
+                for (const [key, val] of Object.entries(cnDict)) {
+                    translated = translated.replace(new RegExp(`\\b${key}\\b`, 'g'), val);
+                }
+                return translated;
         }
-        return translated;
     }, [lang]);
 
     return (
