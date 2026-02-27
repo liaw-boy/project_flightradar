@@ -147,3 +147,147 @@
     border-top: 1px solid rgba(0, 255, 65, 0.2);
     margin: 5px 0;
 }
+
+/* ===== API Stats Accordion ===== */
+.api-stats-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    margin-top: 5px;
+    background: rgba(1, 255, 112, 0.05);
+    border: 1px solid rgba(1, 255, 112, 0.2);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #01FF70;
+    transition: all 0.3s ease;
+}
+
+.api-stats-header:hover {
+    background: rgba(1, 255, 112, 0.15);
+}
+
+.api-stats-icon {
+    font-size: 10px;
+    transition: transform 0.3s ease;
+}
+
+.api-stats-header.open .api-stats-icon {
+    transform: rotate(180deg);
+}
+
+.api-stats-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
+    opacity: 0;
+}
+
+.api-stats-content.open {
+    max-height: 400px;
+    /* Increased to fit multiple accounts */
+    padding-top: 8px;
+    opacity: 1;
+}
+
+.api-stats-content .stat-row {
+    margin-bottom: 4px;
+}
+
+/* ===== Multi-Account Dashboard Cards ===== */
+.account-card {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(1, 255, 112, 0.15);
+    border-radius: 6px;
+    margin-top: 8px;
+    padding: 8px;
+}
+
+.account-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 4px;
+    margin-bottom: 8px;
+    font-size: 11px;
+}
+
+.account-name {
+    color: #fff;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+
+.account-status {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+}
+
+.account-status.healthy {
+    background: rgba(1, 255, 112, 0.15);
+    color: #01FF70;
+}
+
+.account-status.danger {
+    background: rgba(255, 65, 54, 0.15);
+    color: #FF4136;
+}
+
+.account-body {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.circle-progress {
+    position: relative;
+    width: 48px;
+    height: 48px;
+}
+
+.circle-progress svg {
+    transform: rotate(-90deg);
+}
+
+.circle-progress circle {
+    fill: none;
+    stroke-width: 4;
+}
+
+.circle-bg {
+    stroke: rgba(255, 255, 255, 0.1);
+}
+
+.circle-fg {
+    transition: stroke-dashoffset 0.5s ease-in-out, stroke 0.5s ease;
+    stroke-linecap: round;
+}
+
+.circle-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.account-details {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+}
+
+.detail-row span:first-child {
+    color: rgba(255, 255, 255, 0.6);
+}

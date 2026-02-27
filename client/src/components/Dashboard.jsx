@@ -16,6 +16,7 @@ export default function Dashboard({
 }) {
     const [time, setTime] = useState('--:--:--');
     const [isOnline, setIsOnline] = useState(true);
+    const [showApiStats, setShowApiStats] = useState(false);
     const { t, lang, toggleLang } = useI18n();
 
     useEffect(() => {
@@ -35,7 +36,7 @@ export default function Dashboard({
         <div className="dashboard">
             <div className="title-container">
                 <div className={`live-dot ${isOnline ? '' : 'offline'}`} />
-                <h2>{t('radarSystem')} <span style={{ fontSize: '0.6em', color: '#01FF70', opacity: 0.8, marginLeft: '8px', verticalAlign: 'middle', border: '1px solid rgba(1,255,112,0.3)', padding: '2px 4px', borderRadius: '4px' }}>v1.0.26</span></h2>
+                <h2>{t('radarSystem')} <span style={{ fontSize: '0.6em', color: '#01FF70', opacity: 0.8, marginLeft: '8px', verticalAlign: 'middle', border: '1px solid rgba(1,255,112,0.3)', padding: '2px 4px', borderRadius: '4px' }}>v1.1.0</span></h2>
                 <button className="lang-toggle" onClick={toggleLang}>
                     {lang === 'en' ? 'EN/中' : '中/EN'}
                 </button>
@@ -84,19 +85,88 @@ export default function Dashboard({
             )}
 
             <div className="stat-divider" />
-            <div className="stat-row">
-                <span>{t('apiCalls')}</span>
-                <span className="stat-value">{apiStats?.totalCalls ?? 0}</span>
+
+            <div
+                className={`api-stats-header ${showApiStats ? 'open' : ''}`}
+                onClick={() => setShowApiStats(!showApiStats)}
+            >
+                <span>💻 API STATS</span>
+                <span className="api-stats-icon">▼</span>
             </div>
-            <div className="stat-row">
-                <span>{t('rateLimits')}</span>
-                <span className={`stat-value ${(apiStats?.rateLimits || 0) > 0 ? 'stat-warning' : ''}`}>
-                    {apiStats?.rateLimits ?? 0}
-                </span>
-            </div>
-            <div className="stat-row">
-                <span>{t('dbCache')}</span>
-                <span className="stat-value">{apiStats?.metadataCacheSize ?? 0}</span>
+
+            <div className={`api-stats-content ${showApiStats ? 'open' : ''}`}>
+                <div className="stat-row">
+                    <span>{t('apiCalls')}</span>
+                    <span className="stat-value">{apiStats?.totalCalls ?? 0}</span>
+                </div>
+
+                {apiStats?.accounts?.map((acc, index) => {
+                    const maxQuota = 4000;
+                    const remaining = acc.remainingCredits !== null ? acc.remainingCredits : 0;
+                    const percentage = Math.max(0, Math.min(100, Math.round((remaining / maxQuota) * 100)));
+
+                    // SVG Circle Dash Array Logic
+                    const radius = 18;
+                    const circumference = 2 * Math.PI * radius;
+                    const strokeDashoffset = circumference - (percentage / 100) * circumference;
+
+                    const isLimited = acc.unlockTime && new Date(acc.unlockTime).getTime() > Date.now();
+                    const ringColor = isLimited ? '#FF4136' : (percentage < 20 ? '#FFDC00' : '#01FF70');
+
+                    // 計算當天 UTC 00:00 的重置時間 (轉換為當地時間)
+                    const now = new Date();
+                    const nextResetUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+                    const resetTimeString = nextResetUTC.toLocaleTimeString('en-US', { hour12: false });
+
+                    return (
+                        <div key={index} className="account-card">
+                            <div className="account-header">
+                                <span className="account-name">ID: {acc.user?.split('-')[0] || `ACC-${index + 1}`}</span>
+                                <span className={`account-status ${isLimited ? 'danger' : 'healthy'}`}>
+                                    {isLimited ? 'RESTRICTED' : 'HEALTHY'}
+                                </span>
+                            </div>
+                            <div className="account-body">
+                                <div className="circle-progress">
+                                    <svg width="48" height="48">
+                                        <circle cx="24" cy="24" r={radius} className="circle-bg" />
+                                        <circle cx="24" cy="24" r={radius} className="circle-fg"
+                                            style={{
+                                                strokeDasharray: circumference,
+                                                strokeDashoffset: isLimited ? circumference : strokeDashoffset,
+                                                stroke: ringColor
+                                            }}
+                                        />
+                                    </svg>
+                                    <div className="circle-text" style={{ color: ringColor }}>
+                                        {isLimited ? '0%' : `${percentage}%`}
+                                    </div>
+                                </div>
+                                <div className="account-details">
+                                    <div className="detail-row">
+                                        <span>QUOTA:</span>
+                                        <span style={{ color: ringColor }}>
+                                            {isLimited ? '0' : (acc.remainingCredits ?? '--')}
+                                        </span>
+                                    </div>
+                                    {isLimited ? (
+                                        <div className="detail-row">
+                                            <span style={{ color: '#FFDC00' }}>UNLOCKS:</span>
+                                            <span style={{ color: '#FFDC00' }}>
+                                                {new Date(acc.unlockTime).toLocaleTimeString('en-US', { hour12: false })}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <div className="detail-row">
+                                            <span>RESETS:</span>
+                                            <span style={{ color: 'rgba(255,255,255,0.7)' }}>{resetTimeString}</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })}
             </div>
         </div>
     );

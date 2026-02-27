@@ -19,6 +19,7 @@ export function useFlightData(mapRef, showNotification) {
     const [latency, setLatency] = useState(null);
     const [lastUpdateTime, setLastUpdateTime] = useState(null);
     const [apiStats, setApiStats] = useState(null);
+    const [throttleSeconds, setThrottleSeconds] = useState(30);
 
     const flightHistoryRef = useRef({});
     const isFetchingRef = useRef(false);
@@ -53,6 +54,15 @@ export function useFlightData(mapRef, showNotification) {
 
             if (!response.ok) {
                 let errorMsg = `Error ${response.status} (${response.statusText})`;
+
+                try {
+                    const clonedRes = response.clone();
+                    const errData = await clonedRes.json();
+                    if (errData.stats) {
+                        setApiStats(errData.stats);
+                    }
+                } catch (e) { }
+
                 try {
                     const text = await response.text();
                     if (text) errorMsg = `Error ${response.status}: ${text.substring(0, 100)}`;
@@ -73,6 +83,9 @@ export function useFlightData(mapRef, showNotification) {
                 setApiStats(data.stats);
             }
 
+            const intervalDelay = data.recommendedInterval || 30;
+            setThrottleSeconds(intervalDelay);
+
             const parsedPlanes = parseOpenSkyData(data, data.stale === true);
 
             if (parsedPlanes.length > 0) {
@@ -86,6 +99,14 @@ export function useFlightData(mapRef, showNotification) {
                 setApiStatusClass('stat-warning');
                 setApiErrorDetail('API reached successfully but returned 0 planes.');
             }
+
+            // 排定下一次抓取 (依照後端要求的安全時間延展)
+            setTimeout(() => {
+                isFetchingRef.current = false;
+                fetchPlanes();
+            }, intervalDelay * 1000);
+
+            return; // 成功結束，不需要走 default finally
         } catch (error) {
             const elapsed = Math.round(performance.now() - startTime);
             setLatency(elapsed);
@@ -102,15 +123,13 @@ export function useFlightData(mapRef, showNotification) {
             }
             setApiStatusClass('stat-error');
 
-            // 失敗後 5 秒快速重試 (後端快取可能已有資料)
+            // 失敗後 5 秒快速重試 (不要太快，給後端一點喘息空間)
             setTimeout(() => {
                 isFetchingRef.current = false;
                 fetchPlanes();
             }, 5000);
-            return; // 跳過下面的 isFetchingRef reset
+            return;
         }
-
-        isFetchingRef.current = false;
     }, []);
 
     // 處理飛機資料
@@ -252,11 +271,18 @@ export function useFlightData(mapRef, showNotification) {
         return history.slice(latestSegmentStartIdx).map((p) => [p[1], p[2]]);
     }, []);
 
-    // 定時更新飛機 (正式上線 11秒)
+    // 定時更新飛機    // 初次載入驅動迴圈
     useEffect(() => {
-        fetchPlanes();
-        const interval = setInterval(fetchPlanes, 11000);
-        return () => clearInterval(interval);
+        if (!isFetchingRef.current) {
+            fetchPlanes();
+        }
+
+        // Timer countdown sync for UI (不負責 fetch，只負責倒數顯示)
+        const uiTimer = setInterval(() => {
+            setThrottleSeconds((prev) => Math.max(0, prev - 1));
+        }, 1000);
+
+        return () => clearInterval(uiTimer);
     }, [fetchPlanes]);
 
     return {
@@ -268,6 +294,7 @@ export function useFlightData(mapRef, showNotification) {
         apiStatus,
         apiStatusClass,
         apiErrorDetail,
+        throttleSeconds,
         latency,
         lastUpdateTime,
         apiStats,

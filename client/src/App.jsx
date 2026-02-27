@@ -22,7 +22,6 @@ export default function App() {
         showLow: true,
         showAirports: true,
     });
-    const [nextRefresh, setNextRefresh] = useState(null);
 
     const mapInstanceRef = useRef(null);
     const { notifications, showNotification } = useNotification();
@@ -37,29 +36,10 @@ export default function App() {
         latency,
         lastUpdateTime,
         apiStats,
+        throttleSeconds,
         fetchPlanes,
         fetchTrack,
     } = useFlightData(mapInstanceRef, showNotification);
-
-    // NEXT REFRESH 倒數計時器
-    const POLL_INTERVAL = 30;
-    useEffect(() => {
-        let countdown = POLL_INTERVAL;
-        setNextRefresh(countdown);
-        const timer = setInterval(() => {
-            countdown--;
-            if (countdown <= 0) countdown = POLL_INTERVAL;
-            setNextRefresh(countdown);
-        }, 1000);
-        return () => clearInterval(timer);
-    }, [lastUpdateTime]);
-
-    // 後端 30 秒自動更新
-    useEffect(() => {
-        fetchPlanes();
-        const interval = setInterval(fetchPlanes, 30000);
-        return () => clearInterval(interval);
-    }, [fetchPlanes]);
 
     // 載入動畫
     useEffect(() => {
@@ -165,7 +145,7 @@ export default function App() {
                 apiErrorDetail={apiErrorDetail}
                 latency={latency}
                 lastUpdateTime={lastUpdateTime}
-                nextRefresh={nextRefresh}
+                nextRefresh={throttleSeconds}
                 apiStats={apiStats}
             />
 

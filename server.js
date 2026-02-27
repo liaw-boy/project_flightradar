@@ -145,7 +145,12 @@ var apiStats = {
     stateCalls: 0,
     metadataCalls: 0,
     cacheHits: 0,
-    rateLimits: 0,
+    accounts: ACCOUNTS.map(acc => ({
+        user: acc.user,
+        remainingCredits: null,
+        unlockTime: null,
+        rateLimits: 0
+    })),
     errors: 0,
     lastError: null,
     lastErrorTime: null,
@@ -159,16 +164,47 @@ app.get('/api/stats', function (req, res) {
         stateCalls: apiStats.stateCalls,
         metadataCalls: apiStats.metadataCalls,
         cacheHits: apiStats.cacheHits,
-        rateLimits: apiStats.rateLimits,
+        accounts: apiStats.accounts,
         errors: apiStats.errors,
         lastError: apiStats.lastError,
         lastErrorTime: apiStats.lastErrorTime,
         lastSuccessTime: apiStats.lastSuccessTime,
         uptimeMinutes: Math.round((Date.now() - apiStats.startTime) / 60000),
-        metadataCacheSize: Object.keys(aircraftMetadataCache).length,
+        recommendedInterval: calculateRecommendedInterval(),
         activeAccount: ACCOUNTS.length > 0 ? `${currentAccountIndex + 1}/${ACCOUNTS.length} (${ACCOUNTS[currentAccountIndex].user})` : 'none'
     });
 });
+
+// ==========================================
+// 動態 Quota 延展機制 (Quota Stretching)
+// ==========================================
+function calculateRecommendedInterval() {
+    let minInterval = 15; // 絕對底線 (秒)，避免打太快被強制封鎖
+
+    if (ACCOUNTS.length === 0) return minInterval;
+
+    const currentAcc = apiStats.accounts[currentAccountIndex];
+
+    // 如果目前帳號被鎖定了，或者 quota 資料還沒進來，先給一個保守的預設值 (30秒)
+    if (currentAcc.unlockTime && new Date(currentAcc.unlockTime).getTime() > Date.now()) return 30;
+    if (currentAcc.remainingCredits === null || currentAcc.remainingCredits === undefined) return minInterval;
+
+    const remaining = currentAcc.remainingCredits;
+    // 如果剩餘額度低到危險值 (例如剩不到 20 次)，強制拉長間距到 5 分鐘
+    if (remaining < 20) return 300;
+
+    // 計算距離今日 UTC 00:00 的剩餘秒數
+    const now = new Date();
+    const tomorrowUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+    const secondsUntilReset = Math.floor((tomorrowUTC.getTime() - now.getTime()) / 1000);
+
+    // 留 100 次當作緊急緩衝，剩下的額度平分給剩下的秒數
+    const safeCredits = Math.max(1, remaining - 100);
+    const calculatedInterval = Math.ceil(secondsUntilReset / safeCredits);
+
+    // 限制在 15秒 到 300秒 之間
+    return Math.max(minInterval, Math.min(300, calculatedInterval));
+}
 
 // 取得飛機狀態（代理 OpenSky /states/all）
 const activeRequests = new Map();
@@ -187,23 +223,23 @@ app.get('/api/states', async (req, res) => {
         console.log(`⏳ [GLOBAL COOLDOWN] OpenSky Daily Limits reached. Sleeping for ${Math.round((globalRateLimitCooldown - Date.now()) / 1000)}s...`);
         const cached = getCached(cacheKey);
         if (cached && cached.states) {
-            return res.json({ time: Date.now(), states: cached.states, stats: apiStats, stale: true });
+            return res.json({ time: Date.now(), states: cached.states, stats: apiStats, recommendedInterval: calculateRecommendedInterval(), stale: true });
         }
-        return res.status(429).json({ error: "Rate Limited" });
+        return res.status(429).json({ error: "Rate Limited", stats: apiStats, recommendedInterval: calculateRecommendedInterval() });
     }
 
     // 檢查快取
     const cached = getCached(cacheKey);
     if (cached) {
         console.log(`✅ [CACHE HIT] ${cacheKey}`);
-        return res.json({ time: Date.now(), states: cached.states, stats: apiStats });
+        return res.json({ time: Date.now(), states: cached.states, stats: apiStats, recommendedInterval: calculateRecommendedInterval() });
     }
 
     if (activeRequests.has(cacheKey)) {
         console.log(`⏳ [STAMPEDE PREVENT] Waiting for existing request for ${cacheKey}...`);
         try {
             const data = await activeRequests.get(cacheKey);
-            return res.json({ time: Date.now(), states: data.states, stats: apiStats });
+            return res.json({ time: Date.now(), states: data.states, stats: apiStats, recommendedInterval: calculateRecommendedInterval() });
         } catch (error) {
             // failed, fall through to stale cache below
         }
@@ -231,22 +267,34 @@ app.get('/api/states', async (req, res) => {
                     if (!response.ok) {
                         const errorText = await response.text();
 
-                        // 429 Rate Check -> Rotate and Retry
                         if (response.status === 429) {
                             console.warn(`⚠️ [RATE LIMIT] Account ${ACCOUNTS[currentAccountIndex].user} limited. Rotating...`);
-                            apiStats.rateLimits++;
+                            apiStats.accounts[currentAccountIndex].rateLimits++;
 
-                            if (rotateAccount()) {
+                            const retryStr = response.headers.get('x-rate-limit-retry-after-seconds');
+                            if (retryStr) {
+                                apiStats.accounts[currentAccountIndex].unlockTime = new Date(Date.now() + parseInt(retryStr, 10) * 1000).toISOString();
+                            }
+
+                            if (retries > 1 && rotateAccount()) {
                                 retries--;
                                 continue; // Retry loop with new account
                             } else {
-                                globalRateLimitCooldown = Date.now() + 5 * 60 * 1000; // 5 min penalty box
-                                console.error(`🛑 [FATAL] ALL OPEN SKY ACCOUNTS RATE LIMITED. Halting requests for 5 minutes.`);
-                                throw new Error('All accounts rate limited');
+                                const penaltySeconds = retryStr ? parseInt(retryStr, 10) : 5 * 60;
+                                globalRateLimitCooldown = Date.now() + (penaltySeconds * 1000);
+                                console.error(`🛑 [FATAL] ALL OPEN SKY ACCOUNTS RATE LIMITED. Halting requests for ${penaltySeconds} seconds.`);
+                                throw new Error(`All accounts exhausted. Resumes in ${penaltySeconds}s`);
                             }
                         }
 
                         throw new Error(`OpenSky API error: ${response.status} ${errorText.substring(0, 100)}`);
+                    }
+
+                    const remainingStr = response.headers.get('x-rate-limit-remaining');
+                    if (remainingStr) {
+                        apiStats.accounts[currentAccountIndex].remainingCredits = parseInt(remainingStr, 10);
+                        // 如果成功獲得 quota，就清空這個帳號的解鎖時間
+                        apiStats.accounts[currentAccountIndex].unlockTime = null;
                     }
 
                     const data = await response.json();
@@ -261,9 +309,11 @@ app.get('/api/states', async (req, res) => {
                 } catch (error) {
                     lastError = error;
                     console.error(`❌ [FETCH ERROR] ${error.message}`);
-                    if (!error.message.includes('Rate limited') && !error.message.includes('All accounts')) {
+                    if (error.message.includes('All accounts')) break;
+                    if (!error.message.includes('Rate limited')) {
                         break;
                     }
+                    retries--;
                     if (retries <= 0) break;
                 }
             }
@@ -279,7 +329,7 @@ app.get('/api/states', async (req, res) => {
         try {
             const data = await fetchPromise;
             activeRequests.delete(cacheKey);
-            return res.json({ time: Date.now(), states: data.states, stats: apiStats });
+            return res.json({ time: Date.now(), states: data.states, stats: apiStats, recommendedInterval: calculateRecommendedInterval() });
         } catch (err) {
             activeRequests.delete(cacheKey);
             // fail through to stale cache
