@@ -290,5 +290,45 @@
   "CRK261": {
     "dep": "VHHH",
     "arr": "ZSFZ"
+  },
+  "EVA238": {
+    "dep": "WIII",
+    "arr": "RCTP"
+  },
+  "CPA3083": {
+    "dep": "KLAX",
+    "arr": "KPDX"
+  },
+  "UIA8620": {
+    "dep": "RCKH",
+    "arr": "RCWA"
+  },
+  "MDA378": {
+    "dep": "RCMQ",
+    "arr": "RCQC"
+  },
+  "UIA9119": {
+    "dep": "RCKH",
+    "arr": "RCQC"
+  },
+  "UAL837": {
+    "dep": "KSFO",
+    "arr": "RJAA"
+  },
+  "JJA6163": {
+    "dep": "VTBS",
+    "arr": "RJFU"
+  },
+  "EVA810": {
+    "dep": "VHHH",
+    "arr": "RCTP"
+  },
+  "CES2974": {
+    "dep": "ZBLA",
+    "arr": "ZSNJ"
+  },
+  "EVA715": {
+    "dep": "ZBAA",
+    "arr": "RCTP"
   }
 }

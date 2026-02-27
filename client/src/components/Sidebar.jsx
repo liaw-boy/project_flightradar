@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useI18n } from '../hooks/useI18n';
 import {
     getAirlineLogoUrl,
     getAirlineName,
@@ -8,9 +7,33 @@ import {
     getNearestAirport,
     formatVerticalRate,
     getAirportDisplayData,
+    createPlaneSVG,
+    AIRLINE_LOGOS,
+    AIRPORTS
 } from '../utils/flightUtils';
+import { useI18n } from '../hooks/useI18n';
+import { logToServer } from '../utils/logger';
 import './Sidebar.css';
 
+// Helper to format time in a specific timezone
+const formatLocalTime = (timestamp, icao) => {
+    if (!timestamp) return '--:--';
+    const airport = AIRPORTS.find(a => a.icao === icao);
+    const timeZone = airport?.timezone || undefined;
+
+    try {
+        const formatter = new Intl.DateTimeFormat([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+            timeZone,
+            timeZoneName: 'short'
+        });
+        return formatter.format(new Date(timestamp * 1000));
+    } catch (e) {
+        return new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+};
 export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
     if (!plane || !icao24) return null;
 
@@ -20,6 +43,10 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
     const dataAge = nowUnix - (plane.lastContact || nowUnix);
     const contactTime = new Date((plane.lastContact || nowUnix) * 1000).toLocaleTimeString();
     const fr24Url = `https://www.flightradar24.com/${plane.callsign}`;
+
+    const handleFr24Click = () => {
+        logToServer(`User tracking flight on FR24: ${plane.callsign}`, 'info', { callsign: plane.callsign, icao24 });
+    };
 
     const airlineName = getAirlineName(plane.callsign);
     const flag = getCountryFlag(plane.country);
@@ -135,12 +162,14 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                             <div className="sb-route-time left">
                                 <span className="time-label">ACTUAL DEP:</span>
                                 <span className="time-val">
-                                    {route?.firstSeen ? new Date(route.firstSeen * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                                    {formatLocalTime(route?.firstSeen, route?.departureAirport)}
                                 </span>
                             </div>
                             <div className="sb-route-time right" style={{ textAlign: 'right' }}>
                                 <span className="time-label">ESTIMATED:</span>
-                                <span className="time-val">TBD</span>
+                                <span className="time-val">
+                                    {formatLocalTime(route?.lastSeen, route?.arrivalAirport)}
+                                </span>
                             </div>
                         </div>
                     )}
@@ -202,7 +231,7 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                         </div>
                         {openSections.nearest && (
                             <div className="sb-section-content">
-                                <DataRow label={t('airport')} value={`${nearest.airport.icao} - ${nearest.airport.name}`} />
+                                <DataRow label={t('airport')} value={`${nearest.airport.icao} - ${t('airportName', nearest.airport.icao) || nearest.airport.name}`} />
                                 <DataRow label={t('distance')} value={`${nearest.distance} km`} />
                             </div>
                         )}
@@ -210,7 +239,7 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                 )}
 
                 {/* FR24 連結 */}
-                <a href={fr24Url} target="_blank" rel="noopener noreferrer" className="route-btn">
+                <a href={fr24Url} target="_blank" rel="noopener noreferrer" className="route-btn" onClick={handleFr24Click}>
                     {t('trackOnFR24')}
                 </a>
             </div>

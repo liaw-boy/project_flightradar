@@ -32,31 +32,9 @@
         "built": "2015",
         "categoryDescription": "Heavy"
     },
-    "89905c": {
-        "icao24": "89905c",
-        "registration": "B-16709",
-        "manufacturerName": "Boeing",
-        "model": "777-35E(ER)",
-        "typecode": "B773",
-        "owner": "EVA Air",
-        "operator": "EVA",
-        "built": "2007",
-        "categoryDescription": "Heavy"
-    },
     "899042": {
         "icao24": "899042",
         "registration": "B-18001",
-        "manufacturerName": "Boeing",
-        "model": "777-309(ER)",
-        "typecode": "B773",
-        "owner": "China Airlines",
-        "operator": "CAL",
-        "built": "2014",
-        "categoryDescription": "Heavy"
-    },
-    "899043": {
-        "icao24": "899043",
-        "registration": "B-18002",
         "manufacturerName": "Boeing",
         "model": "777-309(ER)",
         "typecode": "B773",
@@ -76,26 +54,180 @@
         "built": "2019",
         "categoryDescription": "Large"
     },
-    "899ade": {
-        "icao24": "899ade",
-        "registration": "B-58202",
+    "89638a": {
+        "icao24": "89638a",
+        "registration": "A6-EOZ",
         "manufacturerName": "Airbus",
-        "model": "A321-251NX",
-        "typecode": "A21N",
-        "owner": "STARLUX Airlines",
-        "operator": "SJX",
-        "built": "2019",
+        "model": "A380-842",
+        "typecode": "A388",
+        "owner": "Emirates",
+        "operator": "UAE",
+        "built": "2016",
+        "categoryDescription": "Heavy"
+    },
+    "8960bb": {
+        "icao24": "8960bb",
+        "registration": "A6-EGU",
+        "manufacturerName": "Boeing",
+        "model": "777-31H(ER)",
+        "typecode": "B773",
+        "owner": "Emirates",
+        "operator": "UAE",
+        "built": "2011",
+        "categoryDescription": "Heavy"
+    },
+    "a65bb7": {
+        "icao24": "a65bb7",
+        "registration": "N509DN",
+        "manufacturerName": "Airbus",
+        "model": "A350-941",
+        "typecode": "A359",
+        "owner": "Delta Air Lines",
+        "operator": "DAL",
+        "built": "2017",
+        "categoryDescription": "Heavy"
+    },
+    "a2b8db": {
+        "icao24": "a2b8db",
+        "registration": "N2748U",
+        "manufacturerName": "Boeing",
+        "model": "777-300ER",
+        "typecode": "B77W",
+        "owner": "United Airlines",
+        "operator": "UAL",
+        "built": "2017",
+        "categoryDescription": "Heavy"
+    },
+    "3c65ad": {
+        "icao24": "3c65ad",
+        "registration": "D-AIMM",
+        "manufacturerName": "Airbus",
+        "model": "A380-841",
+        "typecode": "A388",
+        "owner": "Lufthansa",
+        "operator": "DLH",
+        "built": "2010",
+        "categoryDescription": "Heavy"
+    },
+    "406948": {
+        "icao24": "406948",
+        "registration": "G-STBH",
+        "manufacturerName": "Boeing",
+        "model": "777-336(ER)",
+        "typecode": "B77W",
+        "owner": "British Airways",
+        "operator": "BAW",
+        "built": "2014",
+        "categoryDescription": "Heavy"
+    },
+    "780204": {
+        "icao24": "780204",
+        "registration": "B-KPD",
+        "manufacturerName": "Boeing",
+        "model": "777-367(ER)",
+        "typecode": "B77W",
+        "owner": "Cathay Pacific",
+        "operator": "CPA",
+        "built": "2007",
+        "categoryDescription": "Heavy"
+    },
+    "76cdad": {
+        "icao24": "76cdad",
+        "registration": "9V-SMM",
+        "manufacturerName": "Airbus",
+        "model": "A350-941",
+        "typecode": "A359",
+        "owner": "Singapore Airlines",
+        "operator": "SIA",
+        "built": "2017",
+        "categoryDescription": "Heavy"
+    },
+    "851cca": {
+        "icao24": "851cca",
+        "registration": "JA348J",
+        "manufacturerName": "Boeing",
+        "model": "737-846(WL)",
+        "typecode": "B738",
+        "owner": "Japan Airlines",
+        "operator": "JAL",
+        "built": "2010",
         "categoryDescription": "Large"
     },
-    "89930f": {
-        "icao24": "89930f",
-        "registration": "B-11111",
-        "manufacturerName": "ATR",
-        "model": "ATR-72-600",
-        "typecode": "AT76",
-        "owner": "Mandarin Airlines",
-        "operator": "MDA",
-        "built": "2017",
-        "categoryDescription": "Light"
+    "86d996": {
+        "icao24": "86d996",
+        "registration": "JA834J",
+        "manufacturerName": "Boeing",
+        "model": "787-8 Dreamliner",
+        "typecode": "B788",
+        "owner": "Japan Airlines",
+        "operator": "JAL",
+        "built": "2012",
+        "categoryDescription": "Heavy"
+    },
+    "71c210": {
+        "icao24": "71c210",
+        "registration": "HL8210",
+        "manufacturerName": "Boeing",
+        "model": "777-3B5(ER)",
+        "typecode": "B77W",
+        "owner": "Korean Air",
+        "operator": "KAL",
+        "built": "2011",
+        "categoryDescription": "Heavy"
+    },
+    "4851ae": {
+        "icao24": "4851ae",
+        "registration": "PH-BHC",
+        "manufacturerName": "Boeing",
+        "model": "787-9 Dreamliner",
+        "typecode": "B789",
+        "owner": "KLM",
+        "operator": "KLM",
+        "built": "2015",
+        "categoryDescription": "Heavy"
+    },
+    "3c459a": {
+        "icao24": "3c459a",
+        "registration": "D-AALZ",
+        "manufacturerName": "Boeing",
+        "model": "777-FBT",
+        "typecode": "B77L",
+        "owner": "Lufthansa Cargo",
+        "operator": "GEC",
+        "built": "2016",
+        "categoryDescription": "Heavy"
+    },
+    "abb325": {
+        "icao24": "abb325",
+        "registration": "N853GT",
+        "manufacturerName": "Boeing",
+        "model": "747-87U(F)",
+        "typecode": "B748",
+        "owner": "Atlas Air",
+        "operator": "GTI",
+        "built": "2012",
+        "categoryDescription": "Heavy"
+    },
+    "a7ff6a": {
+        "icao24": "a7ff6a",
+        "registration": "N614UP",
+        "manufacturerName": "Boeing",
+        "model": "747-8F",
+        "typecode": "B748",
+        "owner": "UPS",
+        "operator": "UPS",
+        "built": "2019",
+        "categoryDescription": "Heavy"
+    },
+    "040060": {
+        "icao24": "040060",
+        "registration": "ET-APS",
+        "manufacturerName": "Boeing",
+        "model": "777-F6N",
+        "typecode": "B77L",
+        "owner": "Ethiopian Airlines",
+        "operator": "ETH",
+        "built": "2014",
+        "categoryDescription": "Heavy"
     }
 }

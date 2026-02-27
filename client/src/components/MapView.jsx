@@ -68,12 +68,30 @@ export default function MapView({
                             <div class="ap-icao">${ap.icao} · ${elevLabel} ${data.elev || '--'}ft (${elevM}m)</div>
                             <div class="ap-fltcat ${fltCatClass}">${data.fltCat || '--'}</div>
                             <div class="ap-grid">
-                                <div class="ap-item"><span class="ap-label">🌡</span><span class="ap-desc">${t('metarTemp')}:</span><span class="ap-val">${data.temp ?? '--'}°C</span></div>
-                                <div class="ap-item"><span class="ap-label">💧</span><span class="ap-desc">${t('metarDew')}:</span><span class="ap-val">${data.dewp ?? '--'}°C</span></div>
-                                <div class="ap-item"><span class="ap-label">🌬</span><span class="ap-desc">${t('metarWind')}:</span><span class="ap-val">${windDisplay}</span></div>
-                                <div class="ap-item"><span class="ap-label">👁</span><span class="ap-desc">${t('metarVis')}:</span><span class="ap-val">${visibDisplay}</span></div>
-                                <div class="ap-item"><span class="ap-label">☁</span><span class="ap-desc">${t('metarClouds')}:</span><span class="ap-val">${cloudStr}</span></div>
-                                <div class="ap-item"><span class="ap-label">📊</span><span class="ap-desc">${t('metarBaro')}:</span><span class="ap-val">${altimDisplay}</span></div>
+                                <div class="ap-item">
+                                    <div class="ap-label-row"><span class="ap-label">🌡</span><span class="ap-desc">${t('metarTemp')}:</span></div>
+                                    <span class="ap-val">${data.temp ?? '--'}°C</span>
+                                </div>
+                                <div class="ap-item">
+                                    <div class="ap-label-row"><span class="ap-label">💧</span><span class="ap-desc">${t('metarDew')}:</span></div>
+                                    <span class="ap-val">${data.dewp ?? '--'}°C</span>
+                                </div>
+                                <div class="ap-item">
+                                    <div class="ap-label-row"><span class="ap-label">🌬</span><span class="ap-desc">${t('metarWind')}:</span></div>
+                                    <span class="ap-val">${windDisplay}</span>
+                                </div>
+                                <div class="ap-item">
+                                    <div class="ap-label-row"><span class="ap-label">👁</span><span class="ap-desc">${t('metarVis')}:</span></div>
+                                    <span class="ap-val">${visibDisplay}</span>
+                                </div>
+                                <div class="ap-item">
+                                    <div class="ap-label-row"><span class="ap-label">☁</span><span class="ap-desc">${t('metarClouds')}:</span></div>
+                                    <span class="ap-val">${cloudStr}</span>
+                                </div>
+                                <div class="ap-item">
+                                    <div class="ap-label-row"><span class="ap-label">📊</span><span class="ap-desc">${t('metarBaro')}:</span></div>
+                                    <span class="ap-val">${altimDisplay}</span>
+                                </div>
                             </div>
                             <div class="ap-metar">${data.rawOb || '--'}</div>
                         </div>
@@ -192,7 +210,21 @@ export default function MapView({
     useEffect(() => {
         const map = mapRef.current;
         if (map) {
-            map.closePopup(); // 語系切換時關閉舊氣泡，防止殘留舊語言內容
+            // Persistent Popup Logic: If a popup is open, check if it's an airport card and re-render it
+            const openPopup = map._popup;
+            if (openPopup && openPopup.isOpen()) {
+                const el = openPopup.getElement();
+                const apCard = el?.querySelector('.ap-card');
+                if (apCard) {
+                    const icaoMatch = el.querySelector('.ap-icao')?.textContent.split(' · ')[0];
+                    if (icaoMatch) {
+                        const apData = GLOBAL_AIRPORTS.find(a => a.icao === icaoMatch);
+                        if (apData) {
+                            renderMetarPopup(apData, map, openPopup);
+                        }
+                    }
+                }
+            }
             updateAirportVisibility(map);
         }
     }, [filters.showAirports, t, translateMetar]);

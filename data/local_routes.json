@@ -1,58 +1,62 @@
 {
-    "DAL521": [
-        "DTW",
-        "ATL"
+    "TTW204": [
+        "RCTP",
+        "RJAA"
     ],
-    "EVA95": [
-        "TPE",
-        "MXP"
-    ],
-    "CAL111": [
-        "TPE",
-        "FUK"
-    ],
-    "CPA489": [
-        "TPE",
-        "HKG"
-    ],
-    "CPA411": [
-        "ICN",
-        "HKG"
-    ],
-    "SJX100": [
-        "TPE",
-        "NRT"
-    ],
-    "SIA879": [
-        "TPE",
-        "SIN"
-    ],
-    "JAL96": [
-        "TSA",
-        "HND"
-    ],
-    "ANA851": [
-        "HND",
-        "TSA"
+    "TTW205": [
+        "RJAA",
+        "RCTP"
     ],
     "UAL871": [
         "SFO",
         "TPE"
     ],
-    "THY24": [
-        "IST",
+    "ANA849": [
+        "RJTT",
+        "VTBS"
+    ],
+    "CPA566": [
+        "VHHH",
+        "VTBP"
+    ],
+    "SJX800": [
+        "TPE",
+        "NRT"
+    ],
+    "JJA6163": [
+        "PUS",
         "TPE"
     ],
-    "UAE366": [
+    "SIA608": [
+        "WSSS",
+        "RKSI"
+    ],
+    "THA917": [
+        "LHR",
+        "BKK"
+    ],
+    "UAE202": [
+        "JFK",
+        "DXB"
+    ],
+    "UAE001": [
         "DXB",
-        "TPE"
+        "LHR"
     ],
-    "AFR252": [
+    "QTR701": [
+        "DOH",
+        "JFK"
+    ],
+    "DAL201": [
+        "JFK",
+        "LHR"
+    ],
+    "BAW203": [
+        "LHR",
+        "EWR"
+    ],
+    "AFR006": [
         "CDG",
-        "TPE"
-    ],
-    "KLM807": [
-        "AMS",
-        "TPE"
+        "JFK"
     ]
 }

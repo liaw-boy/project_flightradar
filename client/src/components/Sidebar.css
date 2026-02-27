@@ -194,12 +194,12 @@
 
 .sb-route-left,
 .sb-route-right {
-    flex: 1;
+    flex: 1.5;
+    /* Spread them more */
     z-index: 2;
     display: flex;
     flex-direction: column;
     align-items: center;
-    /* Center horizontally */
     justify-content: center;
     text-align: center;
 }
@@ -225,8 +225,8 @@
 
 .sb-airport-name {
     font-size: 10px;
-    color: #aaa;
-    margin-top: 4px;
+    color: #888;
+    margin-top: 2px;
 }
 
 .sb-route-center {
@@ -279,11 +279,17 @@
 }
 
 /* Generic inner padding */
-.sb-section-title,
+.sb-section-title {
+    margin-left: 10px !important;
+    /* Move only titles to 10px as requested */
+    margin-right: 25px;
+}
+
 .sb-data-row,
 .route-btn {
-    margin-left: 15px;
-    margin-right: 15px;
+    margin-left: 20px;
+    /* Reset content to standard position */
+    margin-right: 25px;
 }
 
 .sb-section-title {

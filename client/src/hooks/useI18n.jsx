@@ -154,7 +154,7 @@ const translations = {
         spiLabel: 'SPI',
         lastContact: '最後聯繫',
         dataAge: '資料年齡',
-        nearestAirport: '🏗️ NEAREST AIRPORT',
+        nearestAirport: '🏗️ 最近機場',
         airport: '機場',
         distance: '距離',
         trackOnFR24: '🔍 在 Flightradar24 追蹤 ↗',
@@ -174,6 +174,25 @@ const translations = {
     },
 };
 
+/**
+ * 機場名稱在地化辭典 (常用國際機場)
+ */
+const airportNames = {
+    cn: {
+        'RCTP': '桃園國際機場', 'RCSS': '台北松山機場', 'RCKH': '高雄國際機場', 'RCMQ': '台中機場',
+        'RCNN': '台南機場', 'RCFN': '花蓮機場', 'RCQC': '澎湖馬公機場',
+        'RJTT': '東京羽田機場', 'RJAA': '東京成田機場', 'RJBB': '大阪關西機場', 'RJFF': '福岡機場',
+        'RJCC': '新千歲機場', 'ROAH': '那霸機場', 'RKSI': '首爾仁川機場', 'RKSS': '首爾金浦機場',
+        'ZBAA': '北京首都機場', 'ZSPD': '上海浦東機場', 'ZSSS': '上海虹橋機場', 'ZGGG': '廣州白雲機場',
+        'ZGSZ': '深圳寶安機場', 'VHHH': '香港國際機場', 'WSSS': '新加坡樟宜機場', 'VTBS': '曼谷蘇凡納布機場',
+        'WMKK': '吉隆坡國際機場', 'RPLL': '馬尼拉機場', 'WIII': '雅加達機場', 'VVNB': '河內機場',
+        'VVTS': '胡志明市機場', 'VIDP': '新德里機場', 'OMDB': '杜拜國際機場', 'OTHH': '多哈機場',
+        'EGLL': '倫敦希斯洛機場', 'LFPG': '巴黎戴高樂機場', 'EDDF': '法蘭克福機場', 'EHAM': '阿姆斯特丹史基浦機場',
+        'LTFM': '伊斯坦堡機場', 'KJFK': '紐約甘迺迪機場', 'KLAX': '洛杉磯國際機場', 'KORD': '芝加哥歐海爾機場',
+        'KATL': '亞特蘭大機場', 'YSSY': '雪梨機場', 'NZAA': '奧克蘭機場'
+    }
+};
+
 const I18nContext = createContext();
 
 export function I18nProvider({ children }) {
@@ -184,7 +203,13 @@ export function I18nProvider({ children }) {
     }, []);
 
     const t = useCallback(
-        (key) => translations[lang]?.[key] || translations.en[key] || key,
+        (key, data) => {
+            // 特別處理機場名稱翻譯
+            if (key === 'airportName' && data) {
+                return airportNames[lang]?.[data] || null;
+            }
+            return translations[lang]?.[key] || translations.en[key] || key;
+        },
         [lang]
     );
 

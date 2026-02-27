@@ -141,8 +141,15 @@ async function getAuthHeaders() {
 }
 
 // ==========================================
-// API 路由
-// ==========================================
+// 動作紀錄 API (讓前端的操作顯示在後台中端)
+app.post('/api/log', (req, res) => {
+    const { message, type = 'info', data = {} } = req.body;
+    const timestamp = new Date().toLocaleTimeString();
+    const prefix = type === 'error' ? '❌ [CLIENT ERROR]' : type === 'warn' ? '⚠️ [CLIENT WARN]' : '📱 [USER ACTION]';
+
+    console.log(`${prefix} [${timestamp}] ${message}`, Object.keys(data).length > 0 ? data : '');
+    res.json({ status: 'ok' });
+});
 
 // 健康檢查
 app.get('/api/health', (req, res) => {

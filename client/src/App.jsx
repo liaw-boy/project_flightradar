@@ -9,6 +9,7 @@ import MapView from './components/MapView';
 import { useFlightData } from './hooks/useFlightData';
 import { useNotification } from './hooks/useNotification';
 import { useI18n } from './hooks/useI18n';
+import { logToServer } from './utils/logger';
 import './App.css';
 
 export default function App() {
@@ -68,7 +69,9 @@ export default function App() {
     // 選中飛機
     const handleSelectPlane = useCallback(
         async (icao24, plane) => {
+            logToServer(`Selected plane: ${plane.callsign || 'N/A'} (ICAO: ${icao24})`, 'info', { callsign: plane.callsign, icao24 });
             setSelectedIcao24(icao24);
+            setTrackPoints([]); // Clear previous tracks immediately to prevent "ghost lines"
             setSelectedMetadata(null);
             setSelectedRoute(null);
 
@@ -81,14 +84,20 @@ export default function App() {
             // 背景取得 metadata + route (不阻塞 UI)
             fetch(`/api/metadata/${icao24}`)
                 .then(r => r.json())
-                .then(data => { if (!data.noData) setSelectedMetadata(data); })
-                .catch(() => { });
+                .then(data => {
+                    if (!data.noData) setSelectedMetadata(data);
+                    else logToServer(`Metadata missing for ${icao24}`, 'warn');
+                })
+                .catch(e => { logToServer(`Metadata fetch error for ${icao24}: ${e.message}`, 'error'); });
 
             const callsignQuery = plane.callsign ? `?callsign=${plane.callsign.trim()}` : '';
             fetch(`/api/route/${icao24}${callsignQuery}`)
                 .then(r => r.json())
-                .then(data => { setSelectedRoute(data); })
-                .catch(() => { });
+                .then(data => {
+                    if (data.noData) logToServer(`Route missing for ${plane.callsign || icao24}`, 'warn');
+                    setSelectedRoute(data);
+                })
+                .catch(e => { logToServer(`Route fetch error for ${plane.callsign || icao24}: ${e.message}`, 'error'); });
         },
         [fetchTrack, showNotification]
     );
@@ -103,6 +112,7 @@ export default function App() {
 
     // 過濾器變更
     const handleFilterChange = useCallback((key, value) => {
+        logToServer(`Filter toggled: ${key} = ${value}`, 'info');
         setFilters((prev) => ({ ...prev, [key]: value }));
     }, []);
 
