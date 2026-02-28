@@ -25,6 +25,7 @@ export function useFlightData(mapRef, showNotification) {
     const isFetchingRef = useRef(false);
     const planesDictRef = useRef({});
     const apiStatusRef = useRef('INIT');
+    const globalLastUpdateRef = useRef(0);
 
     // 保持 ref 和 state 同步
     useEffect(() => {
@@ -35,7 +36,8 @@ export function useFlightData(mapRef, showNotification) {
         apiStatusRef.current = apiStatus;
     }, [apiStatus]);
 
-    const fetchPlanes = useCallback(async () => {
+    const fetchPlanes = useCallback(async (isAutoRefresh = false) => {
+        // 如果是正在抓取中，就跳過
         if (isFetchingRef.current) return;
         isFetchingRef.current = true;
 
@@ -100,8 +102,6 @@ export function useFlightData(mapRef, showNotification) {
             const intervalDelay = 25; // User requested 25 seconds
             setThrottleSeconds(intervalDelay);
 
-            // [V2.0.0] The backend `/api/planes/bbox` now returns pre-parsed objects directly
-            // No need for `parseOpenSkyData` array indexing
             const parsedPlanes = (data.states || []).map(p => {
                 return {
                     icao24: p.icao24,
@@ -109,10 +109,15 @@ export function useFlightData(mapRef, showNotification) {
                         ...p,
                         callsign: p.callsign || 'UNKNOWN',
                         registration: p.callsign || 'N/A', // fallback
-                        aircraftType: 'Unknown'
+                        aircraftType: 'Unknown',
+                        lastSeenTime: data.globalLastUpdate || Math.floor(Date.now() / 1000)
                     }
                 };
             });
+
+            if (data.globalLastUpdate) {
+                globalLastUpdateRef.current = data.globalLastUpdate;
+            }
 
             if (parsedPlanes.length > 0) {
                 processPlaneData(parsedPlanes);
@@ -126,11 +131,15 @@ export function useFlightData(mapRef, showNotification) {
                 setApiErrorDetail('API reached successfully but returned 0 planes.');
             }
 
-            // 排定下一次抓取 (固定 25 秒)
-            setTimeout(() => {
-                isFetchingRef.current = false;
-                fetchPlanes();
-            }, 25000);
+            // 如果是自動刷新觸發的，就設定下一預約更新
+            if (isAutoRefresh) {
+                setTimeout(() => {
+                    fetchPlanes(true);
+                }, 25000);
+            }
+
+            isFetchingRef.current = false;
+            return;
 
             return; // 成功結束，不需要走 default finally
         } catch (error) {
@@ -149,18 +158,19 @@ export function useFlightData(mapRef, showNotification) {
             }
             setApiStatusClass('stat-error');
 
-            // 失敗後 5 秒快速重試 (不要太快，給後端一點喘息空間)
-            setTimeout(() => {
-                isFetchingRef.current = false;
-                fetchPlanes();
-            }, 5000);
+            // 失敗後同樣釋放鎖
+            isFetchingRef.current = false;
+            if (isAutoRefresh) {
+                setTimeout(() => {
+                    fetchPlanes(true);
+                }, 5000);
+            }
             return;
         }
     }, []);
 
-    // 處理飛機資料
+    // 處理飛機資料 (非破壞性合併)
     const processPlaneData = useCallback((planes) => {
-        const currentIcaos = new Set();
         const history = flightHistoryRef.current;
         let air = 0;
         let gnd = 0;
@@ -169,17 +179,14 @@ export function useFlightData(mapRef, showNotification) {
             const next = { ...prev };
 
             planes.forEach(({ icao24, data: pData }) => {
-                currentIcaos.add(icao24);
-
-                // 計算 AIR / GND
+                // 更新 AIR / GND 計數
                 if (pData.onGround) gnd++;
                 else air++;
 
                 if (!history[icao24]) history[icao24] = [];
-                // 儲存 [時間戳, 緯度, 經度, 是否在地面]
                 const nowUnix = Math.floor(Date.now() / 1000);
                 history[icao24].push([nowUnix, pData.lat, pData.lng, pData.onGround]);
-                if (history[icao24].length > 500) history[icao24].shift(); // 保留 500 個點 (~83分鐘追蹤)
+                if (history[icao24].length > 500) history[icao24].shift();
 
                 if (!next[icao24]) {
                     next[icao24] = { ...pData, isDirty: true, lastCallsign: '' };
@@ -202,15 +209,19 @@ export function useFlightData(mapRef, showNotification) {
                 }
             });
 
-            // 清理消失的飛機
+            // 清理機制：不再根據這次 BBox 結果刪除，而是根據「過期時間」
+            // 只有當飛機最後一次在後端全球快取出現的時間比當前最新的全球刷新時間早 60 秒以上，才視為消失
+            const globalSnapshotTime = globalLastUpdateRef.current || Math.floor(Date.now() / 1000);
             Object.keys(next).forEach((id) => {
-                if (!currentIcaos.has(id)) {
+                const p = next[id];
+                // 如果這架飛機太久沒出現在全球快取中，則清理
+                if (p.lastSeenTime && globalSnapshotTime - p.lastSeenTime > 60) {
                     delete next[id];
                     delete history[id];
                 }
             });
 
-            setPlaneCount(currentIcaos.size);
+            setPlaneCount(Object.keys(next).length);
             setAirCount(air);
             setGroundCount(gnd);
             return next;
@@ -300,7 +311,7 @@ export function useFlightData(mapRef, showNotification) {
     // 定時更新飛機    // 初次載入驅動迴圈
     useEffect(() => {
         if (!isFetchingRef.current) {
-            fetchPlanes();
+            fetchPlanes(true); // 使用 true 啟動定時自動更新
         }
 
         // Timer countdown sync for UI (不負責 fetch，只負責倒數顯示)

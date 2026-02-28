@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath } from '../utils/flightUtils';
-import { GLOBAL_AIRPORTS } from '../utils/airportMappings';
 
 /**
  * MapView — 管理 Leaflet 地圖、飛機 markers、軌跡線、機場圖層
@@ -32,6 +31,9 @@ export default function MapView({
     const airportLayerRef = useRef(null);
     const airportMarkersLoadedRef = useRef(false);
 
+    const [airports, setAirports] = useState([]);
+    const airportsRef = useRef([]);
+    const filtersRef = useRef(filters);
     const [bounds, setBounds] = useState(null);
 
     // ===== 機場圖標 SVG =====
@@ -129,6 +131,7 @@ export default function MapView({
         // 地圖移動結束
         map.on('moveend', () => {
             setBounds(map.getBounds());
+            updateAirportVisibility(map); // <--- Add this to refresh virtualized airports
             onMapMove?.();
         });
 
@@ -140,7 +143,16 @@ export default function MapView({
         mapRef.current = map;
         onMapReady?.(map);
 
-        // 初始載入機場
+        // 初始載入機場列表 (From Backend)
+        fetch('/api/airports/list')
+            .then(res => res.json())
+            .then(data => {
+                console.log(`🌍 [MAP] Loaded ${data.length} airports from backend`);
+                airportsRef.current = data;
+                setAirports(data);
+            })
+            .catch(err => console.error('Failed to load airports:', err));
+
         airportLayerRef.current = L.layerGroup();
         updateAirportVisibility(map);
 
@@ -157,8 +169,11 @@ export default function MapView({
         const zoom = map.getZoom();
         const bounds = map.getBounds();
 
-        // Zoom 5 starts showing major continental airports, keeps performance decent
-        if (zoom >= 5 && filters.showAirports) {
+        // Zoom 4 starts showing major continental airports, keeps performance decent
+        const currentAirports = airportsRef.current || [];
+        const currentFilters = filtersRef.current || {};
+
+        if (zoom >= 4 && currentFilters.showAirports) {
             if (!map.hasLayer(airportLayerRef.current)) {
                 map.addLayer(airportLayerRef.current);
             }
@@ -167,8 +182,8 @@ export default function MapView({
             airportLayerRef.current.clearLayers();
             const extBounds = bounds.pad(0.3); // Pad view by 30% for smooth panning
 
-            for (let i = 0; i < GLOBAL_AIRPORTS.length; i++) {
-                const ap = GLOBAL_AIRPORTS[i];
+            for (let i = 0; i < currentAirports.length; i++) {
+                const ap = currentAirports[i];
                 if (extBounds.contains([ap.lat, ap.lng])) {
                     const m = L.marker([ap.lat, ap.lng], {
                         icon: createAirportIcon(ap.type),
@@ -209,9 +224,10 @@ export default function MapView({
 
     // 監聽 showAirports filter 與 語系 (t) 變化
     useEffect(() => {
+        filtersRef.current = filters; // Update ref whenever filters change
         const map = mapRef.current;
         if (map) {
-            // Persistent Popup Logic: If a popup is open, check if it's an airport card and re-render it
+            // Persistent Popup Logic...
             const openPopup = map._popup;
             if (openPopup && openPopup.isOpen()) {
                 const el = openPopup.getElement();
@@ -229,7 +245,7 @@ export default function MapView({
             }
             updateAirportVisibility(map);
         }
-    }, [filters.showAirports, t, translateMetar]);
+    }, [airports, filters, t, translateMetar]);
 
     // ===== 過濾器：判斷是否顯示飛機 =====
     const shouldShowPlane = useCallback(

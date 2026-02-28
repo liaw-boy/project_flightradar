@@ -36,7 +36,7 @@ export default function Dashboard({
         <div className="dashboard">
             <div className="title-container">
                 <div className={`live-dot ${isOnline ? '' : 'offline'}`} />
-                <h2>{t('radarSystem')} <span className="version-label">v2.0.0</span></h2>
+                <h2>{t('radarSystem')} <span className="version-label">v2.2.5</span></h2>
                 <button className="lang-toggle" onClick={toggleLang}>
                     {lang === 'en' ? 'EN/中' : '中/EN'}
                 </button>
@@ -101,6 +101,7 @@ export default function Dashboard({
                 </div>
 
                 {apiStats?.accounts?.map((acc, index) => {
+                    const SAFE_RESERVE_CAP = 50;
                     const maxQuota = 4000;
                     const remaining = acc.remainingCredits !== null ? acc.remainingCredits : 0;
                     const percentage = Math.max(0, Math.min(100, Math.round((remaining / maxQuota) * 100)));
@@ -111,7 +112,8 @@ export default function Dashboard({
                     const strokeDashoffset = circumference - (percentage / 100) * circumference;
 
                     const isLimited = acc.unlockTime && new Date(acc.unlockTime).getTime() > Date.now();
-                    const ringColor = isLimited ? '#FF4136' : (percentage < 20 ? '#FFDC00' : '#01FF70');
+                    const isReserved = !isLimited && remaining !== null && remaining <= SAFE_RESERVE_CAP;
+                    const ringColor = isLimited ? '#FF4136' : (isReserved ? '#FF851B' : (percentage < 20 ? '#FFDC00' : '#01FF70'));
 
                     // 計算當天 UTC 00:00 的重置時間 (轉換為當地時間)
                     const now = new Date();
@@ -121,9 +123,9 @@ export default function Dashboard({
                     return (
                         <div key={index} className="account-card">
                             <div className="account-header">
-                                <span className="account-name">ID: {acc.user?.split('-')[0] || `ACC-${index + 1}`}</span>
-                                <span className={`account-status ${isLimited ? 'danger' : 'healthy'}`}>
-                                    {isLimited ? t('restricted') : t('active')}
+                                <span className="account-name">ID: {acc.user || `ACC-${index + 1}`}</span>
+                                <span className={`account-status ${isLimited ? 'danger' : (isReserved ? 'warning' : 'healthy')}`}>
+                                    {isLimited ? t('restricted') : (isReserved ? t('reserved') : t('active'))}
                                 </span>
                             </div>
                             <div className="account-body">
@@ -133,13 +135,13 @@ export default function Dashboard({
                                         <circle cx="24" cy="24" r={radius} className="circle-fg"
                                             style={{
                                                 strokeDasharray: circumference,
-                                                strokeDashoffset: isLimited ? circumference : strokeDashoffset,
+                                                strokeDashoffset: (percentage === 0 && !isLimited) ? circumference : (isLimited ? circumference : strokeDashoffset),
                                                 stroke: ringColor
                                             }}
                                         />
                                     </svg>
                                     <div className="circle-text" style={{ color: ringColor }}>
-                                        {isLimited ? '0%' : `${percentage}%`}
+                                        {isLimited ? '0%' : (acc.remainingCredits === null ? '--%' : `${percentage}%`)}
                                     </div>
                                 </div>
                                 <div className="account-details">

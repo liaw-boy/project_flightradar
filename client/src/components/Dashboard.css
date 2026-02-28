@@ -287,6 +287,11 @@
     color: #FF4136;
 }
 
+.account-status.warning {
+    background: rgba(255, 133, 27, 0.15);
+    color: #FF851B;
+}
+
 .account-body {
     display: flex;
     align-items: center;

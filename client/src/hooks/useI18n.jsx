@@ -62,6 +62,7 @@ const translations = {
         limitsHit: 'LIMITS HIT:',
         restricted: 'RESTRICTED',
         active: 'ACTIVE',
+        reserved: 'RESERVED',
         // Filters
         filters: '🎛️ FILTERS',
         showGround: 'Show Ground',
@@ -127,6 +128,7 @@ const translations = {
         limitsHit: '限流累計:',
         restricted: '存取受限',
         active: '正常運作',
+        reserved: '保留配額',
         // Filters
         filters: '🎛️ 篩選器',
         showGround: '顯示地面',

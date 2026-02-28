@@ -26,8 +26,7 @@ export default defineConfig({
         rollupOptions: {
             output: {
                 manualChunks: {
-                    vendor: ['react', 'react-dom'],
-                    airports: ['./src/utils/airportMappings.js']
+                    vendor: ['react', 'react-dom']
                 }
             }
         }

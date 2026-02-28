@@ -1,84 +1,88 @@
-# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - 專業版 v2.0.0 (Global Big Data)
+# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - 極致效能版 v2.2.5
 
-這是一款基於 **React (Vite)**、**Node.js (Express)** 與 **OpenSky Network API** 開發的高級實時全球航空監控系統。本專案專為追求「數據精準度」與「系統透明度」的資深航空愛好者打造。
-
----
-
-## 🚀 v2.0.0 核心技術優勢 (Big Data Edition)
-
-### 🌍 1. 全球大數據集成 (Global Data Mission)
-- **20,329 筆全球機場庫**：棄用傳統 2.8MB 冗長檔案，改由高效能 **伺服器端動態 API** 驅動。支援 ICAO/IATA 代碼、精準座標與時區資料。
-- **1,744 個航空公司別名 (Airline Aliasing)**：具備智能解析功能，能自動將呼號轉化（例如：`APJ` -> `MM` 樂桃、`TTW` -> `IT` 虎航），將原本查不到的「隱密航班」對應至正確的靜態資料庫。
-- **動態時區偵測**：系統會根據目的地機場座標，自動計算並顯示各國航班的 **正確當地抵達時間**，不再只有單一時區。
-
-### 📡 2. 數據精準度修復機制 (Data Precision)
-- **雙源照片邏輯 (Dual-Source Photo Fetch)**：同時透過飛機的 **Hex (16 進位碼)** 與 **Registration (註冊號/機身編號)** 進行交叉查詢，徹底解決飛機改色、更換營運商導致的照片誤刷問題（如：解決樂桃顯示日航照片之 Bug）。
-- **六階層路由解析 (6-Tier Routing)**：
-  1. **Local Override**：手動修正檔（`data/local_routes.json`），具備最高優先權。
-  2. **Global DB**：基於 OpenFlights 與 Jonty 的 15 萬筆全球大數據庫。
-  3. **Heuristic Network**：智能航空公司航網推算（Tier 2.5）。
-  4. **Runtime Cache**：動態學習快取。
-  5. **AeroDataBox Premium**：商業級實時補位 API。
-  6. **OpenSky Tracks**：軌跡推算最後備援。
-
-### 📊 3. 後端透明化與監控 (Visibility)
-- **實時請求日誌 (Request Logging)**：終端機現在能即時顯示每一筆 API 調用狀況：
-  - `📡 [時間] GET /api/states - 200 (15ms)`：飛機位置刷新。
-  - `❌ [時間] GET /api/route/... - 404`：航線遺失警示。
-  - 包含毫秒級處理時間，讓您隨時監控伺服器負載與網路狀態。
-- **多帳號輪替 (Auto-Rotation)**：支援最高 5 組 OpenSky 帳號輪替。當某帳號額度耗盡，系統會自動毫秒級切換下一個帳號，確保 24/7 不斷線。
+這是一款專門為「大數據效能」與「極致流暢視覺」而生的專業級全球航空監控系統。基於 **React (Vite 6)**、**Node.js (Worker Threads)** 與 **OpenSky Network API**，V2.2.5 引入了多項航空工業級的渲染與推算技術。
 
 ---
 
-## 📂 系統架構說明
+## 🚀 v2.2.5 核心技術突破 (Technical Breakthroughs)
+*   **🎉 v2.2.x 深度優化專場**：
+    *   **無縫地圖平移 (Seamless Panning)**：移除 25 秒 fetch 鎖定，實現隨移隨抓，且舊飛機不消失。
+    *   **動態機場資料庫**：移除 5MB 靜態分塊，改由後端 `/api/airports/list` 按需提供 major/intermediate 機場。
+    *   **智慧 METAR 解碼**：支援全方位機場天氣資訊與飛行類別 (VFR/IFR) 顯示。
+    *   **清理冗餘程式碼**：移除 Legacy 分塊與無效 import，編譯體積更輕量。
+
+### �️ 1. 後端「全球數據中心」 (The Heavy Lifter)
+*   **25s 全域定時輪詢**：後端獨立於前端需求，每 25,000ms 自動向 OpenSky 擷取全球 ~15,000 架飛機的即時狀態快取。
+*   **Worker Threads 異步解析**：利用 Node.js 多執行緒技術，將 CPU 密集型的龐大 JSON 字串解析與數據清洗工作交給背景執行緒，確保 API 回應主執行緒 **零阻塞 (Event Loop Unblocked)**。
+*   **BBox Slicer (智能裁切 API)**：前端不再下載全球數據。伺服器依據地圖邊界動態裁切（帶有 **10% Buffer Zone**），僅傳輸當前視野內的飛機，大幅降低移動端頻寬消耗。
+
+### 🧬 2. 前端「物理運動引擎」 (Physics & Animation Engine)
+*   **60FPS 物理推算 (Dead Reckoning)**：棄用傳統的跳躍式更新。系統採用 Great Circle (大圓航法) 物理公式，根據飛機的 `velocity` 與 `heading` 即時計算下一幀位置，實現極致絲滑的 60FPS 飛行滑行效果。
+*   **即時軌跡「蛇形追加」 (Snake Appending)**：當您選中飛機時，軌跡線不再是死板的線段。隨著飛機在螢幕上移動，後端推送的新坐標會即時「銜接」至歷史軌跡，實現類似雷達螢幕的動態增長效果。
+*   **多層次細節渲染 (LOD Rendering)**：
+    *   **Zoom < 5**: 僅顯示 5000m 以上巡航機，減少全球視角效能損耗。
+    *   **Zoom 6-9**: 隱藏地面飛機 (onGround)，聚焦空域交通。
+    *   **Zoom >= 10**: 開放精細渲染，包含所有地面與低空目標。
+
+### � 3. 數據精煉與自動修復 (Data Resilience)
+*   **航空別名自動解析 (Airline Aliasing)**：智能將 ICAO 呼號 (如 `APJ`) 轉化為 IATA 營運碼 (`MM`)，精準匹配航空公司 Logo。
+*   **Waterfall 路由獲取策略**：優先查詢 **RAM Cache** -> **Static DB** -> **TDX API**，徹底解決 OpenSky 原始數據中「起降機場」遺失的問題。
+*   **雙源照片交叉驗證**：透過 Hex 與 Reg 雙代碼查詢 Planespotters，確保飛機照片精準無誤。
+
+---
+
+## 📂 核心架構地圖
 
 ```text
 project_flightradar/
-├── server.js               # 後端中樞：API 代理、別名解析、日誌系統、配額保護
+├── server.js               # 高效能中樞：API Slicer、帳號輪替、配額保護
+├── workers/
+│   └── parser.js           # ⚡ Worker Thread: 負載解析全球 >15,000 架飛機數據
 ├── data/
-│   ├── processed/          # 🌍 經過精煉的 2 萬筆全球機場與航空公司 JSON 資料
-│   ├── local_routes.json   # 📚 手動修正檔： CAL6876, APJ30 等航線在此永久修正
-│   └── aircraft_static.json# ✈️ 特殊飛機機型資料庫
-├── routes-cache.json       # 🗺️ 航班航線動態學習快取庫 (會依據即時動態更新)
-├── client/                 # ⚛️ React 前端開發原碼 (Vite 架構)
-└── public-react/           # ⚛️ 已編譯之現代化 Web 資源 (iOS 12+ 向下相容)
+│   ├── processed/          # 🌍 2 萬筆全球機場 (ICAO/IATA/時區)
+│   ├── local_routes.json   # 📚 手動航線修正檔 (Priority: 1)
+│   └── aircraft_static.json# ✈️ 高精細航空器型號庫
+├── client/src/
+│   ├── hooks/
+│   │   └── useFlightData.js# 🧬 BBox 動態拉取與資料流管理
+│   ├── utils/
+│   │   └── flightUtils.js  # 🧮 物理推算算法中心
+│   └── components/
+│       └── MapView.jsx     # 🎨 60FPS 渲染與 LOD 邏輯中樞
 ```
 
 ---
 
-## ⚙️ 操作與運行流程
+## ⚙️ 快速部署
 
-### 1. 初始設定
-確保安裝 Node.js v18 以上版本。
+### 1. 安裝環境
+需 Node.js v18+。
 ```bash
-npm install          # 安裝伺服器依賴
-cd client && npm i   # 安裝前端依賴
+npm install && cd client && npm install
 ```
 
 ### 2. 環境變數 (.env)
-在根目錄新增 `.env` 檔案，配置您的 OpenSky 帳號（建議配置多個以防限流）：
+系統自動支持 **多帳號輪控**：
 ```env
-OPENSKY_USER=your_user_1
-OPENSKY_PASS=your_pass_1
-OPENSKY_USER2=your_user_2
-OPENSKY_PASS2=your_pass_2
-# ... 支援到 USER5
+OPENSKY_USER=user1
+OPENSKY_PASS=pass1
+OPENSKY_USER2=user2
+OPENSKY_PASS2=pass2
+# 支援多組帳號輪替，每組額度獨立計算
 ```
 
 ### 3. 一鍵啟動
-執行根目錄下的批次檔或使用命令列：
-- `start.bat`：啟動伺服器。
-- `npm start`：手動啟動 Node.js 後端。
+```bash
+npm run build   # 前端編譯
+npm start       # 啟動後端並託管前端
+```
 
 ---
 
-## 🛠️ 維護與疑難排解 (Maintenance)
+## 🛠️ 專業級操作小撇步
 
-- **修正錯誤航班資料**：若發現某航班號顯示錯誤或 `N/A`，直接在 `data/local_routes.json` 中加入該呼號與起降機場 ICAO 代碼並存檔，伺服器將優先採用新數據。
-- **照片與型號**：
-  - 航空器型號會優先自 `aircraft_static.json` 讀取。
-  - 照片抓取若有誤，可檢查飛機註冊號碼是否更新。
-- **清理過期數據**：若系統出現異常循環，可手動刪除 `routes-cache.json` 後重啟伺服器。
+*   **物理推算校正**：若發現飛機在數據更新瞬間有些微位移，這是物理引擎正將觀測座標與推算座標進行 **平滑校正 (LERP Correcting)**，以維持地圖位置的絕對真實性。
+*   **效能監控**：可以在後端終端機觀察 `📦 [WORKER] Parse complete` 日誌，理想狀態下解析 15,000 架飛機僅需 10ms 以內。
 
 ---
-*Powered by Deepmind Antigravity Engine | Professional Data Repair Suite.*
+*Powered by Deepmind Antigravity Engine | Professional Aero Data Analysis Suite.*

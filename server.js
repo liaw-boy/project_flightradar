@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const { Worker } = require('worker_threads');
 require('dotenv').config();
 
@@ -80,10 +81,72 @@ function rotateAccount() {
     return true;
 }
 
-const SAFE_RESERVE_CAP = 30; // 每個帳號保留至少 30 次額度，不讓它歸零
+const SAFE_RESERVE_CAP = 50; // 每個帳號保留至少 50 次額度 (User Specified)
+const QUOTA_CACHE_FILE = path.join(__dirname, 'quota-cache.json');
 
-async function getAuthHeaders() {
+function saveQuotaCache() {
+    try {
+        fs.writeFileSync(QUOTA_CACHE_FILE, JSON.stringify(apiStats.accounts, null, 2));
+    } catch (e) {
+        console.error('❌ [QUOTA] Failed to save quota cache:', e.message);
+    }
+}
+
+function loadQuotaCache() {
+    try {
+        if (fs.existsSync(QUOTA_CACHE_FILE)) {
+            const saved = JSON.parse(fs.readFileSync(QUOTA_CACHE_FILE, 'utf8'));
+            // 根據使用者名稱比對，恢復狀態
+            apiStats.accounts.forEach(acc => {
+                const found = saved.find(s => s.user === acc.user);
+                if (found) {
+                    acc.remainingCredits = found.remainingCredits;
+                    acc.unlockTime = found.unlockTime;
+                    acc.rateLimits = found.rateLimits || 0;
+                }
+            });
+            console.log(`💾 [QUOTA] Loaded persistent stats for ${apiStats.accounts.length} accounts.`);
+        }
+    } catch (e) {
+        console.error('❌ [QUOTA] Failed to load quota cache:', e.message);
+    }
+}
+
+/**
+ * 同步並儲存 Quota 資訊
+ */
+function syncAccountQuota(index, response) {
+    if (!response || !response.headers) return;
+
+    const remainingStr = response.headers.get('x-rate-limit-remaining');
+    const retryStr = response.headers.get('x-rate-limit-retry-after-seconds');
+    let changed = false;
+
+    if (remainingStr) {
+        const remainingNum = parseInt(remainingStr, 10);
+        if (apiStats.accounts[index].remainingCredits !== remainingNum) {
+            apiStats.accounts[index].remainingCredits = remainingNum;
+            changed = true;
+        }
+        apiStats.accounts[index].unlockTime = null;
+    }
+
+    if (response.status === 429 && retryStr) {
+        const unlock = new Date(Date.now() + parseInt(retryStr, 10) * 1000).toISOString();
+        apiStats.accounts[index].unlockTime = unlock;
+        apiStats.accounts[index].rateLimits++;
+        changed = true;
+    }
+
+    if (changed) {
+        saveQuotaCache();
+    }
+}
+
+async function getAuthHeaders(retryCount = 0) {
     if (ACCOUNTS.length === 0) return {};
+    // 防鎖死：如果轉一圈都沒健康的帳號，就硬著頭皮用目前這個 (或交由 429 處理)
+    if (retryCount >= ACCOUNTS.length) return { 'Authorization': `Bearer ${accountStates[currentAccountIndex].token}` };
 
     // 檢查目前帳號是否還有足夠的安全餘額
     const currentStats = apiStats.accounts[currentAccountIndex];
@@ -94,7 +157,7 @@ async function getAuthHeaders() {
         if (!isCurrentlyLimited) {
             console.log(`🛡️ [RESERVE] Account ${ACCOUNTS[currentAccountIndex].user} hit safe floor (${currentStats.remainingCredits}). Rotating preemptively...`);
             if (rotateAccount()) {
-                return await getAuthHeaders();
+                return await getAuthHeaders(retryCount + 1);
             }
         }
     }
@@ -124,7 +187,7 @@ async function getAuthHeaders() {
             const err = await response.text();
             console.error(`❌ [AUTH ERROR] Failed to get token for ${account.user}: ${err}`);
             // 如果這個帳號認證失敗，嘗試切換下一個
-            if (rotateAccount()) return await getAuthHeaders();
+            if (rotateAccount()) return await getAuthHeaders(retryCount + 1);
             return {};
         }
 
@@ -252,11 +315,12 @@ async function fetchGlobalPlanes() {
 
     while (retries > 0) {
         try {
+            const headers = await getAuthHeaders();
+
+            // 重要：在確定最終選用的帳號後再進行 Log，避免誤導
             console.log(`🌐 [GLOBAL FETCH] Requesting /states/all ... (Account: ${ACCOUNTS[currentAccountIndex].user})`);
             apiStats.totalCalls++;
             apiStats.stateCalls++;
-
-            const headers = await getAuthHeaders();
             const response = await fetch('https://opensky-network.org/api/states/all', {
                 headers,
                 signal: AbortSignal.timeout(18000)
@@ -264,20 +328,18 @@ async function fetchGlobalPlanes() {
 
             if (!response.ok) {
                 const errorText = await response.text();
-                // 處理 Rate Limit (同原本邏輯)
+
+                // 同步 Quota (即使失敗也可能有 Header)
+                syncAccountQuota(currentAccountIndex, response);
+
                 if (response.status === 429) {
                     console.warn(`⚠️ [RATE LIMIT] Account ${ACCOUNTS[currentAccountIndex].user} limited. Rotating...`);
-                    apiStats.accounts[currentAccountIndex].rateLimits++;
-
-                    const retryStr = response.headers.get('x-rate-limit-retry-after-seconds');
-                    if (retryStr) {
-                        apiStats.accounts[currentAccountIndex].unlockTime = new Date(Date.now() + parseInt(retryStr, 10) * 1000).toISOString();
-                    }
 
                     if (retries > 1 && rotateAccount()) {
                         retries--;
                         continue;
                     } else {
+                        const retryStr = response.headers.get('x-rate-limit-retry-after-seconds');
                         const penaltySeconds = retryStr ? parseInt(retryStr, 10) : 5 * 60;
                         globalRateLimitCooldown = Date.now() + (penaltySeconds * 1000);
                         throw new Error(`All accounts exhausted. Resumes in ${penaltySeconds}s`);
@@ -287,16 +349,12 @@ async function fetchGlobalPlanes() {
             }
 
             // 更新 Quota
-            const remainingStr = response.headers.get('x-rate-limit-remaining');
-            if (remainingStr) {
-                const remainingNum = parseInt(remainingStr, 10);
-                apiStats.accounts[currentAccountIndex].remainingCredits = remainingNum;
-                apiStats.accounts[currentAccountIndex].unlockTime = null;
+            syncAccountQuota(currentAccountIndex, response);
 
-                if (remainingNum <= SAFE_RESERVE_CAP && retries > 1) {
-                    console.log(`🛡️ [RESERVE] Post-call check: Account ${ACCOUNTS[currentAccountIndex].user} metric low. Rotating...`);
-                    rotateAccount();
-                }
+            const remaining = apiStats.accounts[currentAccountIndex].remainingCredits;
+            if (remaining !== null && remaining <= SAFE_RESERVE_CAP && retries > 1) {
+                console.log(`🛡️ [RESERVE] Post-call check: Account ${ACCOUNTS[currentAccountIndex].user} metric low. Rotating...`);
+                rotateAccount();
             }
 
             // [V2.0.0] 將龐大的 JSON.stringify 文字交給 Worker Thread 處理
@@ -332,10 +390,51 @@ async function fetchGlobalPlanes() {
     isFetchingGlobal = false;
 }
 
-// 啟動 25 秒全球資料輪詢機制
-setInterval(fetchGlobalPlanes, 25000);
-// 啟動時立刻抓取一次
-setTimeout(fetchGlobalPlanes, 2000);
+// 啟動 20 秒全球資料輪詢機制 (User Specified: 20s)
+setInterval(fetchGlobalPlanes, 20000);
+// 啟動時讀取快取並初始化
+loadQuotaCache();
+initializeAccountQuotas();
+
+/**
+ * 啟動預熱：若帳號沒有額度紀錄，先各戳一次 API 建立狀態
+ */
+async function initializeAccountQuotas() {
+    console.log(`🌐 [QUOTA] Initializing quotas for ${ACCOUNTS.length} accounts...`);
+    for (let i = 0; i < ACCOUNTS.length; i++) {
+        const acc = apiStats.accounts[i];
+        // 如果本地已經有額度紀錄，就不再額外請求 (User Request: skip if record exists)
+        if (acc.remainingCredits !== null) {
+            console.log(`✅ [QUOTA] Account ${acc.user} has cached quota: ${acc.remainingCredits}`);
+            continue;
+        }
+
+        try {
+            console.log(`🌐 [QUOTA] Warming up account #${i + 1} (${acc.user})...`);
+            // 切換暫時索引來發送請求
+            const savedIndex = currentAccountIndex;
+            currentAccountIndex = i;
+
+            const headers = await getAuthHeaders();
+            // 使用一個極小範圍的 BBox 請求，盡量不耗費太多資源
+            const response = await fetch('https://opensky-network.org/api/states/all?lamin=23.5&lomin=120.5&lamax=23.6&lomax=120.6', {
+                headers,
+                signal: AbortSignal.timeout(10000)
+            });
+
+            syncAccountQuota(i, response);
+            currentAccountIndex = savedIndex; // 還原
+
+            // 每組間隔一下避免太密集
+            await new Promise(r => setTimeout(r, 1000));
+        } catch (e) {
+            console.error(`❌ [QUOTA] Warm-up failed for ${acc.user}: ${e.message}`);
+        }
+    }
+
+    // 預熱完後立刻執行一次真正的全球抓取
+    fetchGlobalPlanes();
+}
 
 // ==========================================
 // V2.0.0 BBox Slicer API
@@ -368,10 +467,11 @@ app.get('/api/planes/bbox', (req, res) => {
 
     res.json({
         time: globalPlanesCache.time,
+        globalLastUpdate: globalPlanesCache.time, // 用於前端判斷資料是否真正過時
         states: filteredStates,
         totalGlobal: globalPlanesCache.states.length,
         stats: apiStats,
-        recommendedInterval: 25 // 固定為前端提供 25s 作為參考
+        recommendedInterval: 25
     });
 });
 
@@ -421,7 +521,6 @@ app.get('/api/tracks', async (req, res) => {
 // ==========================================
 // 飛機 Metadata（機型/製造商/註冊號）— 永久快取與靜態字典
 // ==========================================
-const fs = require('fs');
 const METADATA_CACHE_FILE = path.join(__dirname, 'aircraft-cache.json');
 const AIRCRAFT_STATIC_FILE = path.join(__dirname, 'data', 'aircraft_static.json');
 let aircraftMetadataCache = {};
@@ -473,11 +572,14 @@ app.get('/api/metadata/:icao24', async (req, res) => {
         });
 
         if (!response.ok) {
+            syncAccountQuota(currentAccountIndex, response);
             // 記錄為「無資料」避免重複查詢
             aircraftMetadataCache[icao24] = { icao24, noData: true };
             saveMetadataCache();
             return res.json(aircraftMetadataCache[icao24]);
         }
+
+        syncAccountQuota(currentAccountIndex, response);
 
         const data = await response.json();
         const metadata = {
@@ -535,11 +637,14 @@ app.post('/api/metadata/batch', async function (req, res) {
             );
 
             if (response.status === 429) {
+                syncAccountQuota(currentAccountIndex, response);
                 apiStats.rateLimits++;
                 apiStats.lastError = '429 Rate Limited (metadata batch)';
                 apiStats.lastErrorTime = new Date().toISOString();
                 break; // 停止批次查詢
             }
+
+            syncAccountQuota(currentAccountIndex, response);
 
             if (response.ok) {
                 var data = await response.json();
@@ -658,6 +763,20 @@ function saveRoutesDatabase() {
 
 const routeCache = new Map(); // icao24 -> { data, timestamp } (動態航線快取)
 const ROUTE_CACHE_TTL = 1800000; // 30 分鐘
+
+app.get('/api/airports/list', (req, res) => {
+    // Return all unique airports (key == icao or if no icao, key == iata)
+    // To avoid double-sending (as dictionary has both icao and iata as keys)
+    const airportList = Object.entries(globalAirportsDB)
+        .filter(([key, ap]) => {
+            if (ap.icao) return key === ap.icao;
+            return key === ap.iata;
+        })
+        .map(([key, ap]) => ap);
+
+    console.log(`🌐 [API] Serving ${airportList.length} airports to client (Global Search/Display)`);
+    res.json(airportList);
+});
 
 app.get('/api/airport/:code', (req, res) => {
     const code = req.params.code.toUpperCase();
