@@ -1,17 +1,18 @@
-# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - 極致效能版 v2.2.5
+# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - 極致效能版 v2.3.10
 
-這是一款專門為「大數據效能」與「極致流暢視覺」而生的專業級全球航空監控系統。基於 **React (Vite 6)**、**Node.js (Worker Threads)** 與 **OpenSky Network API**，V2.2.5 引入了多項航空工業級的渲染與推算技術。
+這是一款專門為「大數據效能」與「極致流暢視覺」而生的專業級全球航空監控系統。基於 **React (Vite 6)**、**Node.js (Worker Threads)** 與 **OpenSky Network API**，V2.3.10 優化了 API 請求與計時器邏輯。
 
 ---
 
-## 🚀 v2.2.5 核心技術突破 (Technical Breakthroughs)
-*   **🎉 v2.2.x 深度優化專場**：
-    *   **無縫地圖平移 (Seamless Panning)**：移除 25 秒 fetch 鎖定，實現隨移隨抓，且舊飛機不消失。
-    *   **動態機場資料庫**：移除 5MB 靜態分塊，改由後端 `/api/airports/list` 按需提供 major/intermediate 機場。
+## 🚀 v2.3.10 核心技術突破 (Technical Breakthroughs)
+*   **🎉 v2.3.10 API 同步邏輯優化 (API Sync Logic Optimization)**：
+    *   **💓 獨立心跳計時器 (Independent Heartbeat)**：將「25秒自動刷新」與「地圖移動 BBox 請求」邏輯解耦。地圖移動現在不會再重置視覺上的 25 秒倒數計時。
+    *   **🛡️ 地圖防抖請求 (Map Move Debounce)**：新增 1.5 秒防抖機制，避免在頻繁拖動地圖時產生多餘的 API 請求，有效保護 API 配額。
+    *   **📊 全方位資源監測 (System Resource Monitor)**：支援顯示即時渲染比例、節流係數與標記上限，並具備可摺疊 UI 保持介面整潔。
     *   **智慧 METAR 解碼**：支援全方位機場天氣資訊與飛行類別 (VFR/IFR) 顯示。
     *   **清理冗餘程式碼**：移除 Legacy 分塊與無效 import，編譯體積更輕量。
 
-### �️ 1. 後端「全球數據中心」 (The Heavy Lifter)
+### ️ 1. 後端「全球數據中心」 (The Heavy Lifter)
 *   **25s 全域定時輪詢**：後端獨立於前端需求，每 25,000ms 自動向 OpenSky 擷取全球 ~15,000 架飛機的即時狀態快取。
 *   **Worker Threads 異步解析**：利用 Node.js 多執行緒技術，將 CPU 密集型的龐大 JSON 字串解析與數據清洗工作交給背景執行緒，確保 API 回應主執行緒 **零阻塞 (Event Loop Unblocked)**。
 *   **BBox Slicer (智能裁切 API)**：前端不再下載全球數據。伺服器依據地圖邊界動態裁切（帶有 **10% Buffer Zone**），僅傳輸當前視野內的飛機，大幅降低移動端頻寬消耗。

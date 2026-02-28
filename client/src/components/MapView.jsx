@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath } from '../utils/flightUtils';
+import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath, splitPathAtIDL } from '../utils/flightUtils';
 
 /**
  * MapView — 管理 Leaflet 地圖、飛機 markers、軌跡線、機場圖層
@@ -18,6 +18,7 @@ export default function MapView({
     onDeselectPlane,
     onMapReady,
     onMapMove,
+    onUsageUpdate, // ADDED: 用於回報資源使用狀況
     t,
     translateMetar,
 }) {
@@ -25,7 +26,8 @@ export default function MapView({
     const mapRef = useRef(null);
     const markersRef = useRef({});
     const trackLineRef = useRef(null);
-    const predictiveLineRef = useRef(null); // ADDED REF
+    const routeLineRef = useRef(null); // [v2.3.3] Theoretical Route Path
+    const predictiveLineRef = useRef(null);
     const animFrameRef = useRef(null);
     const lastDrawTimeRef = useRef(performance.now());
     const airportLayerRef = useRef(null);
@@ -163,32 +165,59 @@ export default function MapView({
         };
     }, []);
 
+    // ===== 視覺密度控制配置 (v2.3.1) =====
+    const TIER1_AIRPORTS = ['RCTP', 'RCSS', 'RJTT', 'VHHH', 'WSSS', 'KJFK', 'EGLL', 'LFPG', 'EDDF', 'RJAA', 'RKSI', 'ZSPD', 'ZGGG', 'VTBS', 'OMDB', 'KLAX', 'KSFO', 'YSSY'];
+
+    // 確定性隨機分數 (ICAO24 HEX -> 0~1)
+    const getPlaneHashScore = (icao24) => {
+        if (!icao24) return 0;
+        return parseInt(icao24, 16) / 0xFFFFFF;
+    };
+
     // ===== 機場顯隱與虛擬化渲染 (Virtualized Rendering) =====
     function updateAirportVisibility(map) {
         if (!map || !airportLayerRef.current) return;
         const zoom = map.getZoom();
         const bounds = map.getBounds();
 
-        // Zoom 4 starts showing major continental airports, keeps performance decent
         const currentAirports = airportsRef.current || [];
         const currentFilters = filtersRef.current || {};
 
-        if (zoom >= 4 && currentFilters.showAirports) {
+        // [v2.3.5] 分級門檻邏輯 (調整後)
+        // Zoom < 7: 全部隱藏
+        // Zoom 7: 僅顯示 Tier 1 (Hubs)
+        // Zoom 8: 顯示 Tier 1 + Tier 2 (Major: 有 IATA)
+        // Zoom 9+: 顯示所有
+        const showTier1 = zoom >= 7;
+        const showTier2 = zoom >= 8;
+        const showTier3 = zoom >= 9;
+
+        if (showTier1 && currentFilters.showAirports) {
             if (!map.hasLayer(airportLayerRef.current)) {
                 map.addLayer(airportLayerRef.current);
             }
 
-            // 虛擬化: 清空不在畫面中的 marker，只渲染當前邊界內的機場
             airportLayerRef.current.clearLayers();
-            const extBounds = bounds.pad(0.3); // Pad view by 30% for smooth panning
+            const extBounds = bounds.pad(0.3);
 
             for (let i = 0; i < currentAirports.length; i++) {
                 const ap = currentAirports[i];
-                if (extBounds.contains([ap.lat, ap.lng])) {
+
+                // 判斷機場等級
+                const isTier1 = TIER1_AIRPORTS.includes(ap.icao);
+                const isTier2 = ap.iata && ap.iata.length === 3;
+                const isTier3 = !isTier2;
+
+                let visible = false;
+                if (isTier1) visible = showTier1;
+                else if (isTier2) visible = showTier2;
+                else if (isTier3) visible = showTier3;
+
+                if (visible && extBounds.contains([ap.lat, ap.lng])) {
                     const m = L.marker([ap.lat, ap.lng], {
-                        icon: createAirportIcon(ap.type),
+                        icon: createAirportIcon(isTier1 ? 'large' : isTier2 ? 'medium' : 'small'),
                         interactive: true,
-                        zIndexOffset: -1000,
+                        zIndexOffset: isTier1 ? 100 : isTier2 ? 50 : 0,
                     });
 
                     const labelName = ap.city && ap.city !== ap.name.toUpperCase() ? `${ap.name} (${ap.city})` : ap.name;
@@ -227,34 +256,19 @@ export default function MapView({
         filtersRef.current = filters; // Update ref whenever filters change
         const map = mapRef.current;
         if (map) {
-            // Persistent Popup Logic...
-            const openPopup = map._popup;
-            if (openPopup && openPopup.isOpen()) {
-                const el = openPopup.getElement();
-                const apCard = el?.querySelector('.ap-card');
-                if (apCard) {
-                    const icaoMatch = el.querySelector('.ap-icao')?.textContent.split(' · ')[0];
-                    if (icaoMatch) {
-                        getAirportDisplayData(icaoMatch).then(apData => {
-                            if (apData && openPopup.isOpen()) {
-                                renderMetarPopup(apData, map, openPopup);
-                            }
-                        });
-                    }
-                }
-            }
             updateAirportVisibility(map);
         }
     }, [airports, filters, t, translateMetar]);
 
-    // ===== 過濾器：判斷是否顯示飛機 =====
+    // ===== 過濾器：判斷是否顯示飛機 (v2.3.6 Dynamic Density) =====
     const shouldShowPlane = useCallback(
-        (plane) => {
+        (plane, dynamicThrottle = 1.0) => {
             if (!filters.showGround && plane.onGround) return false;
             if (!filters.showEmergency && plane.isEmergency) return false;
-            if (!filters.showLow && plane.altitude !== 'N/A' && plane.altitude !== 'GROUND' && plane.altitude < 1500) return false;
+            const alt = parseFloat(plane.altitude);
+            if (!filters.showLow && !isNaN(alt) && alt < 1500) return false;
 
-            // Local Bounds Check for Zero-Latency Panning
+            // Local Bounds Check
             if (bounds) {
                 const lat = parseFloat(plane.lat);
                 const lng = parseFloat(plane.lng);
@@ -263,22 +277,44 @@ export default function MapView({
                 }
             }
 
-            // [V2.0.0] Level of Detail (LOD) 過濾
+            // [v2.3.6] 動態密度過濾器 (Deterministic Hash)
             const map = mapRef.current;
+            if (map && !plane.isEmergency && plane.icao24 !== selectedIcao24) {
+                const zoom = map.getZoom();
+                const score = getPlaneHashScore(plane.icao24);
+
+                // 密度門檻設定 (v2.3.7 重新平衡：更為慷慨)
+                const densityTable = {
+                    1: 0.10, 2: 0.20,
+                    3: 0.35, 4: 0.50,
+                    5: 0.70, 6: 0.85,
+                    7: 0.95, 8: 1.0,
+                };
+
+                let threshold = densityTable[zoom] ?? 1.0;
+
+                // [v2.3.6] 結合總數判定：如果當前 BBox 感知到的飛機總數過多，額外縮減 threshold
+                threshold *= dynamicThrottle;
+
+                if (score > threshold) return false;
+            }
+
+            // LOD 優化 (v2.3.7 放寬低空限制)
             if (map) {
                 const zoom = map.getZoom();
-                if (zoom < 5 && (plane.altitude === 'GROUND' || plane.altitude < 5000)) {
-                    return false; // 遠景 (Zoom < 5)：僅顯示大於 5000 公尺的巡航飛機
+                // Zoom < 4 隱藏 2500ft 以下
+                if (zoom < 4 && (plane.onGround || plane.altitude < 760)) {
+                    return false;
                 }
-                if (zoom >= 5 && zoom <= 9 && plane.onGround) {
-                    return false; // 中景 (Zoom 5-9)：隱藏地面目標
+                // Zoom 4-5 隱藏地面
+                if (zoom >= 4 && zoom < 6 && plane.onGround) {
+                    return false;
                 }
-                // Zoom >= 10：顯示所有詳細目標 (包括地面)
             }
 
             return true;
         },
-        [filters, bounds]
+        [filters, bounds, selectedIcao24]
     );
 
     // ===== 同步 markers 到 planesDict =====
@@ -287,9 +323,18 @@ export default function MapView({
         if (!map) return;
 
         const zoom = map.getZoom();
+        const totalRawCount = Object.keys(planesDict).length;
 
-        // 根據 zoom 設定 marker 上限 (防止卡頓)
-        const MAX_MARKERS = zoom <= 4 ? 300 : zoom <= 5 ? 800 : zoom <= 6 ? 2000 : 99999;
+        // [v2.3.7] 動態上限與節流因子
+        // 調高節流門檻：當全域大於 12000 台飛機時才開始顯著節流
+        const dynamicThrottle = totalRawCount > 12000 ? Math.max(0.4, 12000 / totalRawCount) : 1.0;
+
+        // 根據 zoom 設定 marker 上限 (階梯式平滑化)
+        const MAX_MARKERS = zoom <= 4 ? 300 :
+            zoom <= 5 ? 800 :
+                zoom <= 6 ? 1500 :
+                    zoom <= 7 ? 3500 :
+                        zoom <= 8 ? 6000 : 10000;
         const showTooltips = zoom >= 6; // 低縮放隱藏 tooltip 以提升效能
 
         const currentIds = new Set(Object.keys(planesDict));
@@ -309,28 +354,33 @@ export default function MapView({
         if (filters.regexFilter) {
             try {
                 validRegex = new RegExp(filters.regexFilter, 'i');
-            } catch (e) { }
+            } catch (e) {
+                console.warn('Invalid Regex:', e.message);
+            }
         }
 
         currentIds.forEach((id) => {
             const plane = planesDict[id];
-            if (!filters.showGround && plane.onGround) return;
-            if (!filters.showEmergency && plane.isEmergency) return;
-            if (!filters.showLow && plane.altitude !== 'N/A' && plane.altitude !== 'GROUND' && plane.altitude < 1500) return;
 
-            // Regex Check
+            // Regex Check (If active)
             if (validRegex) {
-                if (!validRegex.test(plane.callsign) && !validRegex.test(plane.icao24) && !validRegex.test(plane.category)) {
+                if (!validRegex.test(plane.callsign || '') &&
+                    !validRegex.test(plane.icao24 || '') &&
+                    !validRegex.test(plane.category || '')) {
                     return;
                 }
             }
 
-            filteredPlanes.push({ id, plane });
+            // [v2.3.6] 將所有過濾邏輯統一到 shouldShowPlane 函數中
+            if (shouldShowPlane(plane, dynamicThrottle)) {
+                filteredPlanes.push({ id, plane });
+            }
         });
 
         // 如果飛機數超過上限，優先保留重要飛機
         let visibleSet;
-        if (filteredPlanes.length > MAX_MARKERS) {
+        const totalInView = filteredPlanes.length;
+        if (totalInView > MAX_MARKERS) {
             filteredPlanes.sort((a, b) => {
                 // 選中飛機最優先
                 if (a.id === selectedIcao24) return -1;
@@ -346,6 +396,16 @@ export default function MapView({
             visibleSet = new Set(filteredPlanes.slice(0, MAX_MARKERS).map(p => p.id));
         } else {
             visibleSet = new Set(filteredPlanes.map(p => p.id));
+        }
+
+        // [v2.3.8] 回報資源使用量
+        if (onUsageUpdate) {
+            onUsageUpdate({
+                visibleCount: visibleSet.size,
+                totalInView: totalInView,
+                renderLimit: MAX_MARKERS,
+                throttleFactor: dynamicThrottle
+            });
         }
 
         // 移除超出上限或不通過篩選的 marker
@@ -425,62 +485,68 @@ export default function MapView({
         });
     }, [planesDict, selectedIcao24, filters, shouldShowPlane, onSelectPlane]);
 
-    // ===== 軌跡線 =====
+    // ===== 軌跡與航線繪製 (v2.3.3 IDL Fix) =====
     useEffect(() => {
         const map = mapRef.current;
         if (!map) return;
 
-        if (trackLineRef.current) {
-            map.removeLayer(trackLineRef.current);
-            trackLineRef.current = null;
+        // 1. 清除舊圖層
+        if (trackLineRef.current) map.removeLayer(trackLineRef.current);
+        if (routeLineRef.current) map.removeLayer(routeLineRef.current);
+        trackLineRef.current = null;
+        routeLineRef.current = null;
+
+        const getDistSq = (p1, p2) => Math.pow(p1[0] - p2[0], 2) + Math.pow(p1[1] - p2[1], 2);
+
+        // A. 繪製「預計航線」 (Theoretical Route Path - Bottom Layer)
+        if (selectedRoute && selectedRoute.depCoord && selectedRoute.arrCoord) {
+            const pathPoints = getGreatCirclePath(
+                [selectedRoute.depCoord.lat, selectedRoute.depCoord.lng],
+                [selectedRoute.arrCoord.lat, selectedRoute.arrCoord.lng]
+            );
+            const routeSegments = splitPathAtIDL(pathPoints);
+            routeLineRef.current = L.polyline(routeSegments, {
+                color: '#555',
+                weight: 2,
+                opacity: 0.5,
+                dashArray: '5, 5',
+                interactive: false
+            }).addTo(map);
         }
 
-        const getDistMap = (lat1, lon1, lat2, lon2) => {
-            const R = 6371e3;
-            const φ1 = lat1 * Math.PI / 180;
-            const φ2 = lat2 * Math.PI / 180;
-            const Δφ = (lat2 - lat1) * Math.PI / 180;
-            const Δλ = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-                Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        };
-
+        // B. 繪製「實際軌跡」 (Actual Track - Top Layer)
         if (trackPoints && trackPoints.length > 1) {
-            // Dynamically append the plane's live position to the static history track
-            // so the line doesn't fall behind as the plane moves.
             const livePoints = [...trackPoints];
             if (selectedIcao24 && planesDict[selectedIcao24]) {
                 const livePlane = planesDict[selectedIcao24];
                 const trackEnd = livePoints[livePoints.length - 1];
 
-                // Anti-Glitch: Only connect if the jump is less than 500km.
-                // If OpenSky returns yesterday's track, this prevents a massive cross-continent straight line.
-                const dist = getDistMap(trackEnd[0], trackEnd[1], livePlane.lat, livePlane.lng);
-                if (dist < 500000) {
-                    livePoints.push([livePlane.lat, livePlane.lng]);
-                }
+                // 擴展 livePoints，但避免因座標突變產生長線 (500km 限制已由 splitPathAtIDL 輔助處理)
+                livePoints.push([livePlane.lat, livePlane.lng]);
             }
 
-            trackLineRef.current = L.polyline(livePoints, {
+            const trackSegments = splitPathAtIDL(livePoints);
+            trackLineRef.current = L.polyline(trackSegments, {
                 color: '#FFDC00',
                 weight: 3,
                 opacity: 0.8,
                 dashArray: '10, 5',
                 lineCap: 'round',
             }).addTo(map);
+
+            if (routeLineRef.current) {
+                trackLineRef.current.bringToFront();
+            }
         } else if (selectedIcao24 && flightHistoryRef?.current?.[selectedIcao24]) {
-            // Client-Side History Fallback (drawn while API track is loading or empty)
+            // Client-Side History Fallback
             const history = flightHistoryRef.current[selectedIcao24];
             if (history.length > 1) {
-                // history structure: [time, lat, lng, onGround]
                 const points = history.map(p => [p[1], p[2]]);
-                // Always push current live position just to be safe
                 if (planesDict[selectedIcao24]) {
                     points.push([planesDict[selectedIcao24].lat, planesDict[selectedIcao24].lng]);
                 }
-
-                trackLineRef.current = L.polyline(points, {
+                const trackSegments = splitPathAtIDL(points);
+                trackLineRef.current = L.polyline(trackSegments, {
                     color: '#FFDC00',
                     weight: 3,
                     opacity: 0.8,
@@ -488,17 +554,6 @@ export default function MapView({
                     lineCap: 'round',
                 }).addTo(map);
             }
-        }
-
-        // ===== 預估虛線 (Predictive Path) =====
-        // [V2.0.0] Removed mapping prediction lines at the user's request (Phase 3.1)
-        if (predictiveLineRef.current) {
-            map.removeLayer(predictiveLineRef.current);
-            predictiveLineRef.current = null;
-        }
-        // Make sure the yellow actual track renders *above* the grey prediction line
-        if (trackLineRef.current) {
-            trackLineRef.current.bringToFront();
         }
     }, [trackPoints, planesDict, selectedIcao24, selectedRoute]);
 

@@ -1,7 +1,8 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const fs = require('fs');
+const path = require('path');
+const cron = require('node-cron');
 const { Worker } = require('worker_threads');
 require('dotenv').config();
 
@@ -806,13 +807,26 @@ app.get('/api/airport/:code', (req, res) => {
     return res.status(404).json({ error: 'Airport not found' });
 });
 
+/**
+ * Haversine Formula — 計算兩點經緯度距離 (km)
+ */
+function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+
 app.get('/api/route/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
     const queryCallsign = (req.query.callsign || '').toUpperCase();
     const cleanCallsign = queryCallsign.replace(/[^A-Z0-9]/g, '');
 
     // 1. Try static schedules and local routes first (Higher Priority)
-    // Now with Airline Alias Support!
     let searchCallsigns = [cleanCallsign];
     const resolved = resolveAirlineAlias(cleanCallsign);
     if (resolved && resolved.alias) {
@@ -842,7 +856,6 @@ app.get('/api/route/:icao24', async (req, res) => {
     }
 
     if (route) {
-        // Enforce 4-letter ICAO codes for consistency
         if (route.dep && route.dep.length === 3) route.dep = globalAirportsDB[route.dep]?.icao || route.dep;
         if (route.arr && route.arr.length === 3) route.arr = globalAirportsDB[route.arr]?.icao || route.arr;
 
@@ -863,14 +876,48 @@ app.get('/api/route/:icao24', async (req, res) => {
     }
 
     try {
-        // [V2.0.0] Remove OpenSky /routes API fetch (Too many missing routes + rate limits).
-        // First fallback is TDX API (Assuming it's configured, or just mock it simply if we don't have TDX credentials yet)
+        // --- Layer 3: Spatial Reverse-Geocoding (物理足跡推測) ---
+        console.log(`🔍 [SPATIAL] Attempting inference for ${cleanCallsign} (${icao24})...`);
 
-        // --- 3. TDX API (Taiwan specific routes fallback) ---
-        // TODO: The user mentioned TDX API. We'll add a placeholder structure that can be fleshed out or replaced if TDX isn't fully set up yet.
-        // For now, since OpenSky routes is removed, and if TDX isn't cleanly available without tokens, we return noData.
+        // Fetch tracks history to find the starting point
+        const trackRes = await fetch(`http://localhost:${PORT}/api/tracks?icao24=${icao24}`);
+        const trackData = await trackRes.json();
 
-        console.log(`⚠️ [ROUTE] ${cleanCallsign} not found in Local/Cache. Returning noData.`);
+        if (trackData && trackData.path && trackData.path.length > 0) {
+            const startPoint = trackData.path[0]; // [time, lat, lng, alt, heading, onGround]
+            const startLat = startPoint[1];
+            const startLng = startPoint[2];
+
+            // Find nearest airport within 10km
+            let nearestAp = null;
+            let minDict = 10; // 門檻 10km
+
+            // 我們優化搜尋，僅對有 ICAO 代碼的真實機場進行比對
+            for (const ap of Object.values(globalAirportsDB)) {
+                if (!ap.icao || !ap.lat || !ap.lng) continue;
+                const dist = getDistance(startLat, startLng, ap.lat, ap.lng);
+                if (dist < minDict) {
+                    minDict = dist;
+                    nearestAp = ap;
+                }
+            }
+
+            if (nearestAp) {
+                console.log(`✅ [SPATIAL] Inferred Departure: ${nearestAp.icao} (${nearestAp.name}) for ${cleanCallsign}`);
+                const inferredResult = {
+                    icao24,
+                    callsign: cleanCallsign,
+                    departureAirport: nearestAp.icao,
+                    arrivalAirport: null,
+                    isInferred: true,
+                    source: 'spatial_inference'
+                };
+                routeCache.set(icao24, { data: inferredResult, timestamp: Date.now() });
+                return res.json(inferredResult);
+            }
+        }
+
+        console.log(`⚠️ [ROUTE] ${cleanCallsign} not found in Local/Cache/Spatial. Returning noData.`);
         const noDataResult = { icao24, callsign: cleanCallsign, noData: true, source: 'none' };
         routeCache.set(icao24, { data: noDataResult, timestamp: Date.now() });
         return res.json(noDataResult);
@@ -1012,8 +1059,49 @@ app.use((req, res) => {
 });
 
 // ==========================================
-// 啟動伺服器
+// 自動化資料庫引擎 (Background Auto-Sync)
 // ==========================================
+async function syncSchedulesDatabase() {
+    console.log('⚙️ [AUTO-SYNC] Starting daily database synchronization...');
+    try {
+        // [數據獲取] 這裡使用的是一個開源的、定期更新的航班班表來源範例
+        // 實際部署時使用者可以根據需要修改此 URL
+        const SCHEDULES_URL = 'https://raw.githubusercontent.com/LiaoCho/flight-data-source/main/schedules_latest.json';
+
+        console.log(`📡 [AUTO-SYNC] Downloading latest data from ${SCHEDULES_URL}...`);
+
+        // 設定較短的逾時，避免阻塞事件循環
+        const response = await fetch(SCHEDULES_URL, { signal: AbortSignal.timeout(60000) });
+
+        if (!response.ok) {
+            console.warn(`⚠️ [AUTO-SYNC] Failed to download schedules: ${response.status}. Using existing local data.`);
+            return;
+        }
+
+        const newData = await response.json();
+        const SCHEDULE_FILE = path.join(__dirname, 'schedules_static.json');
+
+        // [轉譯與覆寫]
+        // 原則上我們直接覆寫，但如果是 CSV 或其他格式，這裡需要加入清洗邏輯
+        fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(newData, null, 2));
+
+        // 同步完成後更新記憶體中的變數
+        global.schedulesStaticDB = newData;
+
+        console.log(`✅ [AUTO-SYNC] Successfully synced ${Object.keys(newData).length} flights. Schedules updated.`);
+    } catch (error) {
+        console.error('❌ [AUTO-SYNC] Critical synchronization error:', error.message);
+    }
+}
+
+// 設定每日凌晨 3 點 (伺服器離峰時間) 執行任務
+cron.schedule('0 3 * * *', () => {
+    syncSchedulesDatabase();
+}, {
+    timezone: "Asia/Taipei"
+});
+
+// 啟動伺服器
 app.listen(PORT, () => {
     const readyTime = new Date().toLocaleTimeString();
     console.log('');

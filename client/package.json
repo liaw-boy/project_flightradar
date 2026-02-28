@@ -1,7 +1,7 @@
 {
     "name": "flight-radar-client",
     "private": true,
-    "version": "2.2.5",
+    "version": "2.3.11",
     "type": "module",
     "scripts": {
         "dev": "vite",

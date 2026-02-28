@@ -217,10 +217,34 @@
     font-size: 11px;
     font-weight: 600;
     color: #FFDC00;
-    opacity: 0.8;
-    margin-top: 2px;
-    letter-spacing: 1px;
+    opacity: 0.9;
+    letter-spacing: 0.5px;
     text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 140px;
+}
+
+.route-city-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.inferred-badge {
+    background: rgba(1, 255, 112, 0.15);
+    color: #01FF70;
+    border: 1px solid rgba(1, 255, 112, 0.3);
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 9px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 0 10px rgba(1, 255, 112, 0.1);
 }
 
 .sb-airport-name {
@@ -278,6 +302,51 @@
     font-size: 14px;
 }
 
+.inferred-label {
+    font-style: italic;
+    font-size: 10px;
+    color: #01FF70;
+    opacity: 0.8;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+.sb-route-card.no-route {
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+}
+
+.sb-route-fallback {
+    padding: 25px 15px;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.fallback-airline {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.fallback-airline .airline-name {
+    font-size: 20px;
+    font-weight: bold;
+    color: #FFDC00;
+}
+
+.fallback-airline .no-data-text {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.fallback-hint {
+    margin-top: 15px;
+    font-size: 11px;
+    color: #888;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 6px;
+    border-radius: 4px;
+}
+
 /* Generic inner padding */
 .sb-section-title {
     margin-left: 10px !important;
@@ -321,6 +390,25 @@
     color: #fff;
     text-align: right;
     word-break: break-all;
+}
+
+.sb-route-time.right {
+    text-align: right;
+}
+
+.route-path-line {
+    position: absolute;
+    width: 60%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 220, 0, 0.4), transparent);
+    top: 50%;
+    transform: translateY(-50%);
+    border-top: 1px dashed rgba(255, 220, 0, 0.2);
+}
+
+.inferred-label {
+    display: none;
+    /* Replaced by inferred-badge */
 }
 
 .alert-box {

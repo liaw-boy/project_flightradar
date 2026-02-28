@@ -163,38 +163,57 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                 )}
 
                 {/* Advanced Route Card (Dark Theme Symmetric Layout) */}
-                <div className="sb-route-card">
-                    <div className="sb-route-display">
-                        <div className="sb-route-left">
-                            <div className="route-iata">{depInfo?.iata || depCode || '...'}</div>
-                            <div className="route-city">{depName}</div>
-                        </div>
-                        <div className="sb-route-center">
-                            <div className="route-plane-icon">
-                                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-                                    <path d="M22,12 L18,8 L15,8 L16,11 L6,11 L3,6 L1,6 L4,12 L1,18 L3,18 L6,13 L16,13 L15,16 L18,16 L22,12 Z" />
-                                </svg>
+                <div className={`sb-route-card ${route?.noData ? 'no-route' : ''}`}>
+                    {!route?.noData ? (
+                        <>
+                            <div className="sb-route-display">
+                                <div className="sb-route-left">
+                                    <div className="route-iata">{depInfo?.iata || depCode || '---'}</div>
+                                    <div className="route-city-container">
+                                        <div className="route-city">{depName}</div>
+                                        {route?.isInferred && <span className="inferred-badge">{t('inferred') || '推定'}</span>}
+                                    </div>
+                                </div>
+                                <div className="sb-route-center">
+                                    <div className="route-path-line"></div>
+                                    <div className="route-plane-icon">
+                                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                            <path d="M22,12 L18,8 L15,8 L16,11 L6,11 L3,6 L1,6 L4,12 L1,18 L3,18 L6,13 L16,13 L15,16 L18,16 L22,12 Z" />
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div className="sb-route-right">
+                                    <div className="route-iata">{arrInfo?.iata || arrCode || '---'}</div>
+                                    <div className="route-city-container">
+                                        <div className="route-city">{arrName}</div>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                        <div className="sb-route-right">
-                            <div className="route-iata">{arrInfo?.iata || arrCode || '...'}</div>
-                            <div className="route-city">{arrName}</div>
-                        </div>
-                    </div>
-                    {(route?.firstSeen || route?.lastSeen) && (
-                        <div className="sb-route-bottom">
-                            <div className="sb-route-time left">
-                                <span className="time-label">ACTUAL DEP:</span>
-                                <span className="time-val">
-                                    {formatLocalTime(route?.firstSeen, depInfo?.timezone)}
-                                </span>
+                            {(route?.firstSeen || route?.lastSeen) && (
+                                <div className="sb-route-bottom">
+                                    <div className="sb-route-time left">
+                                        <span className="time-label">ACTUAL DEP:</span>
+                                        <span className="time-val">
+                                            {formatLocalTime(route?.firstSeen, depInfo?.timezone)}
+                                        </span>
+                                    </div>
+                                    <div className="sb-route-time right">
+                                        <span className="time-label">ESTIMATED:</span>
+                                        <span className="time-val">
+                                            {formatLocalTime(route?.lastSeen, arrInfo?.timezone)}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        /* Graceful Degradation: Airline-only display */
+                        <div className="sb-route-fallback">
+                            <div className="fallback-airline">
+                                <span className="airline-name">{airlineName || t('unknownAirline')}</span>
+                                <span className="no-data-text"> — {t('routeNotPublished') || '航線未公開'}</span>
                             </div>
-                            <div className="sb-route-time right" style={{ textAlign: 'right' }}>
-                                <span className="time-label">ESTIMATED:</span>
-                                <span className="time-val">
-                                    {formatLocalTime(route?.lastSeen, arrInfo?.timezone)}
-                                </span>
-                            </div>
+                            <div className="fallback-hint">{t('spatialInferenceFailed') || '系統解析中或為私人航班'}</div>
                         </div>
                     )}
                 </div>
@@ -238,7 +257,7 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                         <DataRow label={t('squawk')} value={plane.squawk || '--'} />
                         <DataRow
                             label={t('spiLabel')}
-                            value={plane.spi ? '⚠️ ACTIVE' : 'Normal'}
+                            value={plane.spi ? t('spiActive') : t('spiNormal')}
                             valueClass={plane.spi ? 'spi-active' : ''}
                         />
                         <DataRow label={t('lastContact')} value={contactTime} />

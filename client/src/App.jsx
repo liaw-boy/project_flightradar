@@ -37,6 +37,14 @@ export default function App() {
         showAirports: true,
     });
 
+    const [zoom, setZoom] = useState(10);
+    const [usageStats, setUsageStats] = useState({
+        visibleCount: 0,
+        totalInView: 0,
+        renderLimit: 0,
+        throttleFactor: 1.0
+    });
+
     const mapInstanceRef = useRef(null);
     const { notifications, showNotification } = useNotification();
     const {
@@ -86,12 +94,21 @@ export default function App() {
         if (urlParams.lat !== null && urlParams.lng !== null) {
             map.setView([urlParams.lat, urlParams.lng], urlParams.zoom || 10);
         }
+        setZoom(map.getZoom());
     }, []);
 
-    // 地圖移動
+    // 地圖移動 [v2.3.10] 新增防抖處理 (Debounce) 避免頻繁移動造成 API 負載
+    const moveTimeoutRef = useRef(null);
     const handleMapMove = useCallback(() => {
-        console.log('Map moved - pulling new BBox planes');
-        fetchPlanes();
+        if (mapInstanceRef.current) {
+            setZoom(mapInstanceRef.current.getZoom());
+        }
+
+        if (moveTimeoutRef.current) clearTimeout(moveTimeoutRef.current);
+        moveTimeoutRef.current = setTimeout(() => {
+            console.log('Map movement settled - pulling new BBox planes');
+            fetchPlanes();
+        }, 1500); // 1.5 秒內沒有新移動才抓取
     }, [fetchPlanes]);
 
     // 選中飛機
@@ -191,6 +208,7 @@ export default function App() {
                 onDeselectPlane={handleDeselectPlane}
                 onMapReady={handleMapReady}
                 onMapMove={handleMapMove}
+                onUsageUpdate={setUsageStats}
                 t={t}
                 translateMetar={translateMetar}
             />
@@ -211,6 +229,8 @@ export default function App() {
                 lastUpdateTime={lastUpdateTime}
                 nextRefresh={throttleSeconds}
                 apiStats={apiStats}
+                zoom={zoom}
+                usageStats={usageStats}
             />
 
             <FilterPanel

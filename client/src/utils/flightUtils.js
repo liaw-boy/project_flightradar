@@ -380,6 +380,33 @@ export function predictPosition(lat, lng, velocity, heading, deltaTime) {
 }
 
 /**
+ * 將路徑點在換日線 (IDL) 處切斷，避免橫穿地球的直連線
+ * @param {Array} points [[lat, lng], ...]
+ * @returns {Array} [[[lat, lng], ...], ...] 段落組成的陣列
+ */
+export function splitPathAtIDL(points) {
+    if (!points || points.length < 2) return [points];
+
+    const segments = [];
+    let currentSegment = [points[0]];
+
+    for (let i = 1; i < points.length; i++) {
+        const p1 = points[i - 1];
+        const p2 = points[i];
+
+        // 檢測經度突變 (超過 180 度視為跨換日線)
+        const lonDiff = Math.abs(p2[1] - p1[1]);
+        if (lonDiff > 180) {
+            segments.push(currentSegment);
+            currentSegment = [];
+        }
+        currentSegment.push(p2);
+    }
+    segments.push(currentSegment);
+    return segments;
+}
+
+/**
  * 產生大圓航線 (Great Circle) 插補點，用於繪製弧線
  * @param {Array} p1 [lat, lng]
  * @param {Array} p2 [lat, lng]
@@ -387,10 +414,15 @@ export function predictPosition(lat, lng, velocity, heading, deltaTime) {
  * @returns {Array} [[lat, lng], ...]
  */
 export function getGreatCirclePath(p1, p2, numPoints = 60) {
-    const lat1 = p1[0] * Math.PI / 180;
-    const lon1 = p1[1] * Math.PI / 180;
-    const lat2 = p2[0] * Math.PI / 180;
-    const lon2 = p2[1] * Math.PI / 180;
+    let lat1 = p1[0] * Math.PI / 180;
+    let lon1 = p1[1] * Math.PI / 180;
+    let lat2 = p2[0] * Math.PI / 180;
+    let lon2 = p2[1] * Math.PI / 180;
+
+    // 經度正規化處理，確保 lonDiff 在 -PI 到 PI 之間
+    let lonDiff = lon2 - lon1;
+    if (lonDiff > Math.PI) lon2 -= 2 * Math.PI;
+    if (lonDiff < -Math.PI) lon2 += 2 * Math.PI;
 
     const d = 2 * Math.asin(Math.sqrt(
         Math.pow(Math.sin((lat1 - lat2) / 2), 2) +
@@ -409,7 +441,13 @@ export function getGreatCirclePath(p1, p2, numPoints = 60) {
         const z = A * Math.sin(lat1) + B * Math.sin(lat2);
         const lat3 = Math.atan2(z, Math.sqrt(Math.pow(x, 2) + Math.pow(y, 2)));
         const lon3 = Math.atan2(y, x);
-        path.push([lat3 * 180 / Math.PI, lon3 * 180 / Math.PI]);
+
+        // 將座標轉回 180 到 -180
+        let degLon = lon3 * 180 / Math.PI;
+        while (degLon > 180) degLon -= 360;
+        while (degLon < -180) degLon += 360;
+
+        path.push([lat3 * 180 / Math.PI, degLon]);
     }
     return path;
 }

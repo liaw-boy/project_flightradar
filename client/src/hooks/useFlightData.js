@@ -26,6 +26,7 @@ export function useFlightData(mapRef, showNotification) {
     const planesDictRef = useRef({});
     const apiStatusRef = useRef('INIT');
     const globalLastUpdateRef = useRef(0);
+    const nextScheduledFetchRef = useRef(Date.now() + 25000); // 追蹤下一次預約自動更新的時間
 
     // 保持 ref 和 state 同步
     useEffect(() => {
@@ -99,8 +100,8 @@ export function useFlightData(mapRef, showNotification) {
                 setApiStats(data.stats);
             }
 
-            const intervalDelay = 25; // User requested 25 seconds
-            setThrottleSeconds(intervalDelay);
+            // [v2.3.10] 移除此處的計時器重置，改由 useEffect 或自動週期控制
+            // setThrottleSeconds(intervalDelay); 
 
             const parsedPlanes = (data.states || []).map(p => {
                 return {
@@ -131,8 +132,10 @@ export function useFlightData(mapRef, showNotification) {
                 setApiErrorDetail('API reached successfully but returned 0 planes.');
             }
 
-            // 如果是自動刷新觸發的，就設定下一預約更新
+            // 如果是自動刷新觸發的，就設定下一預約更新時間並排程
             if (isAutoRefresh) {
+                nextScheduledFetchRef.current = Date.now() + 25000;
+                setThrottleSeconds(25);
                 setTimeout(() => {
                     fetchPlanes(true);
                 }, 25000);
@@ -314,9 +317,10 @@ export function useFlightData(mapRef, showNotification) {
             fetchPlanes(true); // 使用 true 啟動定時自動更新
         }
 
-        // Timer countdown sync for UI (不負責 fetch，只負責倒數顯示)
+        // Timer countdown sync for UI (不負責 fetch，只負責反映距離下一個 nextScheduledFetchRef 的剩餘時間)
         const uiTimer = setInterval(() => {
-            setThrottleSeconds((prev) => Math.max(0, prev - 1));
+            const remaining = Math.max(0, Math.round((nextScheduledFetchRef.current - Date.now()) / 1000));
+            setThrottleSeconds(remaining);
         }, 1000);
 
         return () => clearInterval(uiTimer);

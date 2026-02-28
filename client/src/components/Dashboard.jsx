@@ -13,10 +13,13 @@ export default function Dashboard({
     lastUpdateTime,
     nextRefresh,
     apiStats,
+    zoom, // ADDED PROP
+    usageStats, // [v2.3.8] NEW PROP
 }) {
     const [time, setTime] = useState('--:--:--');
     const [isOnline, setIsOnline] = useState(true);
     const [showApiStats, setShowApiStats] = useState(false);
+    const [showResourceUsage, setShowResourceUsage] = useState(false); // [v2.3.8] Collapsible state
     const { t, lang, toggleLang } = useI18n();
 
     useEffect(() => {
@@ -32,11 +35,15 @@ export default function Dashboard({
 
     const nextRefreshClass = nextRefresh !== null && nextRefresh <= 5 ? 'stat-warning' : '';
 
+    // [v2.3.8] 計算資源指標
+    const displayPercentage = usageStats.totalInView > 0 ? Math.round((usageStats.visibleCount / usageStats.totalInView) * 100) : 100;
+    const isThrottled = usageStats.throttleFactor < 1.0;
+
     return (
         <div className="dashboard">
             <div className="title-container">
                 <div className={`live-dot ${isOnline ? '' : 'offline'}`} />
-                <h2>{t('radarSystem')} <span className="version-label">v2.2.5</span></h2>
+                <h2>{t('radarSystem')} <span className="version-label">v2.3.11</span></h2>
                 <button className="lang-toggle" onClick={toggleLang}>
                     {lang === 'en' ? 'EN/中' : '中/EN'}
                 </button>
@@ -58,6 +65,10 @@ export default function Dashboard({
                 </span>
             </div>
             <div className="stat-row">
+                <span>{t('zoomLevel') || 'Zoom Level'}</span>
+                <span className="stat-value">{zoom}</span>
+            </div>
+            <div className="stat-row">
                 <span>{t('lastUpdate')}</span>
                 <span className="stat-value">{lastUpdateTime || '--'}</span>
             </div>
@@ -73,6 +84,37 @@ export default function Dashboard({
                     {apiErrorDetail}
                 </div>
             )}
+
+            <div className="stat-divider" />
+
+            {/* [v2.3.8] Resource Usage Section */}
+            <div
+                className={`api-stats-header ${showResourceUsage ? 'open' : ''}`}
+                onClick={() => setShowResourceUsage(!showResourceUsage)}
+            >
+                <span>{t('resourceUsage')}</span>
+                <span className="api-stats-icon">▼</span>
+            </div>
+            <div className={`api-stats-content ${showResourceUsage ? 'open' : ''}`}>
+                <div className="stat-row">
+                    <span>{t('displayRatio')}</span>
+                    <span className="stat-value">{displayPercentage}%</span>
+                </div>
+                <div className="stat-row">
+                    <span>{t('renderLimit')}</span>
+                    <span className="stat-value">{usageStats.renderLimit}</span>
+                </div>
+                <div className="stat-row">
+                    <span>{t('throttling')}</span>
+                    <span className="stat-value">{usageStats.throttleFactor.toFixed(2)}x</span>
+                </div>
+                <div className="stat-row">
+                    <span>{t('renderStatus')}</span>
+                    <span className={`stat-value ${isThrottled ? 'stat-warning' : ''}`} style={{ fontSize: '11px' }}>
+                        {isThrottled ? t('statusThrottled') : t('statusNormal')}
+                    </span>
+                </div>
+            </div>
 
             <div className="stat-divider" />
 
@@ -97,7 +139,12 @@ export default function Dashboard({
                 </div>
                 <div className="stat-row">
                     <span>{t('apiCalls')}</span>
-                    <span className="stat-value" style={{ fontSize: '13px' }}>{apiStats?.totalCalls ?? 0}</span>
+                    <span className="stat-value" style={{ fontSize: '13px' }}>
+                        {apiStats?.totalCalls ?? 0}
+                        <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '6px' }}>
+                            (Next: {nextRefresh}s)
+                        </span>
+                    </span>
                 </div>
 
                 {apiStats?.accounts?.map((acc, index) => {
