@@ -42,11 +42,25 @@ export function useFlightData(mapRef, showNotification) {
         const startTime = performance.now();
 
         try {
-            // [Global Fetch] 抓取全球資料 (20秒超時)
+            // [BBox Fetch] 動態只索取畫面範圍內的飛機
+            let url = '/api/planes/bbox';
+
+            // 加入 20% 安全邊界，讓 BBox 再稍微擴大一點，避免邊緣飛機突然消失
+            if (mapRef && mapRef.current) {
+                const bounds = mapRef.current.getBounds();
+                const padLat = (bounds.getNorth() - bounds.getSouth()) * 0.2;
+                const padLng = (bounds.getEast() - bounds.getWest()) * 0.2;
+
+                url += `?lamin=${bounds.getSouth() - padLat}&lomin=${bounds.getWest() - padLng}&lamax=${bounds.getNorth() + padLat}&lomax=${bounds.getEast() + padLng}`;
+            } else {
+                // 如果還沒有地圖實例 (剛載入)，給一個預設的寬廣範圍 (例如整個亞洲)
+                url += `?lamin=-10&lomin=90&lamax=50&lomax=150`;
+            }
+
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 20000);
 
-            const response = await fetch('/api/states', { signal: controller.signal });
+            const response = await fetch(url, { signal: controller.signal });
             clearTimeout(timeout);
 
             const elapsed = Math.round(performance.now() - startTime);
@@ -83,10 +97,22 @@ export function useFlightData(mapRef, showNotification) {
                 setApiStats(data.stats);
             }
 
-            const intervalDelay = data.recommendedInterval || 30;
+            const intervalDelay = 25; // User requested 25 seconds
             setThrottleSeconds(intervalDelay);
 
-            const parsedPlanes = parseOpenSkyData(data, data.stale === true);
+            // [V2.0.0] The backend `/api/planes/bbox` now returns pre-parsed objects directly
+            // No need for `parseOpenSkyData` array indexing
+            const parsedPlanes = (data.states || []).map(p => {
+                return {
+                    icao24: p.icao24,
+                    data: {
+                        ...p,
+                        callsign: p.callsign || 'UNKNOWN',
+                        registration: p.callsign || 'N/A', // fallback
+                        aircraftType: 'Unknown'
+                    }
+                };
+            });
 
             if (parsedPlanes.length > 0) {
                 processPlaneData(parsedPlanes);
@@ -100,11 +126,11 @@ export function useFlightData(mapRef, showNotification) {
                 setApiErrorDetail('API reached successfully but returned 0 planes.');
             }
 
-            // 排定下一次抓取 (依照後端要求的安全時間延展)
+            // 排定下一次抓取 (固定 25 秒)
             setTimeout(() => {
                 isFetchingRef.current = false;
                 fetchPlanes();
-            }, intervalDelay * 1000);
+            }, 25000);
 
             return; // 成功結束，不需要走 default finally
         } catch (error) {

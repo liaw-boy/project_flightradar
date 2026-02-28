@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData } from '../utils/flightUtils';
+import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath } from '../utils/flightUtils';
 import { GLOBAL_AIRPORTS } from '../utils/airportMappings';
 
 /**
@@ -12,6 +12,7 @@ export default function MapView({
     planesDict,
     selectedIcao24,
     trackPoints,
+    flightHistoryRef,
     filters,
     selectedRoute, // ADDED PROPS
     onSelectPlane,
@@ -245,6 +246,20 @@ export default function MapView({
                     return false;
                 }
             }
+
+            // [V2.0.0] Level of Detail (LOD) 過濾
+            const map = mapRef.current;
+            if (map) {
+                const zoom = map.getZoom();
+                if (zoom < 5 && (plane.altitude === 'GROUND' || plane.altitude < 5000)) {
+                    return false; // 遠景 (Zoom < 5)：僅顯示大於 5000 公尺的巡航飛機
+                }
+                if (zoom >= 5 && zoom <= 9 && plane.onGround) {
+                    return false; // 中景 (Zoom 5-9)：隱藏地面目標
+                }
+                // Zoom >= 10：顯示所有詳細目標 (包括地面)
+            }
+
             return true;
         },
         [filters, bounds]
@@ -274,11 +289,26 @@ export default function MapView({
 
         // 篩選通過 filter 的飛機列表
         const filteredPlanes = [];
+        let validRegex = null;
+        if (filters.regexFilter) {
+            try {
+                validRegex = new RegExp(filters.regexFilter, 'i');
+            } catch (e) { }
+        }
+
         currentIds.forEach((id) => {
             const plane = planesDict[id];
             if (!filters.showGround && plane.onGround) return;
             if (!filters.showEmergency && plane.isEmergency) return;
             if (!filters.showLow && plane.altitude !== 'N/A' && plane.altitude !== 'GROUND' && plane.altitude < 1500) return;
+
+            // Regex Check
+            if (validRegex) {
+                if (!validRegex.test(plane.callsign) && !validRegex.test(plane.icao24) && !validRegex.test(plane.category)) {
+                    return;
+                }
+            }
+
             filteredPlanes.push({ id, plane });
         });
 
@@ -423,41 +453,32 @@ export default function MapView({
                 dashArray: '10, 5',
                 lineCap: 'round',
             }).addTo(map);
+        } else if (selectedIcao24 && flightHistoryRef?.current?.[selectedIcao24]) {
+            // Client-Side History Fallback (drawn while API track is loading or empty)
+            const history = flightHistoryRef.current[selectedIcao24];
+            if (history.length > 1) {
+                // history structure: [time, lat, lng, onGround]
+                const points = history.map(p => [p[1], p[2]]);
+                // Always push current live position just to be safe
+                if (planesDict[selectedIcao24]) {
+                    points.push([planesDict[selectedIcao24].lat, planesDict[selectedIcao24].lng]);
+                }
+
+                trackLineRef.current = L.polyline(points, {
+                    color: '#FFDC00',
+                    weight: 3,
+                    opacity: 0.8,
+                    dashArray: '10, 5',
+                    lineCap: 'round',
+                }).addTo(map);
+            }
         }
 
         // ===== 預估虛線 (Predictive Path) =====
+        // [V2.0.0] Removed mapping prediction lines at the user's request (Phase 3.1)
         if (predictiveLineRef.current) {
             map.removeLayer(predictiveLineRef.current);
             predictiveLineRef.current = null;
-        }
-
-        if (selectedIcao24 && planesDict[selectedIcao24] && selectedRoute) {
-            const livePlane = planesDict[selectedIcao24];
-            const livePos = [livePlane.lat, livePlane.lng];
-
-            // Async coordinates fetching
-            const drawPredictiveLine = async () => {
-                const origin = await getAirportDisplayData(selectedRoute.origin);
-                const destination = await getAirportDisplayData(selectedRoute.destination);
-
-                if (!predictiveLineRef.current && mapRef.current) {
-                    const points = [];
-                    if (origin) points.push([origin.lat, origin.lng]);
-                    points.push(livePos);
-                    if (destination) points.push([destination.lat, destination.lng]);
-
-                    if (points.length >= 2) {
-                        predictiveLineRef.current = L.polyline(points, {
-                            color: '#FFDC00',
-                            weight: 2,
-                            opacity: 0.5,
-                            dashArray: '5, 10',
-                            lineCap: 'round',
-                        }).addTo(mapRef.current);
-                    }
-                }
-            };
-            drawPredictiveLine();
         }
         // Make sure the yellow actual track renders *above* the grey prediction line
         if (trackLineRef.current) {
@@ -474,19 +495,63 @@ export default function MapView({
         map.setView([plane.lat, plane.lng], Math.max(map.getZoom(), 10), { animate: true });
     }, [selectedIcao24]);
 
-    // ===== 動畫引擎：位置插值 =====
+    // ===== 動畫引擎：位置插值與微觀推算 (Dead Reckoning) =====
     useEffect(() => {
-        function animate() {
+        let lastTime = performance.now();
+
+        function animate(time) {
+            const deltaTimeSec = (time - lastTime) / 1000;
+            lastTime = time;
+
             Object.entries(markersRef.current).forEach(([id, marker]) => {
                 const plane = planesDict[id];
                 if (!plane) return;
 
-                if (plane.targetLat && plane.targetLng) {
-                    const lerpSpeed = 0.08;
-                    const currentLatLng = marker.getLatLng();
-                    const newLat = currentLatLng.lat + (plane.targetLat - currentLatLng.lat) * lerpSpeed;
-                    const newLng = currentLatLng.lng + (plane.targetLng - currentLatLng.lng) * lerpSpeed;
-                    marker.setLatLng([newLat, newLng]);
+                const currentLatLng = marker.getLatLng();
+
+                if (plane.onGround || plane.velocity <= 0 || plane.altitude === 'GROUND') {
+                    // 地面目標：一般 Lerp (網路校正插值)
+                    if (plane.targetLat && plane.targetLng) {
+                        const lerpSpeed = 0.08;
+                        const newLat = currentLatLng.lat + (plane.targetLat - currentLatLng.lat) * lerpSpeed;
+                        const newLng = currentLatLng.lng + (plane.targetLng - currentLatLng.lng) * lerpSpeed;
+                        marker.setLatLng([newLat, newLng]);
+                    }
+                } else {
+                    // [V2.0.0] 微觀推算 (Dead Reckoning)：基於速度和航向的持續物理運動
+                    const nextPos = predictPosition(currentLatLng.lat, currentLatLng.lng, plane.velocity, plane.heading, deltaTimeSec);
+
+                    // 網路位置與推算位置的融合 (Smooth catching up)
+                    // 當前端收到 API 的新 targetLat 時，我們將當前位置慢慢向 Target 靠攏，但同時保持向前的運動趨勢
+                    if (plane.targetLat && plane.targetLng) {
+                        const distToTargetSq = Math.pow(plane.targetLat - currentLatLng.lat, 2) + Math.pow(plane.targetLng - currentLatLng.lng, 2);
+
+                        // 如果誤差超過一定範圍 (例如斷線太久被拉回)，加快校正速度，否則平滑融入
+                        const lerpFactor = distToTargetSq > 0.0001 ? 0.3 : 0.05;
+
+                        const correctedLat = nextPos.lat + (plane.targetLat - nextPos.lat) * lerpFactor;
+                        const correctedLng = nextPos.lng + (plane.targetLng - nextPos.lng) * lerpFactor;
+
+                        marker.setLatLng([correctedLat, correctedLng]);
+                    } else {
+                        // 純靠慣性飛行
+                        marker.setLatLng([nextPos.lat, nextPos.lng]);
+                    }
+                }
+
+                // [V2.0.0] Real-time Track Appending ("Snake Appending")
+                if (id === selectedIcao24 && trackLineRef.current && !plane.onGround && plane.velocity > 0) {
+                    const latLngs = trackLineRef.current.getLatLngs();
+                    if (latLngs.length > 0) {
+                        const lastPoint = latLngs[latLngs.length - 1];
+                        const currentPos = marker.getLatLng();
+
+                        // 只在移動超過一定距離時才追加點 (例如 50 公尺)，避免因微小震動導致數組無限膨脹
+                        const distToLast = currentPos.distanceTo(lastPoint);
+                        if (distToLast > 50) {
+                            trackLineRef.current.addLatLng(currentPos);
+                        }
+                    }
                 }
             });
 

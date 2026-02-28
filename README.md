@@ -1,10 +1,10 @@
-# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - 專業版 v1.2.3+
+# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - 專業版 v2.0.0 (Global Big Data)
 
 這是一款基於 **React (Vite)**、**Node.js (Express)** 與 **OpenSky Network API** 開發的高級實時全球航空監控系統。本專案專為追求「數據精準度」與「系統透明度」的資深航空愛好者打造。
 
 ---
 
-## 🚀 v1.2.3+ 核心技術優勢
+## 🚀 v2.0.0 核心技術優勢 (Big Data Edition)
 
 ### 🌍 1. 全球大數據集成 (Global Data Mission)
 - **20,329 筆全球機場庫**：棄用傳統 2.8MB 冗長檔案，改由高效能 **伺服器端動態 API** 驅動。支援 ICAO/IATA 代碼、精準座標與時區資料。
@@ -13,12 +13,13 @@
 
 ### 📡 2. 數據精準度修復機制 (Data Precision)
 - **雙源照片邏輯 (Dual-Source Photo Fetch)**：同時透過飛機的 **Hex (16 進位碼)** 與 **Registration (註冊號/機身編號)** 進行交叉查詢，徹底解決飛機改色、更換營運商導致的照片誤刷問題（如：解決樂桃顯示日航照片之 Bug）。
-- **五階層路由解析 (5-Tier Routing)**：
-  1. **Static DB**：優先檢查專業航班資料庫。
-  2. **Local Dictionary**：由使用者手動維護的私信字典（`data/local_routes.json`），具備最高優先修復權。
-  3. **Runtime Cache**：快速回應頻繁查詢的航班。
-  4. **OpenSky Live**：向全球網路搜尋最新動態。
-  5. **Historical Fallback**：若全數落空，則自動追溯該機最近 24 小時的飛行軌跡推算起降點。
+- **六階層路由解析 (6-Tier Routing)**：
+  1. **Local Override**：手動修正檔（`data/local_routes.json`），具備最高優先權。
+  2. **Global DB**：基於 OpenFlights 與 Jonty 的 15 萬筆全球大數據庫。
+  3. **Heuristic Network**：智能航空公司航網推算（Tier 2.5）。
+  4. **Runtime Cache**：動態學習快取。
+  5. **AeroDataBox Premium**：商業級實時補位 API。
+  6. **OpenSky Tracks**：軌跡推算最後備援。
 
 ### 📊 3. 後端透明化與監控 (Visibility)
 - **實時請求日誌 (Request Logging)**：終端機現在能即時顯示每一筆 API 調用狀況：

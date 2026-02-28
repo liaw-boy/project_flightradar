@@ -350,27 +350,17 @@ export function parseOpenSkyData(data, isStale = false) {
 }
 
 /**
- * 大圓航線位置預測
+ * 微觀推算 (Micro-Dead Reckoning)
+ * 根據真實的當下經緯度、速度、航向，計算 deltaTime 秒後的理論位移點
  */
-export function predictPosition(plane, deltaTime) {
-    if (plane.onGround || plane.velocity <= 0) return { lat: plane.lat, lng: plane.lng };
+export function predictPosition(lat, lng, velocity, heading, deltaTime) {
+    if (velocity <= 0 || !lat || !lng) return { lat, lng };
 
-    const nowUnix = Math.floor(Date.now() / 1000);
-    const dataAge = nowUnix - plane.lastContact;
-    if (dataAge >= 60) return { lat: plane.lat, lng: plane.lng };
-
-    let currentVelocity = plane.velocity;
-    if (plane.altitude !== 'N/A' && plane.altitude !== 'GROUND' && plane.altitude < 1500) {
-        const brakingFactor = Math.max(0.1, 1 - (dataAge / 45));
-        currentVelocity *= brakingFactor;
-    }
-
-    if (currentVelocity <= 0) return { lat: plane.lat, lng: plane.lng };
-
-    const dist = currentVelocity * deltaTime;
-    const brng = (plane.heading * Math.PI) / 180;
-    const lat1 = (plane.lat * Math.PI) / 180;
-    const lng1 = (plane.lng * Math.PI) / 180;
+    // 每秒移動公尺數
+    const dist = velocity * deltaTime;
+    const brng = (heading * Math.PI) / 180;
+    const lat1 = (lat * Math.PI) / 180;
+    const lng1 = (lng * Math.PI) / 180;
 
     const lat2 = Math.asin(
         Math.sin(lat1) * Math.cos(dist / EARTH_RADIUS) +
@@ -387,6 +377,41 @@ export function predictPosition(plane, deltaTime) {
         lat: (lat2 * 180) / Math.PI,
         lng: (lng2 * 180) / Math.PI,
     };
+}
+
+/**
+ * 產生大圓航線 (Great Circle) 插補點，用於繪製弧線
+ * @param {Array} p1 [lat, lng]
+ * @param {Array} p2 [lat, lng]
+ * @param {number} numPoints 插補點數量
+ * @returns {Array} [[lat, lng], ...]
+ */
+export function getGreatCirclePath(p1, p2, numPoints = 60) {
+    const lat1 = p1[0] * Math.PI / 180;
+    const lon1 = p1[1] * Math.PI / 180;
+    const lat2 = p2[0] * Math.PI / 180;
+    const lon2 = p2[1] * Math.PI / 180;
+
+    const d = 2 * Math.asin(Math.sqrt(
+        Math.pow(Math.sin((lat1 - lat2) / 2), 2) +
+        Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lon1 - lon2) / 2), 2)
+    ));
+
+    if (d === 0) return [p1, p2];
+
+    const path = [];
+    for (let i = 0; i <= numPoints; i++) {
+        const f = i / numPoints;
+        const A = Math.sin((1 - f) * d) / Math.sin(d);
+        const B = Math.sin(f * d) / Math.sin(d);
+        const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
+        const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
+        const z = A * Math.sin(lat1) + B * Math.sin(lat2);
+        const lat3 = Math.atan2(z, Math.sqrt(Math.pow(x, 2) + Math.pow(y, 2)));
+        const lon3 = Math.atan2(y, x);
+        path.push([lat3 * 180 / Math.PI, lon3 * 180 / Math.PI]);
+    }
+    return path;
 }
 
 /**

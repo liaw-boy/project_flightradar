@@ -346,5 +346,13 @@
   "CAL6876": {
     "dep": "RCTP",
     "arr": "WMAU"
+  },
+  "EVA226": {
+    "dep": "WSSS",
+    "arr": "RCTP"
+  },
+  "ANA1692": {
+    "dep": "RJFO",
+    "arr": "RJOO"
   }
 }

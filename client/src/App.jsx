@@ -12,6 +12,17 @@ import { useI18n } from './hooks/useI18n';
 import { logToServer } from './utils/logger';
 import './App.css';
 
+// URL Parsing Utility
+function parseUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    return {
+        icao: params.get('icao'),
+        lat: params.get('lat') ? parseFloat(params.get('lat')) : null,
+        lng: params.get('lng') ? parseFloat(params.get('lng')) : null,
+        zoom: params.get('zoom') ? parseInt(params.get('zoom'), 10) : null,
+    };
+}
+
 export default function App() {
     const { t, translateMetar } = useI18n();
     const [loading, setLoading] = useState(true);
@@ -42,7 +53,22 @@ export default function App() {
         throttleSeconds,
         fetchPlanes,
         fetchTrack,
+        flightHistoryRef,
     } = useFlightData(mapInstanceRef, showNotification);
+
+    // Initial URL Params parsing
+    const initializedUrlRef = useRef(false);
+
+    // Global Keydown Listener
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                handleDeselectPlane();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
 
     // 載入動畫
     useEffect(() => {
@@ -56,15 +82,17 @@ export default function App() {
     // 地圖就緒
     const handleMapReady = useCallback((map) => {
         mapInstanceRef.current = map;
+        const urlParams = parseUrlParams();
+        if (urlParams.lat !== null && urlParams.lng !== null) {
+            map.setView([urlParams.lat, urlParams.lng], urlParams.zoom || 10);
+        }
     }, []);
 
     // 地圖移動
     const handleMapMove = useCallback(() => {
-        // [Zero-Latency Panning] 
-        // 地圖移動不再觸發 API 請求，僅由 MapView 負責本地過濾渲染
-        // fetchPlanes(); 
-        console.log('Map moved - re-filtering local planes');
-    }, []);
+        console.log('Map moved - pulling new BBox planes');
+        fetchPlanes();
+    }, [fetchPlanes]);
 
     // 選中飛機
     const handleSelectPlane = useCallback(
@@ -98,6 +126,11 @@ export default function App() {
                     setSelectedRoute(data);
                 })
                 .catch(e => { logToServer(`Route fetch error for ${plane.callsign || icao24}: ${e.message}`, 'error'); });
+
+            // Update URL
+            const url = new URL(window.location);
+            url.searchParams.set('icao', icao24);
+            window.history.replaceState({}, '', url);
         },
         [fetchTrack, showNotification]
     );
@@ -108,6 +141,11 @@ export default function App() {
         setTrackPoints([]);
         setSelectedMetadata(null);
         setSelectedRoute(null);
+
+        // Remove ICAO from URL
+        const url = new URL(window.location);
+        url.searchParams.delete('icao');
+        window.history.replaceState({}, '', url);
     }, []);
 
     // 過濾器變更
@@ -127,6 +165,17 @@ export default function App() {
     // 當前選中的飛機資料
     const selectedPlane = selectedIcao24 ? planesDict[selectedIcao24] : null;
 
+    // Check URL for ICAO auto-select once planesDict is populated
+    useEffect(() => {
+        if (!initializedUrlRef.current && Object.keys(planesDict).length > 0) {
+            initializedUrlRef.current = true;
+            const urlParams = parseUrlParams();
+            if (urlParams.icao && planesDict[urlParams.icao]) {
+                handleSelectPlane(urlParams.icao, planesDict[urlParams.icao]);
+            }
+        }
+    }, [planesDict, handleSelectPlane]);
+
     return (
         <div className="app">
             <LoadingScreen visible={loading} />
@@ -135,6 +184,7 @@ export default function App() {
                 planesDict={planesDict}
                 selectedIcao24={selectedIcao24}
                 trackPoints={trackPoints}
+                flightHistoryRef={flightHistoryRef}
                 filters={filters}
                 selectedRoute={selectedRoute}
                 onSelectPlane={handleSelectPlane}
