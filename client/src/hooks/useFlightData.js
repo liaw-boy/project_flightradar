@@ -26,7 +26,7 @@ export function useFlightData(mapRef, showNotification) {
     const planesDictRef = useRef({});
     const apiStatusRef = useRef('INIT');
     const globalLastUpdateRef = useRef(0);
-    const nextScheduledFetchRef = useRef(Date.now() + 25000); // 追蹤下一次預約自動更新的時間
+    const nextScheduledFetchRef = useRef(Date.now() + 60000); // 追蹤下一次預約自動更新的時間
 
     // 保持 ref 和 state 同步
     useEffect(() => {
@@ -134,11 +134,11 @@ export function useFlightData(mapRef, showNotification) {
 
             // 如果是自動刷新觸發的，就設定下一預約更新時間並排程
             if (isAutoRefresh) {
-                nextScheduledFetchRef.current = Date.now() + 25000;
-                setThrottleSeconds(25);
+                nextScheduledFetchRef.current = Date.now() + 60000;
+                setThrottleSeconds(60);
                 setTimeout(() => {
                     fetchPlanes(true);
-                }, 25000);
+                }, 60000);
             }
 
             isFetchingRef.current = false;

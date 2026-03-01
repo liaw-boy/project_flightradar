@@ -391,8 +391,8 @@ async function fetchGlobalPlanes() {
     isFetchingGlobal = false;
 }
 
-// 啟動 20 秒全球資料輪詢機制 (User Specified: 20s)
-setInterval(fetchGlobalPlanes, 20000);
+// 啟動 60 秒全球資料輪詢機制 (User Specified: 60s)
+setInterval(fetchGlobalPlanes, 60000);
 // 啟動時讀取快取並初始化
 loadQuotaCache();
 initializeAccountQuotas();
