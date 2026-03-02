@@ -297,11 +297,30 @@ function calculateRecommendedInterval() {
 }
 
 // ==========================================
-// V2.0.0 Global Polling System & BBox API
+// [V2.0.0] Global Polling System & BBox API
 // ==========================================
 let globalPlanesCache = { states: [], time: 0 };
+let lastGlobalStatesMap = new Map(); // icao24 -> state (用於偵測起飛/降落)
 let isFetchingGlobal = false;
 let globalRateLimitCooldown = 0; // The timestamp when we are allowed to ping OpenSky again
+
+/**
+ * 尋找最近的機場 (用於推測起降點)
+ */
+function findNearestAirport(lat, lng, maxDist = 8) {
+    let nearestAp = null;
+    let minDist = maxDist;
+
+    for (const ap of Object.values(globalAirportsDB)) {
+        if (!ap.icao || ap.lat === undefined || ap.lng === undefined) continue;
+        const dist = getDistance(lat, lng, ap.lat, ap.lng);
+        if (dist < minDist) {
+            minDist = dist;
+            nearestAp = ap;
+        }
+    }
+    return nearestAp;
+}
 
 // 背景持續輪詢 OpenSky 取得全球資料
 async function fetchGlobalPlanes() {
@@ -366,8 +385,42 @@ async function fetchGlobalPlanes() {
 
             worker.on('message', (msg) => {
                 if (msg.success) {
-                    globalPlanesCache = { states: msg.planes, time: msg.time };
-                    console.log(`📦 [WORKER] Parse complete. Parsed ${msg.planes.length} planes in ${msg.parseTimeMs}ms.`);
+                    const newStates = msg.planes;
+                    const timestamp = msg.time;
+
+                    // --- [學習系統] 偵測起飛與降落 ---
+                    newStates.forEach(curr => {
+                        const prev = lastGlobalStatesMap.get(curr.icao24);
+                        if (!prev || !curr.callsign) return;
+
+                        // 偵測起飛 (之前在地面，現在升空)
+                        if (prev.onGround && !curr.onGround) {
+                            const ap = findNearestAirport(curr.lat, curr.lng);
+                            if (ap) {
+                                console.log(`🛫 [LEARN] ${curr.callsign} took off from ${ap.icao} (${ap.name})`);
+                                if (!routesDatabase[curr.callsign]) routesDatabase[curr.callsign] = {};
+                                routesDatabase[curr.callsign].dep = ap.icao;
+                                saveRoutesDatabase();
+                            }
+                        }
+                        // 偵測降落 (之前在空中，現在著地)
+                        else if (!prev.onGround && curr.onGround) {
+                            const ap = findNearestAirport(curr.lat, curr.lng);
+                            if (ap) {
+                                console.log(`🛬 [LEARN] ${curr.callsign} landed at ${ap.icao} (${ap.name})`);
+                                if (!routesDatabase[curr.callsign]) routesDatabase[curr.callsign] = {};
+                                routesDatabase[curr.callsign].arr = ap.icao;
+                                saveRoutesDatabase();
+                            }
+                        }
+                    });
+
+                    // 更新歷史地圖
+                    lastGlobalStatesMap.clear();
+                    newStates.forEach(p => lastGlobalStatesMap.set(p.icao24, p));
+
+                    globalPlanesCache = { states: newStates, time: timestamp };
+                    console.log(`📦 [WORKER] Parse complete. Parsed ${newStates.length} planes in ${msg.parseTimeMs}ms.`);
                     apiStats.lastSuccessTime = new Date().toISOString();
                 } else {
                     console.error(`❌ [WORKER ERROR] ${msg.error}`);
