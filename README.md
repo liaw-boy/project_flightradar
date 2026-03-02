@@ -74,3 +74,41 @@ npm start       # 啟動後端並託管前端
 *   **座標校正 (LERP)**：當 60 秒真實數據進來時，物理引擎會自動平滑校正前端推算位置與真實觀測點的微小落差，維持軌跡絕對真實性。
 *   **效能分級 (LOD)**：系統會根據縮放層級動態調整顯示的飛機數量，確保在低階設備上也能流暢運行。
 
+---
+
+## 🛡️ 實戰一：多帳號 API 輪控系統 (Quota Shield)
+**核心挑戰**：當 OpenSky 回傳 HTTP 429 (Too Many Requests) 時，系統必須瞬間切換帳號並重試，確保服務不中斷。
+
+**實作技術 (Node.js)**：
+*   **建立帳號池**：啟動時讀取 `.env`，將所有帳號密碼封裝成陣列。
+*   **指標追蹤 (Cursor Tracking)**：使用 `currentAccountIndex` 全域變數管理當前使用的帳號。
+*   **攔截器邏輯**：系統會攔截 429 錯誤，自動執行 `currentAccountIndex = (currentAccountIndex + 1) % accounts.length`，更新 Headers 並重新發送原請求。對主程式而言，這一切都是透明且無感的。
+
+## 🧮 實戰二：60fps 物理預測與大圓航法
+**核心挑戰**：在沒有新資料的 60 秒內，精準推算飛機在地圖上的即時位置。
+
+**實作技術 (前端 JavaScript Math)**：
+*   **Destination Point 公式**：基於球面三角學，利用速度、時間與方位角計算下一點。
+*   **角距離 ($\delta$)**：將移動距離 $d$ 除以地球半徑 $R$。
+*   **大圓公式**：
+    $$\varphi_2 = \arcsin( \sin\varphi_1\cos\delta + \cos\varphi_1\sin\delta\cos\theta )$$
+    $$\lambda_2 = \lambda_1 + \operatorname{arctan2}(\sin\theta\sin\delta\cos\varphi_1, \cos\delta - \sin\varphi_1\sin\varphi_2)$$
+*   **電競級渲染**：透過 `requestAnimationFrame` 脫離 React 渲染束縛，在獨立的動畫迴圈中更新 Marker 座標，達成 60fps 的滑順感。
+
+## 🧠 實戰三：機場學習系統 (Auto Learning)
+**核心挑戰**：系統如何主動發現「飛機降落了」，並識別其降落機場？
+
+**實作技術 (後端 Node.js + JSON 快取)**：
+*   **狀態機快取**：維護一個 `previousStates` Map，對比前後兩次資料的 `onGround` 狀態。
+*   **事件觸發**：當飛機從「空中」轉為「地面」時，觸發降落事件。
+*   **空間搜尋 (Spatial Query)**：拿飛機座標與 2 萬筆機場資料進行比對。
+*   **效能優化**：不跑全量迴圈，先用正方形 BBox 粗篩出區域機場，再精算最短距離鎖定 ICAO 代碼。
+
+## ✨ 實戰四：反瞬移的平滑校正 (LERP)
+**核心挑戰**：真實數據進來時，如何消除預測座標與真實座標之間的「跳轉感」？
+
+**實作技術 (前端 LERP)**：
+*   **線性插值 (Linear Interpolation)**：當收到新資料，系統不會立刻「閃現」到新點。
+*   **過渡期補償**：在接下來的 0.5 秒 (約 30 幀) 內，讓飛機稍微偏離預測軌道，朝向真實位置滑行。
+*   **公式**：`currentPos = 預測位置 + (真實位置 - 預測位置) * (已經過時間 / 校正時間)`。
+
