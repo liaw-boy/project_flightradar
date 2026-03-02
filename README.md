@@ -1,10 +1,14 @@
-# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - 極致效能版 v2.3.10
+# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - 極致效能版 v2.5.0
 
-這是一款專門為「大數據效能」與「極致流暢視覺」而生的專業級全球航空監控系統。基於 **React (Vite 6)**、**Node.js (Worker Threads)** 與 **OpenSky Network API**，V2.3.10 優化了 API 請求與計時器邏輯。
+這是一款專門為「大數據效能」與「極致流暢視覺」而生的專業級全球航空監控系統。基於 **React (Vite 6)**、**Node.js (Worker Threads)** 與 **OpenSky Network API**，V2.5.0 引進了強大的 **機場學習系統 (Airport Learning System)**。
 
 ---
 
-## 🚀 v2.3.10 核心技術突破 (Technical Breakthroughs)
+## 🚀 v2.5.0 核心技術突破 (Technical Breakthroughs)
+*   **🧠 v2.5.0 機場學習系統 (Airport Learning System)**：
+    *   **🛫 自動起降偵測**：系統會比較飛機的先後狀態，自動識別起飛與降落事件，並精準鎖定機場。
+    *   **🗺️ 資料庫自我成長**：學習到的新航線會自動寫入 `routes-cache.json`，讓雷達越跑越強大，減少對外部 API 的依賴。
+    *   **📍 物理空間推測**：當偵測到起降時，會從本地 20 萬筆機場資料中找出最近的機場。
 *   **🎉 v2.3.10 API 同步邏輯優化 (API Sync Logic Optimization)**：
     *   **💓 獨立心跳計時器 (Independent Heartbeat)**：將「25秒自動刷新」與「地圖移動 BBox 請求」邏輯解耦。地圖移動現在不會再重置視覺上的 25 秒倒數計時。
     *   **🛡️ 地圖防抖請求 (Map Move Debounce)**：新增 1.5 秒防抖機制，避免在頻繁拖動地圖時產生多餘的 API 請求，有效保護 API 配額。
