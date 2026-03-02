@@ -44,7 +44,7 @@ const metarDictionary = {
 const translations = {
     en: {
         // Dashboard
-        radarSystem: 'RADAR SYSTEM',
+        radarSystem: 'AEROSTRAT',
         sysTime: 'SYS.TIME',
         aircraft: 'AIRCRAFT',
         scanning: 'SCANNING',
@@ -117,11 +117,19 @@ const translations = {
         metarWind: 'Wind',
         metarVis: 'Visib',
         metarClouds: 'Clouds',
-        metarBaro: 'Baro'
+        metarBaro: 'Baro',
+        // Themes
+        themeLabel: '🎨 COLOR SCHEME',
+        themeTactical: 'Tactical',
+        themeClassic: 'Classic',
+        themeVivid: 'Vivid',
+        themeMono: 'Mono (Contrast)',
+        themeHeatmap: 'Heatmap',
+        themeMidnight: 'Midnight'
     },
     cn: {
         // Dashboard
-        radarSystem: '雷達系統',
+        radarSystem: 'AEROSTRAT',
         sysTime: '系統時間',
         aircraft: '航機數量',
         scanning: '掃描中',
@@ -194,7 +202,15 @@ const translations = {
         metarWind: '風向',
         metarVis: '能見度',
         metarClouds: '雲層',
-        metarBaro: '氣壓'
+        metarBaro: '氣壓',
+        // Themes
+        themeLabel: '🎨 視覺配色主題',
+        themeTactical: '戰術 (預設)',
+        themeClassic: '經典復古',
+        themeVivid: '明亮鮮艷',
+        themeMono: '高對比',
+        themeHeatmap: '熱感應',
+        themeMidnight: '午夜之光'
     },
 };
 

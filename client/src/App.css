@@ -4,6 +4,7 @@
     height: 100dvh;
     overflow: hidden;
     position: relative;
+    background-color: var(--color-bg-base);
 }
 
 .map-container {
@@ -16,13 +17,13 @@
     display: none !important;
 }
 
-/* 飛機圖標 */
+/* Plane Icons & Glows */
 .plane-icon {
     display: flex;
     justify-content: center;
     align-items: center;
     cursor: pointer;
-    transition: transform 0.1s;
+    transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 .plane-icon:active {
@@ -30,82 +31,94 @@
 }
 
 .emergency-glow {
-    filter: drop-shadow(0 0 15px #FF4136) !important;
-    animation: emergency-pulse 0.5s infinite;
+    filter: drop-shadow(0 0 12px #ef4444) !important;
+    animation: emergency-pulse 0.8s infinite alternate;
 }
 
 .ground-glow {
-    filter: drop-shadow(0 0 3px #666) !important;
     opacity: 0.6;
+    filter: saturate(0.5) brightness(0.8);
 }
 
 @keyframes emergency-pulse {
-
-    0%,
-    100% {
-        filter: drop-shadow(0 0 15px #FF4136);
+    from {
+        filter: drop-shadow(0 0 8px #ef4444);
+        opacity: 0.8;
     }
 
-    50% {
-        filter: drop-shadow(0 0 25px #FF4136);
+    to {
+        filter: drop-shadow(0 0 20px #ef4444);
+        opacity: 1;
     }
 }
 
-/* Cyber Tooltip */
-.cyber-label {
-    background: rgba(10, 15, 20, 0.9) !important;
-    border: 1px solid rgba(1, 255, 112, 0.5) !important;
-    border-radius: 4px !important;
-    color: #01FF70 !important;
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 11px !important;
-    padding: 4px 8px !important;
-    backdrop-filter: blur(5px);
+/* Tactical HUD Labels (v2.6.6 Redesign) */
+.tactical-label {
     display: flex;
     align-items: center;
-    gap: 6px;
-    box-shadow: 0 0 10px rgba(1, 255, 112, 0.3);
+    gap: 8px;
+    background: rgba(15, 23, 42, 0.96) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    border-left: 3px solid var(--color-accent-cyan) !important;
+    border-radius: 6px !important;
+    padding: 4px 10px !important;
+    color: var(--color-text-primary) !important;
+    font-family: var(--font-main);
+    font-weight: 700;
+    font-size: 13px !important;
+    letter-spacing: 0.5px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), inset 0 0 10px rgba(255, 255, 255, 0.05);
+    pointer-events: none;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    position: relative;
+    overflow: hidden;
 }
 
-.cyber-label::before,
-.cyber-label::after {
-    display: none !important;
+.tactical-label span {
+    color: var(--color-text-primary);
+    /* Reset span color for better readability with white background logo */
+}
+
+/* No before pseudo-element needed as we use border-left */
+.tactical-label::before {
+    display: none;
 }
 
 .airline-logo {
-    height: 25px !important;
-    /* 強制高度為 5px */
-    max-height: 30px !important;
-    /* 限制最大高度 */
+    height: 20px !important;
     width: auto !important;
-    /* 確保寬度等比例縮放 */
     display: inline-block;
-    /* 確保高度設定能生效 */
     vertical-align: middle;
-    margin-right: 4px;
     border-radius: 3px;
-    filter: brightness(1.2);
+    background: #ffffff;
+    /* Solid white for maximum contrast */
+    padding: 1px 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    filter: contrast(1.15) brightness(1.05);
 }
 
 /* Pure CSS Hover Tooltip */
 .css-tooltip {
     position: absolute;
     left: 50%;
-    margin-left: 20px;
+    margin-left: 28px;
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transition: opacity 0.2s ease, visibility 0.2s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     white-space: nowrap;
     z-index: 1000;
+    transform: translateX(-10px);
 }
 
 .plane-icon:hover .css-tooltip {
     opacity: 1;
     visibility: visible;
+    transform: translateX(0);
 }
 
-/* Airport markers */
+/* Airport Display */
 .airport-icon {
     display: flex;
     justify-content: center;
@@ -115,144 +128,130 @@
 }
 
 .airport-label {
-    background: rgba(0, 0, 0, 0.85) !important;
-    border: 1px solid rgba(0, 191, 255, 0.5) !important;
-    border-radius: 4px !important;
-    color: #00BFFF !important;
-    font-family: 'Share Tech Mono', monospace;
+    background: rgba(15, 23, 42, 0.9) !important;
+    border: 1px solid rgba(34, 211, 238, 0.3) !important;
+    border-radius: 6px !important;
+    color: var(--color-accent-cyan) !important;
+    font-family: var(--font-main);
+    font-weight: 600;
     font-size: 10px !important;
-    padding: 3px 6px !important;
+    padding: 4px 8px !important;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-.airport-label::before,
-.airport-label::after {
-    display: none !important;
-}
-
-/* SPI Active */
-.spi-active {
-    color: #FF4136 !important;
-    font-weight: bold;
-}
-
-/* ===== Airport Weather Popup ===== */
+/* Airport Tactical Popup (v2.6.3 Overhaul) */
 .airport-popup .leaflet-popup-content-wrapper {
-    background: rgba(10, 15, 25, 0.95) !important;
-    border: 1px solid rgba(0, 191, 255, 0.5);
-    border-radius: 10px;
-    box-shadow: 0 0 20px rgba(0, 191, 255, 0.3);
-    color: #fff;
-    font-family: 'Share Tech Mono', monospace;
+    background: var(--color-glass-panel) !important;
+    border: 1px solid var(--color-glass-border);
+    border-radius: 16px;
+    box-shadow: var(--shadow-premium);
+    color: var(--color-text-primary);
+    font-family: var(--font-main);
     padding: 0;
+    backdrop-filter: blur(20px);
 }
 
 .airport-popup .leaflet-popup-content {
     margin: 0;
-    min-width: 260px;
+    min-width: 280px;
 }
 
 .airport-popup .leaflet-popup-tip {
-    background: rgba(10, 15, 25, 0.95) !important;
-    border: 1px solid rgba(0, 191, 255, 0.3);
-}
-
-.airport-popup .leaflet-popup-close-button {
-    color: #aaa !important;
-    font-size: 18px !important;
-    right: 8px !important;
-    top: 8px !important;
+    background: var(--color-glass-panel) !important;
+    border: 1px solid var(--color-glass-border);
 }
 
 .ap-card {
-    padding: 14px;
+    padding: 20px;
 }
 
 .ap-loading {
-    padding: 20px;
+    padding: 30px;
     text-align: center;
-    color: #00BFFF;
-    font-size: 13px;
+    color: var(--color-accent-cyan);
+    font-size: 14px;
 }
 
 .ap-name {
-    font-size: 16px;
-    font-weight: bold;
-    color: #00BFFF;
-    margin-bottom: 4px;
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--color-text-primary);
+    margin-bottom: 2px;
+    letter-spacing: -0.5px;
 }
 
 .ap-icao {
-    font-size: 11px;
-    color: #888;
-    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--color-text-dim);
+    margin-bottom: 16px;
+    font-family: var(--font-mono);
 }
 
 .ap-fltcat {
     display: inline-block;
-    padding: 2px 10px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: bold;
-    margin-bottom: 10px;
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
 
 .ap-vfr {
-    background: rgba(1, 255, 112, 0.2);
-    color: #01FF70;
-    border: 1px solid #01FF70;
+    background: rgba(34, 211, 238, 0.15);
+    color: var(--color-accent-cyan);
+    border: 1px solid rgba(34, 211, 238, 0.3);
 }
 
 .ap-mvfr {
-    background: rgba(0, 191, 255, 0.2);
-    color: #00BFFF;
-    border: 1px solid #00BFFF;
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
 .ap-ifr {
-    background: rgba(255, 65, 54, 0.2);
-    color: #FF4136;
-    border: 1px solid #FF4136;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
 .ap-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px 15px;
-    margin-bottom: 12px;
+    gap: 12px 20px;
+    margin-bottom: 20px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 12px;
 }
 
 .ap-item {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
     gap: 2px;
-    font-size: 11px;
 }
 
-.ap-label-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+.ap-item span:first-child {
+    font-size: 10px;
+    color: var(--color-text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .ap-val {
-    color: #01FF70;
-    font-weight: bold;
-    font-size: 13px;
-    padding-left: 26px;
+    color: var(--color-text-primary);
+    font-weight: 700;
+    font-size: 14px;
+    font-family: var(--font-mono);
 }
 
 .ap-metar {
-    font-size: 10px;
-    color: #666;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    padding-top: 8px;
-    word-break: break-all;
-    line-height: 1.4;
-}
-
-.ap-no-data {
-    color: #888;
-    font-size: 12px;
-    padding: 10px 0;
+    font-size: 11px;
+    color: var(--color-text-dim);
+    border-top: 1px solid var(--color-glass-border);
+    padding-top: 12px;
+    line-height: 1.6;
+    font-style: italic;
 }

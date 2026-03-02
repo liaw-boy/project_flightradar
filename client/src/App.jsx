@@ -45,6 +45,16 @@ export default function App() {
         throttleFactor: 1.0
     });
 
+    const [colorScheme, setColorScheme] = useState(() => {
+        return localStorage.getItem('radar_color_scheme') || 'TACTICAL';
+    });
+
+    const handleColorSchemeChange = useCallback((scheme) => {
+        setColorScheme(scheme);
+        localStorage.setItem('radar_color_scheme', scheme);
+        logToServer(`Color scheme changed: ${scheme}`, 'info');
+    }, []);
+
     const mapInstanceRef = useRef(null);
     const { notifications, showNotification } = useNotification();
     const {
@@ -124,7 +134,7 @@ export default function App() {
             const points = await fetchTrack(icao24, plane.lastContact);
             setTrackPoints(points);
 
-            showNotification(`✈️ ${plane.callsign}`, 'info');
+            // showNotification(`✈️ ${plane.callsign}`, 'info');
 
             // 背景取得 metadata + route (不阻塞 UI)
             fetch(`/api/metadata/${icao24}`)
@@ -209,6 +219,7 @@ export default function App() {
                 onMapReady={handleMapReady}
                 onMapMove={handleMapMove}
                 onUsageUpdate={setUsageStats}
+                colorScheme={colorScheme}
                 t={t}
                 translateMetar={translateMetar}
             />
@@ -236,6 +247,8 @@ export default function App() {
             <FilterPanel
                 filters={filters}
                 onFilterChange={handleFilterChange}
+                colorScheme={colorScheme}
+                onColorSchemeChange={handleColorSchemeChange}
             />
 
             {selectedPlane && (

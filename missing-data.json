@@ -1,4 +1,12 @@
 {
+  "782272": {
+    "icao24": "782272",
+    "missing": [
+      "metadata"
+    ],
+    "firstSeen": "2026-03-02T15:12:51.081Z",
+    "lastAttempt": "2026-03-02T15:12:51.081Z"
+  },
   "71c751": {
     "icao24": "71c751",
     "missing": [
@@ -6,5 +14,29 @@
     ],
     "firstSeen": "2026-03-02T14:45:54.205Z",
     "lastAttempt": "2026-03-02T14:45:54.205Z"
+  },
+  "71c743": {
+    "icao24": "71c743",
+    "missing": [
+      "metadata"
+    ],
+    "firstSeen": "2026-03-02T15:12:30.543Z",
+    "lastAttempt": "2026-03-02T15:12:30.543Z"
+  },
+  "300a44": {
+    "icao24": "300a44",
+    "missing": [
+      "metadata"
+    ],
+    "firstSeen": "2026-03-02T15:20:13.032Z",
+    "lastAttempt": "2026-03-02T15:20:13.032Z"
+  },
+  "8a0a84": {
+    "icao24": "8a0a84",
+    "missing": [
+      "metadata"
+    ],
+    "firstSeen": "2026-03-02T15:41:25.979Z",
+    "lastAttempt": "2026-03-02T15:41:25.979Z"
   }
 }

@@ -19,6 +19,7 @@ export default function MapView({
     onMapReady,
     onMapMove,
     onUsageUpdate, // ADDED: 用於回報資源使用狀況
+    colorScheme = 'TACTICAL', // [v2.6.7] NEW PROP
     t,
     translateMetar,
 }) {
@@ -41,7 +42,13 @@ export default function MapView({
     // ===== 機場圖標 SVG =====
     function createAirportIcon(type) {
         const size = type === 'large' ? 14 : type === 'medium' ? 10 : 8;
-        const svg = `<svg viewBox="0 0 24 24" width="${size * 2}" height="${size * 2}"><circle cx="12" cy="12" r="10" fill="none" stroke="#00BFFF" stroke-width="2" opacity="0.6"/><circle cx="12" cy="12" r="4" fill="#00BFFF" opacity="0.8"/></svg>`;
+        // Aero-Tactical Cyan: #22d3ee
+        const svg = `
+            <svg viewBox="0 0 24 24" width="${size * 2}" height="${size * 2}">
+                <circle cx="12" cy="12" r="10" fill="none" stroke="#22d3ee" stroke-width="1.5" opacity="0.4"/>
+                <circle cx="12" cy="12" r="4" fill="#22d3ee" shadow="0 0 8px #22d3ee"/>
+            </svg>
+        `.trim();
         return L.divIcon({ html: svg, className: 'airport-icon', iconSize: [size * 2, size * 2], iconAnchor: [size, size] });
     }
 
@@ -52,7 +59,8 @@ export default function MapView({
             const data = await res.json();
 
             if (data.error) {
-                popup.setContent(`<div class="ap-card"><div class="ap-name">${ap.name}</div><div class="ap-icao">${ap.icao}</div><div class="ap-no-data">${t?.('weatherData') || 'No weather data available'}</div></div>`);
+                const noDataMsg = t('weatherData');
+                popup.setContent(`<div class="ap-card"><div class="ap-name">${ap.name}</div><div class="ap-icao">${ap.icao}</div><div class="ap-no-data">${noDataMsg}</div></div>`);
                 return;
             }
 
@@ -67,9 +75,11 @@ export default function MapView({
             const visibDisplay = translateMetar?.(`${data.visib ?? '--'} SM`, 'VISIB') || `${data.visib ?? '--'} SM`;
             const altimDisplay = translateMetar?.(`${data.altim ?? '--'} hPa`, 'ALTIM') || `${data.altim ?? '--'} hPa`;
 
+            const localizedName = t('airportName', ap.icao) || ap.name;
+
             popup.setContent(`
                         <div class="ap-card">
-                            <div class="ap-name">${ap.name}</div>
+                            <div class="ap-name">${localizedName}</div>
                             <div class="ap-icao">${ap.icao} · ${elevLabel} ${data.elev || '--'}ft (${elevM}m)</div>
                             <div class="ap-fltcat ${fltCatClass}">${data.fltCat || '--'}</div>
                             <div class="ap-grid">
@@ -91,7 +101,7 @@ export default function MapView({
                                 </div>
                                 <div class="ap-item">
                                     <div class="ap-label-row"><span class="ap-label">☁</span><span class="ap-desc">${t('metarClouds')}:</span></div>
-                                    <span class="ap-val">${cloudStr}</span>
+                                    <span class="ap-val" style="font-size: 11px;">${cloudStr}</span>
                                 </div>
                                 <div class="ap-item">
                                     <div class="ap-label-row"><span class="ap-label">📊</span><span class="ap-desc">${t('metarBaro')}:</span></div>
@@ -102,7 +112,7 @@ export default function MapView({
                         </div>
                     `);
         } catch (err) {
-            popup.setContent(`<div class="ap-card"><div class="ap-name">${ap.name}</div><div class="ap-no-data">${t?.('weatherFailed') || 'Failed to load weather'}</div></div>`);
+            popup.setContent(`<div class="ap-card"><div class="ap-name">${ap.name}</div><div class="ap-no-data">${t('weatherFailed')}</div></div>`);
         }
     };
 
@@ -235,7 +245,7 @@ export default function MapView({
                             className: 'airport-popup',
                         }).setLatLng([ap.lat, ap.lng]);
 
-                        popup.setContent(`<div class="ap-loading">Loading ${ap.icao}...</div>`);
+                        popup.setContent(`<div class="ap-loading">${t('scanning')} ${ap.icao}...</div>`);
                         popup.openOn(map);
                         renderMetarPopup(ap, map, popup);
                     });
@@ -434,7 +444,7 @@ export default function MapView({
             }
 
             const isSelected = id === selectedIcao24;
-            const { svg, size } = createPlaneSVG(plane.heading, plane.altitude, isSelected, plane.onGround, plane.isEmergency, plane.category);
+            const { svg, size } = createPlaneSVG(plane.heading, plane.altitude, isSelected, plane.onGround, plane.isEmergency, plane.category, colorScheme);
             const extraClass = getPlaneExtraClass(plane.isEmergency, plane.onGround);
 
             let tooltipHtml = '';
@@ -443,7 +453,7 @@ export default function MapView({
                 const logoHtml = logoUrl
                     ? `<img src="${logoUrl}" onerror="this.style.display='none'" class="airline-logo">`
                     : '';
-                tooltipHtml = `<div class="cyber-label css-tooltip">${logoHtml}<span>${plane.callsign}</span></div>`;
+                tooltipHtml = `<div class="tactical-label css-tooltip">${logoHtml}<span>${plane.callsign}</span></div>`;
             }
 
             const iconHtml = `
@@ -480,10 +490,13 @@ export default function MapView({
                     onSelectPlane(id, plane);
                 });
 
+                // [v2.6.5] No bindTooltip here to avoid persistent/redundant labels after click.
+                // The hover status is handled cleanly by CSS (.css-tooltip in iconHtml).
+
                 markersRef.current[id] = marker;
             }
         });
-    }, [planesDict, selectedIcao24, filters, shouldShowPlane, onSelectPlane]);
+    }, [planesDict, selectedIcao24, filters, shouldShowPlane, onSelectPlane, colorScheme]);
 
     // ===== 軌跡與航線繪製 (v2.3.3 IDL Fix) =====
     useEffect(() => {
@@ -506,7 +519,7 @@ export default function MapView({
             );
             const routeSegments = splitPathAtIDL(pathPoints);
             routeLineRef.current = L.polyline(routeSegments, {
-                color: '#555',
+                color: '#94a3b8', // Slate-400
                 weight: 2,
                 opacity: 0.5,
                 dashArray: '5, 5',
@@ -536,7 +549,7 @@ export default function MapView({
             }
 
             trackLineRef.current = L.polyline(trackSegments, {
-                color: '#FFDC00',
+                color: '#22d3ee', // Cyan-400
                 weight: 3,
                 opacity: 0.9,
                 dashArray: '10, 5',
@@ -559,7 +572,7 @@ export default function MapView({
                 }
                 const trackSegments = splitPathAtIDL(points);
                 trackLineRef.current = L.polyline(trackSegments, {
-                    color: '#FFDC00',
+                    color: '#f59e0b', // Amber-500
                     weight: 3,
                     opacity: 0.8,
                     dashArray: '10, 5',

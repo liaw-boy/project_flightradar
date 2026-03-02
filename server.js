@@ -1201,10 +1201,10 @@ app.listen(PORT, () => {
     const readyTime = new Date().toLocaleTimeString();
     console.log('');
     console.log('╔══════════════════════════════════════════╗');
-    console.log('║   ✈️  Flight Radar Backend Server        ║');
+    console.log('║   ✈️  AEROSTRAT Surveillance Server      ║');
     console.log(`║   🌐 http://localhost:${PORT}               ║`);
     console.log(`║   📁 Serving: ./public-react             ║`);
-    console.log(`║   🔑 Auth: ${process.env.OPENSKY_USER ? 'Enabled' : 'Disabled'}                    ║`);
+    console.log(`║   🔐 Version: v2.7.0                     ║`);
     console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
     console.log('╚══════════════════════════════════════════╝');
     console.log('');

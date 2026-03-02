@@ -2,145 +2,108 @@
     position: absolute;
     top: 0;
     left: 0;
-    width: 360px;
-    /* 固定寬度防止中英文切換時產生縮放效應 */
+    width: 380px;
     height: 100vh;
     height: 100dvh;
     z-index: 2000;
-    background: rgba(15, 20, 25, 0.95);
-    border-right: 2px solid #FFDC00;
-    box-shadow: 5px 0 30px rgba(0, 0, 0, 0.9);
-    backdrop-filter: blur(15px);
+    background: var(--color-glass-panel);
+    border-right: 1px solid var(--color-glass-border);
+    box-shadow: var(--shadow-premium);
+    backdrop-filter: blur(var(--blur-intensity));
     transform: translateX(-100%);
-    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
     display: flex;
     flex-direction: column;
-    color: #fff;
-    font-family: 'Share Tech Mono', monospace;
+    color: var(--color-text-primary);
+    font-family: var(--font-main);
     overflow-x: hidden;
-    /* 防止出現底部滑動條 */
 }
 
 .sidebar.active {
     transform: translateX(0);
 }
 
-/* Header Header & Badge */
+/* Header Section */
 .sb-header {
-    padding: 15px 20px;
-    background: rgba(0, 0, 0, 0.6);
-    border-bottom: 1px solid #444;
+    padding: 24px 20px;
+    background: rgba(15, 23, 42, 0.4);
+    border-bottom: 1px solid var(--color-glass-border);
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
     flex-shrink: 0;
 }
 
+.sb-header-main {
+    flex: 1;
+}
+
 .sb-title {
-    font-size: 24px;
-    font-weight: bold;
-    color: #FFDC00;
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--color-text-primary);
     margin: 0;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+    letter-spacing: -0.5px;
 }
 
 .sb-badge {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--color-accent-blue);
     color: #fff;
-    font-size: 12px;
-    padding: 2px 6px;
+    font-size: 11px;
+    padding: 2px 8px;
     border-radius: 4px;
-    font-weight: normal;
+    font-weight: 600;
+    text-transform: uppercase;
 }
 
 .sb-subtitle {
-    font-size: 12px;
-    color: #ccc;
-    margin-top: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.sb-fr24-link {
-    display: none;
-    /* Removed as requested */
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    margin-top: 6px;
+    font-weight: 500;
 }
 
 .sb-close {
     cursor: pointer;
-    color: #aaa;
-    font-size: 28px;
-    line-height: 1;
-    transition: 0.2s;
-    font-weight: bold;
-    flex-shrink: 0;
-    margin-left: 12px;
-    margin-top: -5px;
+    color: var(--color-text-dim);
+    transition: all 0.2s ease;
+    padding: 4px;
+    margin-top: -4px;
 }
 
 .sb-close:hover {
-    color: #FF4136;
+    color: var(--color-accent-cyan);
     transform: rotate(90deg);
 }
 
+/* Content Area */
 .sb-content {
     padding: 0;
-    /* Removing padding to allow full-width photos */
     overflow-y: auto;
     flex-grow: 1;
-    -webkit-overflow-scrolling: touch;
-}
-
-.alert-box {
-    margin: 15px;
-}
-
-.sb-logo-container {
-    text-align: center;
-    margin: 15px;
-    padding: 12px;
-    background: rgba(255, 255, 255, 0.85);
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.sb-logo-container img {
-    max-width: 100%;
-    max-height: 80px;
-    object-fit: contain;
-}
-
-/* Photo Carousel */
-.sb-photo-carousel {
-    display: flex;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    width: 100%;
-    height: 180px;
-    background: #111;
-    border-bottom: 2px solid #FFDC00;
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+    scrollbar-color: var(--color-glass-border) transparent;
 }
 
-.sb-photo-carousel::-webkit-scrollbar {
-    height: 4px;
+.sb-content::-webkit-scrollbar {
+    width: 4px;
 }
 
-.sb-photo-carousel::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.3);
-    border-radius: 4px;
+.sb-content::-webkit-scrollbar-thumb {
+    background: var(--color-glass-border);
+    border-radius: 2px;
 }
 
-.sb-photo-slide {
-    flex: 0 0 100%;
-    scroll-snap-align: start;
-    position: relative;
+/* Photo & Logo */
+.sb-photo-carousel {
     width: 100%;
-    height: 100%;
+    height: 200px;
+    background: #000;
+    position: relative;
+    overflow: hidden;
 }
 
 .aircraft-photo {
@@ -152,511 +115,281 @@
 
 .sb-photo-credit {
     position: absolute;
-    bottom: 5px;
-    left: 10px;
-    color: rgba(255, 255, 255, 0.7);
+    bottom: 8px;
+    left: 8px;
+    background: rgba(0, 0, 0, 0.6);
+    color: rgba(255, 255, 255, 0.9);
     font-size: 10px;
-    text-decoration: none;
-    background: rgba(0, 0, 0, 0.5);
-    padding: 2px 6px;
+    padding: 4px 8px;
     border-radius: 4px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
+    text-decoration: none;
+    backdrop-filter: blur(4px);
+    transition: background 0.2s;
+    z-index: 10;
 }
 
 .sb-photo-credit:hover {
-    color: #fff;
     background: rgba(0, 0, 0, 0.8);
+    color: var(--color-accent-cyan);
 }
 
-/* Advanced Route Card (Dark Theme) */
+.sb-logo-container {
+    padding: 16px;
+    margin: 20px;
+    background: #fff;
+    border-radius: 12px;
+    text-align: center;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.sb-logo-container img {
+    max-height: 60px;
+    width: auto;
+    display: block;
+    margin: 0 auto;
+    filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.1));
+}
+
+/* Tactical Route Card (v2.6.3 Fixed) */
 .sb-route-card {
-    background: rgba(255, 255, 255, 0.08);
-    /* Dark glass */
-    color: #fff;
-    margin: 15px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+    background: rgba(30, 41, 59, 0.4);
+    margin: 20px;
+    border-radius: 16px;
+    border: 1px solid var(--color-glass-border);
     overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+}
+
+.sb-route-fallback {
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    text-align: center;
 }
 
 .sb-route-display {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 20px 15px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 24px 20px;
     position: relative;
-    background: rgba(0, 0, 0, 0.2);
 }
 
-.sb-route-left,
-.sb-route-right {
-    flex: 1.5;
-    /* Spread them more */
-    z-index: 2;
+.sb-route-node {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    text-align: center;
+    flex: 1;
+    z-index: 2;
+    min-width: 100px;
 }
 
 .route-iata {
-    font-size: 38px;
+    font-size: 32px;
     font-weight: 800;
-    color: #fff;
-    line-height: 1.2;
+    color: var(--color-text-primary);
     letter-spacing: 1px;
-    word-break: break-all;
+    line-height: 1.2;
 }
 
-.route-city {
-    font-size: 11px;
-    font-weight: 600;
-    color: #FFDC00;
-    opacity: 0.9;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 140px;
-}
-
-.route-city-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    margin-top: 4px;
-}
-
-.inferred-badge {
-    background: rgba(1, 255, 112, 0.15);
-    color: #01FF70;
-    border: 1px solid rgba(1, 255, 112, 0.3);
-    padding: 1px 6px;
-    border-radius: 10px;
+.inferred-tag {
     font-size: 9px;
-    font-weight: bold;
-    text-transform: uppercase;
+    background: rgba(34, 211, 238, 0.15);
+    color: var(--color-accent-cyan);
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-top: 6px;
+    font-weight: 800;
     letter-spacing: 0.5px;
-    box-shadow: 0 0 10px rgba(1, 255, 112, 0.1);
-}
-
-.sb-airport-name {
-    font-size: 10px;
-    color: #888;
-    margin-top: 2px;
+    border: 1px solid rgba(34, 211, 238, 0.3);
+    text-transform: uppercase;
 }
 
 .sb-route-center {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
+    flex: 1;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    z-index: 1;
+    position: relative;
+    padding: 0 10px;
+}
+
+.route-path-line {
     width: 100%;
+    height: 1px;
+    border-top: 1px dashed var(--color-accent-cyan);
+    opacity: 0.3;
 }
 
 .route-plane-icon {
-    font-size: 24px;
-    color: #FFDC00;
-    z-index: 2;
-    padding: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--color-accent-cyan);
+    filter: drop-shadow(0 0 8px var(--color-accent-cyan));
 }
 
 .sb-route-bottom {
     display: flex;
     justify-content: space-between;
-    padding: 12px 20px;
-    background: rgba(255, 255, 255, 0.03);
-    font-size: 12px;
+    padding: 16px 20px;
+    background: rgba(15, 23, 42, 0.3);
+    border-top: 1px solid var(--color-glass-border);
+    gap: 12px;
 }
 
-.sb-route-time {
+.time-box {
     display: flex;
     flex-direction: column;
+    gap: 2px;
 }
 
 .time-label {
-    color: #aaa;
-    font-size: 10px;
-    letter-spacing: 1px;
-    margin-bottom: 2px;
+    font-size: 9px;
+    color: var(--color-text-dim);
+    font-weight: 700;
     text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .time-val {
-    font-weight: bold;
-    color: #FFDC00;
-    font-size: 14px;
-}
-
-.inferred-label {
-    font-style: italic;
-    font-size: 10px;
-    color: #01FF70;
-    opacity: 0.8;
-    margin-left: 4px;
-    vertical-align: middle;
-}
-
-.sb-route-card.no-route {
-    border: 1px dashed rgba(255, 255, 255, 0.2);
-}
-
-.sb-route-fallback {
-    padding: 25px 15px;
-    text-align: center;
-    background: rgba(255, 255, 255, 0.02);
-}
-
-.fallback-airline {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-}
-
-.fallback-airline .airline-name {
-    font-size: 20px;
-    font-weight: bold;
-    color: #FFDC00;
-}
-
-.fallback-airline .no-data-text {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
-}
-
-.fallback-hint {
-    margin-top: 15px;
-    font-size: 11px;
-    color: #888;
-    background: rgba(0, 0, 0, 0.3);
-    padding: 6px;
-    border-radius: 4px;
-}
-
-/* Generic inner padding */
-.sb-section-title {
-    margin-left: 10px !important;
-    /* Move only titles to 10px as requested */
-    margin-right: 25px;
-}
-
-.sb-data-row,
-.route-btn {
-    margin-left: 20px;
-    /* Reset content to standard position */
-    margin-right: 25px;
-}
-
-.sb-section-title {
     font-size: 15px;
-    /* 從 12px 調大標題 */
-    color: #01FF70;
-    border-bottom: 1px solid #333;
-    padding-bottom: 5px;
-    margin: 20px 0 12px 0;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    font-family: var(--font-mono);
+}
+
+/* Data Sections */
+.sb-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--color-accent-cyan);
+    padding: 14px 20px;
+    margin-top: 2px;
     letter-spacing: 1.5px;
-    font-weight: bold;
-}
-
-.sb-data-row {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 12px;
-    font-size: 15px;
-    gap: 15px;
-    /* 增加間隔確保長文字不會擠在一起 */
-}
-
-.sb-data-label {
-    color: #aaa;
-}
-
-.sb-data-value {
-    font-weight: bold;
-    color: #fff;
-    text-align: right;
-    word-break: break-all;
-}
-
-.sb-route-time.right {
-    text-align: right;
-}
-
-.route-path-line {
-    position: absolute;
-    width: 60%;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255, 220, 0, 0.4), transparent);
-    top: 50%;
-    transform: translateY(-50%);
-    border-top: 1px dashed rgba(255, 220, 0, 0.2);
-}
-
-.inferred-label {
-    display: none;
-    /* Replaced by inferred-badge */
-}
-
-.alert-box {
-    color: #FF4136;
-    border: 2px solid #FF4136;
-    padding: 10px;
-    text-align: center;
-    margin-bottom: 15px;
-    border-radius: 6px;
-    font-weight: bold;
-    background: rgba(255, 65, 54, 0.1);
-    animation: emergency-pulse 1s infinite;
-    display: none;
-}
-
-.alert-box.visible {
-    display: block;
-}
-
-@keyframes emergency-pulse {
-
-    0%,
-    100% {
-        filter: drop-shadow(0 0 15px #FF4136);
-    }
-
-    50% {
-        filter: drop-shadow(0 0 25px #FF4136);
-    }
-}
-
-.route-btn {
-    display: block;
-    margin-top: 25px;
-    padding: 12px;
-    background: rgba(255, 220, 0, 0.1);
-    border: 2px solid #FFDC00;
-    color: #FFDC00;
-    text-decoration: none;
-    border-radius: 6px;
-    font-size: 14px;
-    text-align: center;
-    transition: 0.3s;
-    font-weight: bold;
-}
-
-.route-btn:hover {
-    background: #FFDC00;
-    color: #000;
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(255, 220, 0, 0.4);
-}
-
-/* Accordion Styles */
-.sb-section-title.accordion {
-    cursor: pointer;
+    text-transform: uppercase;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    user-select: none;
-    transition: background 0.2s, color 0.2s;
-    padding: 12px 18px 12px 0;
-    /* 加大右側內距防止摺疊圖示被切掉 */
+    background: rgba(255, 255, 255, 0.02);
+    cursor: pointer;
+    transition: background 0.2s;
 }
 
-.sb-section-title.accordion:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.08);
+.sb-section-title:hover {
+    background: rgba(255, 255, 255, 0.05);
 }
 
-.sb-section-title .chevron {
+.sb-section-title.accordion .chevron {
     transition: transform 0.3s ease;
-    border-style: solid;
-    border-width: 0.18em 0.18em 0 0;
-    /* 稍微加粗圖示 */
-    content: '';
-    display: inline-block;
-    height: 0.5em;
-    position: relative;
-    top: -0.05em;
-    transform: rotate(135deg);
-    vertical-align: middle;
-    width: 0.5em;
-    opacity: 0.8;
-    margin-right: 5px;
-    /* 確保離邊緣有距離 */
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+    margin-top: -4px;
+    opacity: 0.6;
 }
 
-.sb-section-title.accordion.open .chevron {
-    transform: rotate(-45deg);
-    top: 0.1em;
-    opacity: 1;
+.sb-section-title.accordion .chevron.open {
+    transform: rotate(-135deg);
+    margin-top: 2px;
 }
 
 .sb-section-content {
-    animation: slideDown 0.3s cubic-bezier(0.25, 1, 0.5, 1) forwards;
     overflow: hidden;
-    transform-origin: top;
+    transition: max-height 0.3s ease-out;
 }
 
-@keyframes slideDown {
+.sb-data-row {
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.sb-data-label {
+    color: var(--color-text-secondary);
+    font-weight: 500;
+}
+
+.sb-data-value {
+    color: var(--color-text-primary);
+    font-weight: 600;
+    font-family: var(--font-mono);
+    text-align: right;
+}
+
+.spi-active {
+    color: var(--color-accent-cyan) !important;
+    text-shadow: 0 0 10px var(--color-accent-cyan);
+}
+
+/* Emergency Alert */
+.alert-box {
+    margin: 20px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid #ef4444;
+    color: #ef4444;
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: 700;
+    animation: flash 1s infinite alternate;
+}
+
+@keyframes flash {
     from {
-        opacity: 0;
-        transform: scaleY(0.9);
-        max-height: 0;
+        opacity: 0.6;
     }
 
     to {
         opacity: 1;
-        transform: scaleY(1);
-        max-height: 500px;
+        box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
     }
 }
 
-/* ===== RWD: Bottom Sheet (手機端底部抽屜) ===== */
+/* Actions */
+.route-btn {
+    display: block;
+    margin: 24px 20px;
+    padding: 14px;
+    background: var(--color-accent-cyan);
+    color: #020617;
+    text-align: center;
+    text-decoration: none;
+    font-weight: 700;
+    border-radius: 12px;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(34, 211, 238, 0.2);
+}
+
+.route-btn:hover {
+    filter: brightness(1.1);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(34, 211, 238, 0.4);
+}
+
+/* Mobile Bottom Sheet */
 @media (max-width: 768px) {
     .sidebar {
-        width: 100vw;
-        width: 100dvw;
-        height: 45vh;
+        width: 100%;
+        height: 50vh;
         top: auto;
         bottom: 0;
         left: 0;
-        border-right: none;
-        border-top: 2px solid #FFDC00;
-        border-radius: 16px 16px 0 0;
         transform: translateY(100%);
-        transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+        border-right: none;
+        border-top: 1px solid var(--color-glass-border);
+        border-radius: 24px 24px 0 0;
     }
 
     .sidebar.active {
         transform: translateY(0);
-    }
-
-    /* Drag handle indicator */
-    .sb-header {
-        padding: 8px 15px;
-        position: relative;
-    }
-
-    .sb-header::before {
-        content: '';
-        display: block;
-        width: 40px;
-        height: 4px;
-        background: rgba(255, 255, 255, 0.3);
-        border-radius: 2px;
-        margin: 0 auto 8px auto;
-    }
-
-    .sb-title {
-        font-size: 16px;
-    }
-
-    .sb-close {
-        top: 10px;
-        right: 12px;
-        font-size: 18px;
-    }
-
-    .sb-content {
-        padding: 8px 12px;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-
-    .sb-data-row {
-        padding: 3px 0;
-        font-size: 12px;
-        margin-bottom: 4px;
-    }
-
-    .sb-section-title {
-        margin: 10px 0 6px 0;
-        font-size: 11px;
-    }
-
-    .route-btn {
-        margin-top: 10px;
-        padding: 8px;
-        font-size: 12px;
-    }
-
-    /* Mobile Layout Fixes for Route Card */
-    .sb-airport-code {
-        font-size: 26px;
-        /* iPhone SE / 12 mini Scale down */
-        letter-spacing: 0;
-        word-break: break-all;
-    }
-
-    .sb-route-display {
-        padding: 12px 10px;
-    }
-
-    .route-plane-icon {
-        font-size: 16px;
-        padding: 4px;
-    }
-
-    .route-plane-icon svg {
-        width: 14px;
-        height: 14px;
-    }
-
-    .sb-photo-carousel {
-        height: 140px;
-    }
-
-    .sb-photo-carousel img {
-        object-fit: contain;
-        width: 100%;
-    }
-
-    .route-btn {
-        margin-top: 10px;
-        padding: 8px;
-        font-size: 12px;
-    }
-
-    /* Mobile Layout Fixes for Route Card */
-    .sb-airport-code {
-        font-size: 26px;
-        /* iPhone SE / 12 mini Scale down */
-        letter-spacing: 0;
-        word-break: break-all;
-    }
-
-    .sb-route-display {
-        padding: 12px 10px;
-    }
-
-    .route-plane-icon {
-        font-size: 16px;
-        padding: 4px;
-    }
-
-    .route-plane-icon svg {
-        width: 14px;
-        height: 14px;
-    }
-
-    .sb-photo-carousel {
-        height: 140px;
-    }
-
-    .sb-photo-carousel img {
-        object-fit: contain;
-        width: 100%;
     }
 }

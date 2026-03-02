@@ -205,15 +205,58 @@ export function getNearestAirport(lat, lng) {
 }
 
 /**
- * 根據高度回傳對應顏色
+ * 根據高度回傳對應顏色 (支援多重配色方案)
  */
-export function getAltitudeColor(altitude, onGround, isEmergency) {
-    if (isEmergency) return '#FF4136';
-    if (onGround) return '#888888';
-    if (altitude === 'N/A' || altitude === 'GROUND') return '#888';
-    if (altitude < 1500) return '#FF4136';
-    if (altitude < 5000) return '#FFDC00';
-    return '#01FF70';
+export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'TACTICAL') {
+    if (isEmergency) return '#ef4444'; // Red-500 (Emergency)
+    if (onGround || altitude === 'N/A' || altitude === 'GROUND') return '#64748b'; // Slate-500 (Ground)
+
+    const alt = parseFloat(altitude);
+
+    const SCHEMES = {
+        // [v2.6.6] Current Default
+        TACTICAL: {
+            low: '#f59e0b',    // Amber
+            mid: '#10b981',    // Emerald
+            high: '#6366f1'    // Indigo
+        },
+        // [v2.6.5] Classic
+        CLASSIC: {
+            low: '#fbbf24',    // Amber-400
+            mid: '#22d3ee',    // Cyan-400
+            high: '#3b82f6'    // Blue-500
+        },
+        // Maximum Visibility
+        VIVID: {
+            low: '#fb923c',    // Orange-400
+            mid: '#a3e635',    // Lime-400
+            high: '#d946ef'    // Fuchsia-500
+        },
+        // Pro-Contrast
+        MONO: {
+            low: '#fde047',    // Yellow-300
+            mid: '#4ade80',    // Green-400
+            high: '#f472b6'    // Pink-400
+        },
+        // Thermal / Heat look
+        HEATMAP: {
+            low: '#dc2626',    // Red-600
+            mid: '#facc15',    // Yellow-400
+            high: '#f8fafc'    // Slate-50
+        },
+        // Stealth / Night look
+        MIDNIGHT: {
+            low: '#475569',    // Slate-600
+            mid: '#1e3a8a',    // Blue-900
+            high: '#7c3aed'    // Violet-600
+        }
+    };
+
+    const colors = SCHEMES[scheme] || SCHEMES.TACTICAL;
+
+    if (alt < 2500) return colors.low;
+    if (alt < 9000) return colors.mid;
+    return colors.high;
 }
 
 /**
@@ -235,11 +278,14 @@ export function getAltitudeColor(altitude, onGround, isEmergency) {
  * 17: Surface Vehicle - Service
  * 18: Point Obstacle
  */
-export function createPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category) {
-    const color = getAltitudeColor(altitude, onGround, isEmergency);
-    const size = onGround ? 24 : Math.min(36, 24 + (altitude !== 'N/A' && altitude !== 'GROUND' ? altitude / 500 : 0));
-    const glow = isSelected ? 'drop-shadow(0 0 15px #FFDC00)' : `drop-shadow(0 0 6px ${color})`;
-    const planeColor = isSelected ? '#FFDC00' : color;
+export function createPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category, scheme = 'TACTICAL') {
+    const color = getAltitudeColor(altitude, onGround, isEmergency, scheme);
+    const size = onGround ? 26 : Math.min(36, 26 + (altitude !== 'N/A' && altitude !== 'GROUND' ? altitude / 1000 : 0));
+    const glowColor = isSelected ? '#f59e0b' : color;
+    const glow = `drop-shadow(0 0 6px ${glowColor})`;
+    const planeColor = isSelected ? '#ffffff' : color;
+    const strokeWidth = isSelected ? 1.5 : 0.8;
+    const strokeColor = isSelected ? '#f59e0b' : 'rgba(255,255,255,0.4)';
 
     // SVG paths centered in a 24x24 viewBox pointing straight UP (to be rotated by CSS)
     const SVG_PATHS = {
@@ -282,9 +328,12 @@ export function createPlaneSVG(heading, altitude, isSelected, onGround, isEmerge
     if (selectedPath === SVG_PATHS.heavy) scaleTransform = 'scale(1.1) translate(-1, -1)';
 
     const svg = `
-    <svg viewBox="0 0 24 24" width="${size}" height="${size}" style="filter: ${glow};">
+    <svg viewBox="0 0 24 24" width="${size}" height="${size}" style="filter: ${glow}; overflow: visible;">
       <g transform="rotate(${heading} 12 12)">
-         <path fill="${planeColor}" stroke="${isSelected ? '#fff' : 'none'}" stroke-width="${isSelected ? 0.5 : 0}"
+         <path fill="${planeColor}" 
+               stroke="${strokeColor}" 
+               stroke-width="${strokeWidth}" 
+               stroke-linejoin="round"
                d="${selectedPath}" transform="${scaleTransform}" />
       </g>
     </svg>
