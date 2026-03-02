@@ -4,6 +4,15 @@
 
 const EARTH_RADIUS = 6371000;
 
+/**
+ * 將經度正規化至 -180 ~ 180 之間
+ */
+export function normalizeLongitude(lng) {
+    while (lng > 180) lng -= 360;
+    while (lng < -180) lng += 360;
+    return lng;
+}
+
 // ==========================================
 // 全球主要機場資料庫 (現在由伺服器動態提供)
 // ==========================================
@@ -388,11 +397,11 @@ export function splitPathAtIDL(points) {
     if (!points || points.length < 2) return [points];
 
     const segments = [];
-    let currentSegment = [points[0]];
+    let currentSegment = [[points[0][0], normalizeLongitude(points[0][1])]];
 
     for (let i = 1; i < points.length; i++) {
-        const p1 = points[i - 1];
-        const p2 = points[i];
+        const p1 = currentSegment[currentSegment.length - 1];
+        const p2 = [points[i][0], normalizeLongitude(points[i][1])];
 
         // 檢測經度突變 (超過 180 度視為跨換日線)
         const lonDiff = Math.abs(p2[1] - p1[1]);
@@ -443,11 +452,7 @@ export function getGreatCirclePath(p1, p2, numPoints = 60) {
         const lon3 = Math.atan2(y, x);
 
         // 將座標轉回 180 到 -180
-        let degLon = lon3 * 180 / Math.PI;
-        while (degLon > 180) degLon -= 360;
-        while (degLon < -180) degLon += 360;
-
-        path.push([lat3 * 180 / Math.PI, degLon]);
+        path.push([lat3 * 180 / Math.PI, normalizeLongitude(lon3 * 180 / Math.PI)]);
     }
     return path;
 }

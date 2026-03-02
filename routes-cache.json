@@ -499,7 +499,8 @@
     "dep": "KFLU"
   },
   "SKW4696": {
-    "dep": "KCOS"
+    "dep": "KCOS",
+    "arr": "KDEN"
   },
   "N984CE": {
     "arr": "KSLC"
@@ -643,7 +644,8 @@
     "dep": "KHWV"
   },
   "TGCAM": {
-    "dep": "MGGT"
+    "dep": "MGGT",
+    "arr": "MGGT"
   },
   "N945HC": {
     "dep": "KIWS"
@@ -698,5 +700,1318 @@
   },
   "N265KQ": {
     "dep": "KNFW"
+  },
+  "DLH961": {
+    "dep": "EDDF",
+    "arr": "EDDF"
+  },
+  "FFT1733": {
+    "arr": "KDEN"
+  },
+  "AIC211": {
+    "arr": "VNKT"
+  },
+  "PDT6037": {
+    "arr": "KUZA"
+  },
+  "DAL2142": {
+    "dep": "KCMH"
+  },
+  "WJA145": {
+    "arr": "CYYC"
+  },
+  "SUI721": {
+    "dep": "LSME"
+  },
+  "N155AP": {
+    "dep": "KFMY"
+  },
+  "SWA3094": {
+    "dep": "KFFZ"
+  },
+  "N465MM": {
+    "dep": "KSSF"
+  },
+  "N127GA": {
+    "dep": "KFSD"
+  },
+  "THY9YM": {
+    "arr": "LTBA"
+  },
+  "SWA438": {
+    "arr": "KISM"
+  },
+  "N3787N": {
+    "dep": "EDHL",
+    "arr": "EDHL"
+  },
+  "AFL1321": {
+    "arr": "UUEE"
+  },
+  "SWA1758": {
+    "dep": "KSKA"
+  },
+  "DAL1117": {
+    "arr": "KSAN"
+  },
+  "N309KB": {
+    "dep": "KSUS"
+  },
+  "WZZ1CW": {
+    "dep": "LFSB"
+  },
+  "EPI599": {
+    "arr": "KCOI"
+  },
+  "AAL2266": {
+    "arr": "KMLE"
+  },
+  "N404MM": {
+    "dep": "KORL"
+  },
+  "ECJ72": {
+    "arr": "KCNH"
+  },
+  "VLJ720D": {
+    "arr": "EGVT"
+  },
+  "FFT3019": {
+    "dep": "KLAS"
+  },
+  "AAL2480": {
+    "arr": "KUZA"
+  },
+  "N920EA": {
+    "arr": "KELP"
+  },
+  "JIA5445": {
+    "arr": "KDAA"
+  },
+  "FFT1149": {
+    "arr": "KDEN"
+  },
+  "FFT4873": {
+    "dep": "KPMP"
+  },
+  "FLE805": {
+    "dep": "CYYC"
+  },
+  "TIV740": {
+    "dep": "KSDL"
+  },
+  "AMF1902": {
+    "dep": "KONT"
+  },
+  "DAL570": {
+    "dep": "KNGZ"
+  },
+  "ASH4008": {
+    "arr": "KDWH"
+  },
+  "SWA3135": {
+    "arr": "KDEN"
+  },
+  "PCM8798": {
+    "dep": "KLAS"
+  },
+  "OELSS": {
+    "arr": "EGVO"
+  },
+  "N525LD": {
+    "dep": "KPWA"
+  },
+  "SWA232": {
+    "arr": "KISM"
+  },
+  "DAL1526": {
+    "arr": "KSLC"
+  },
+  "DWI4660": {
+    "arr": "MGGT"
+  },
+  "N722NX": {
+    "arr": "KHOB"
+  },
+  "AFL1730": {
+    "dep": "UUEE"
+  },
+  "SWA404": {
+    "arr": "KANP"
+  },
+  "N775DM": {
+    "dep": "KROW"
+  },
+  "THY65": {
+    "arr": "LTBA"
+  },
+  "AAL1409": {
+    "arr": "KDPA"
+  },
+  "WEN3714": {
+    "dep": "CYYC"
+  },
+  "JTZ287": {
+    "dep": "KMGE"
+  },
+  "N78DT": {
+    "dep": "KSSF"
+  },
+  "AAL883": {
+    "arr": "KILG"
+  },
+  "TAM4677": {
+    "arr": "SBMT"
+  },
+  "JZA873": {
+    "arr": "CYTZ"
+  },
+  "SXS5GH": {
+    "arr": "LFPT"
+  },
+  "SWA1211": {
+    "arr": "KTPF"
+  },
+  "ASA1470": {
+    "dep": "KPWK"
+  },
+  "MSR786": {
+    "dep": "EDFE"
+  },
+  "CXK699": {
+    "arr": "KPUB"
+  },
+  "N9421F": {
+    "dep": "KZPH",
+    "arr": "KZPH"
+  },
+  "UAL122": {
+    "dep": "KTEB"
+  },
+  "UAL2616": {
+    "arr": "KDPA"
+  },
+  "EJA343": {
+    "dep": "KIND"
+  },
+  "TGBIM": {
+    "dep": "MGGT"
+  },
+  "RTY775": {
+    "arr": "KFNL"
+  },
+  "SWA2713": {
+    "dep": "KFLU"
+  },
+  "SWA4531": {
+    "arr": "KDEN"
+  },
+  "JBU754": {
+    "arr": "KFXE"
+  },
+  "SKW183T": {
+    "dep": "KBOI"
+  },
+  "AAL234": {
+    "dep": "KNGZ"
+  },
+  "EJA682": {
+    "dep": "KSVN"
+  },
+  "KMM625": {
+    "dep": "LIML"
+  },
+  "N682WA": {
+    "dep": "KMIT"
+  },
+  "SWA2767": {
+    "dep": "KANP"
+  },
+  "EZY38QD": {
+    "dep": "EGKR"
+  },
+  "EJA124": {
+    "dep": "KCDW"
+  },
+  "WMT372": {
+    "dep": "LRBS"
+  },
+  "FFT1376": {
+    "arr": "KDEN"
+  },
+  "JBU2181": {
+    "dep": "KFRG"
+  },
+  "N604DR": {
+    "dep": "KGGG"
+  },
+  "JIA5417": {
+    "arr": "KUZA"
+  },
+  "VIR412W": {
+    "arr": "EGLC"
+  },
+  "TGMAK": {
+    "arr": "MGGT"
+  },
+  "RPA4591": {
+    "dep": "KJFK"
+  },
+  "AKT1400": {
+    "dep": "CYYC"
+  },
+  "AAL2506": {
+    "dep": "KNGZ"
+  },
+  "THY6GM": {
+    "arr": "LTBA"
+  },
+  "BP02": {
+    "arr": "KLFI"
+  },
+  "N626TM": {
+    "arr": "KOSU"
+  },
+  "N725XL": {
+    "dep": "KARR"
+  },
+  "UCA4240": {
+    "dep": "KHSV"
+  },
+  "AAL1559": {
+    "arr": "KILG"
+  },
+  "TGELI": {
+    "dep": "MGGT"
+  },
+  "EJA458": {
+    "dep": "KLAS"
+  },
+  "NKS1750": {
+    "dep": "KPMP"
+  },
+  "TGOWL": {
+    "arr": "MGGT"
+  },
+  "SWA2093": {
+    "arr": "KFME"
+  },
+  "RNGR715": {
+    "arr": "KRKP"
+  },
+  "FFT2015": {
+    "dep": "KDEN"
+  },
+  "SKW3018": {
+    "dep": "KSLC"
+  },
+  "N6686D": {
+    "dep": "KBJC"
+  },
+  "UAL623": {
+    "dep": "KFLU"
+  },
+  "DAL2808": {
+    "dep": "KMSP"
+  },
+  "DFFMK": {
+    "dep": "EDGS"
+  },
+  "FIN1RE": {
+    "dep": "EFHE"
+  },
+  "AAL2075": {
+    "dep": "KORL"
+  },
+  "SCX341": {
+    "arr": "KISM"
+  },
+  "N999V": {
+    "dep": "KTOA"
+  },
+  "N8650E": {
+    "arr": "KCOS"
+  },
+  "AUB1340": {
+    "dep": "KALX",
+    "arr": "KALX"
+  },
+  "AAL1591": {
+    "dep": "KRAL"
+  },
+  "TGCCA": {
+    "dep": "MGGT",
+    "arr": "MGGT"
+  },
+  "IBE07AH": {
+    "arr": "EGLC"
+  },
+  "AAL752": {
+    "dep": "KMDW"
+  },
+  "ASA211": {
+    "dep": "KNGZ"
+  },
+  "SLI131": {
+    "arr": "MMMX"
+  },
+  "NKS1309": {
+    "dep": "KORL"
+  },
+  "FTY6": {
+    "dep": "LSGG"
+  },
+  "FDY244": {
+    "arr": "KTHV"
+  },
+  "AAL1479": {
+    "arr": "KUZA"
+  },
+  "N179JS": {
+    "dep": "KCOS"
+  },
+  "GJS4505": {
+    "arr": "KDSV"
+  },
+  "EWG22U": {
+    "arr": "EGLC"
+  },
+  "VOI1163": {
+    "dep": "MMCS"
+  },
+  "UAL1299": {
+    "arr": "KDEN"
+  },
+  "UAL1205": {
+    "arr": "KDPA"
+  },
+  "PCM8705": {
+    "dep": "KLAS"
+  },
+  "TAM3301": {
+    "arr": "SBMT"
+  },
+  "WJA223": {
+    "arr": "CYYC"
+  },
+  "N713FS": {
+    "dep": "KFNL"
+  },
+  "JIA5214": {
+    "dep": "KLOU"
+  },
+  "YEL13": {
+    "dep": "KRNT"
+  },
+  "SWA2080": {
+    "dep": "KNGZ"
+  },
+  "SKW5766": {
+    "arr": "KDEN"
+  },
+  "VOI5595": {
+    "arr": "MMAN"
+  },
+  "BAW94HG": {
+    "dep": "EDHI"
+  },
+  "N119UV": {
+    "dep": "KPVU"
+  },
+  "BEL5XD": {
+    "dep": "EBBR"
+  },
+  "TRA5864": {
+    "arr": "EHVK"
+  },
+  "UAL2232": {
+    "arr": "KMIC"
+  },
+  "N730QS": {
+    "dep": "KCDW"
+  },
+  "ECOCF": {
+    "arr": "LEBG"
+  },
+  "N412SW": {
+    "arr": "KHLG"
+  },
+  "THY7LS": {
+    "arr": "LTBA"
+  },
+  "SKW5665": {
+    "arr": "KBCB"
+  },
+  "PRO4215M": {
+    "arr": "CYUY"
+  },
+  "JRE845": {
+    "dep": "KHWO"
+  },
+  "TGRWC": {
+    "dep": "MGGT"
+  },
+  "N71TG": {
+    "dep": "KCRQ"
+  },
+  "EDV4936": {
+    "dep": "KFLU"
+  },
+  "UAL1502": {
+    "dep": "KSLC"
+  },
+  "CES9618": {
+    "dep": "VNKT"
+  },
+  "SWA2811": {
+    "arr": "KSGR"
+  },
+  "JBU1698": {
+    "dep": "KPMP"
+  },
+  "EWG1GH": {
+    "dep": "EGLL"
+  },
+  "AAL2169": {
+    "dep": "KFFZ"
+  },
+  "TWY381": {
+    "arr": "KDWH"
+  },
+  "AFL1125": {
+    "arr": "UUEE"
+  },
+  "EJA925": {
+    "dep": "KWHP"
+  },
+  "AAL1004": {
+    "arr": "KUZA"
+  },
+  "KLM97N": {
+    "arr": "LPAR"
+  },
+  "MVK92": {
+    "dep": "KOWA"
+  },
+  "AAL3234": {
+    "dep": "KFLU"
+  },
+  "SKW4722": {
+    "arr": "KDPA"
+  },
+  "FFT3232": {
+    "dep": "KLAS"
+  },
+  "SWA920": {
+    "dep": "KNGZ"
+  },
+  "THY109": {
+    "arr": "LTBA"
+  },
+  "SKW5089": {
+    "arr": "KDEN"
+  },
+  "RPA4538": {
+    "arr": "KADW"
+  },
+  "EDV5070": {
+    "arr": "KOSU"
+  },
+  "RYR4011": {
+    "dep": "EPKK"
+  },
+  "RNA402": {
+    "arr": "VNKT"
+  },
+  "AAL1274": {
+    "dep": "KHWO"
+  },
+  "AXY99NR": {
+    "arr": "EGVT"
+  },
+  "N25KN": {
+    "arr": "KMGE"
+  },
+  "AAL2595": {
+    "dep": "KSAN",
+    "arr": "KSAN"
+  },
+  "JIA5663": {
+    "arr": "KDCU"
+  },
+  "N856WD": {
+    "arr": "KRVS"
+  },
+  "WJA601": {
+    "arr": "CYHC"
+  },
+  "RPA4494": {
+    "dep": "KJFK"
+  },
+  "SWA2281": {
+    "dep": "KMQY"
+  },
+  "PEG61": {
+    "arr": "LSME"
+  },
+  "VYT568": {
+    "arr": "EGOV"
+  },
+  "LXJ308": {
+    "dep": "KEKM"
+  },
+  "JIA5679": {
+    "arr": "KUZA"
+  },
+  "AMX904": {
+    "arr": "MMAN"
+  },
+  "EVA008": {
+    "arr": "KNUQ"
+  },
+  "AFR1711": {
+    "dep": "EDHI"
+  },
+  "UAL2255": {
+    "arr": "KDEN"
+  },
+  "DAL1208": {
+    "arr": "KISM"
+  },
+  "UAL2018": {
+    "arr": "KPAO"
+  },
+  "ATN3203": {
+    "dep": "KMCC"
+  },
+  "N67MT": {
+    "dep": "KSBM"
+  },
+  "KOW187": {
+    "dep": "KCDW"
+  },
+  "FFT2147": {
+    "arr": "KDEN"
+  },
+  "AAY1708": {
+    "dep": "KLAS"
+  },
+  "TGJAV": {
+    "arr": "MGGT"
+  },
+  "SWA3285": {
+    "arr": "KANP"
+  },
+  "N623BG": {
+    "arr": "KBJC"
+  },
+  "N532ST": {
+    "dep": "KVNY"
+  },
+  "FHNFC": {
+    "dep": "LFLU"
+  },
+  "SWA4039": {
+    "dep": "KRHV"
+  },
+  "EFW6BB": {
+    "dep": "EGKR"
+  },
+  "RPA4475": {
+    "dep": "KFLU"
+  },
+  "AAL922": {
+    "arr": "KUZA"
+  },
+  "BGST362": {
+    "arr": "KLCH"
+  },
+  "N373AG": {
+    "dep": "KSKF"
+  },
+  "CRK017": {
+    "dep": "VHST"
+  },
+  "SKW5726": {
+    "dep": "KMDW"
+  },
+  "JNX01": {
+    "dep": "KIWS"
+  },
+  "ASA416": {
+    "dep": "KNGZ"
+  },
+  "UAL1709": {
+    "dep": "KMQY"
+  },
+  "ACA132": {
+    "dep": "CYYC"
+  },
+  "SWR493Z": {
+    "dep": "EDHI"
+  },
+  "UAL1975": {
+    "dep": "KLAS"
+  },
+  "TGMER": {
+    "dep": "MGGT"
+  },
+  "JBU547": {
+    "dep": "KHWV"
+  },
+  "TAM4607": {
+    "arr": "SBMT"
+  },
+  "GAF197": {
+    "arr": "EDAY"
+  },
+  "SCA32": {
+    "dep": "KDVT"
+  },
+  "N810KK": {
+    "dep": "KBJC"
+  },
+  "N810LF": {
+    "arr": "KLRU"
+  },
+  "SWA4459": {
+    "arr": "KUZA"
+  },
+  "AFR61QH": {
+    "dep": "LFLL"
+  },
+  "PDT5823": {
+    "dep": "KROA"
+  },
+  "SKW4763": {
+    "arr": "KPAO"
+  },
+  "N260TT": {
+    "dep": "KBJC"
+  },
+  "PRNJR": {
+    "arr": "SBSR"
+  },
+  "SKW5483": {
+    "arr": "KDPA"
+  },
+  "SKW5325": {
+    "dep": "KCOS"
+  },
+  "LYM5107": {
+    "arr": "KMIC"
+  },
+  "N131JR": {
+    "arr": "KEAU"
+  },
+  "N1955M": {
+    "arr": "KLEB"
+  },
+  "FFT3281": {
+    "arr": "KDWH"
+  },
+  "SKW5198": {
+    "dep": "KDEN"
+  },
+  "DAL2798": {
+    "dep": "KSLC"
+  },
+  "FGJFI": {
+    "arr": "LFNA"
+  },
+  "SWA1368": {
+    "dep": "KCNO"
+  },
+  "WJA472": {
+    "arr": "CYYC"
+  },
+  "AAL862": {
+    "dep": "KFLU"
+  },
+  "FFT3273": {
+    "dep": "KBWI"
+  },
+  "EJA314": {
+    "arr": "KNBJ"
+  },
+  "N589LJ": {
+    "arr": "KEDC"
+  },
+  "UAL862": {
+    "arr": "KNUQ"
+  },
+  "SKW5237": {
+    "arr": "KDEN"
+  },
+  "N41723": {
+    "dep": "KCSG"
+  },
+  "N8275D": {
+    "dep": "KBVI"
+  },
+  "CXK164": {
+    "arr": "KPVU",
+    "dep": "KPVU"
+  },
+  "XFL330": {
+    "dep": "KHWV"
+  },
+  "LXJ503": {
+    "dep": "KBUR"
+  },
+  "LCT448": {
+    "arr": "MMAN"
+  },
+  "LXJ358": {
+    "dep": "KSDL"
+  },
+  "DAL2254": {
+    "dep": "KMSP"
+  },
+  "N223CM": {
+    "arr": "LSGN",
+    "dep": "LSGN"
+  },
+  "UAL2367": {
+    "arr": "KPAO"
+  },
+  "N605SN": {
+    "dep": "KTVI"
+  },
+  "ENY3418": {
+    "arr": "KDPA"
+  },
+  "AAL1784": {
+    "arr": "KUZA"
+  },
+  "BAW391": {
+    "arr": "EGLC"
+  },
+  "SKW5139": {
+    "dep": "KDEN"
+  },
+  "LXJ536": {
+    "dep": "KSLC"
+  },
+  "N29HT": {
+    "dep": "KBJC"
+  },
+  "ETP87": {
+    "dep": "EGHD"
+  },
+  "00000000": {
+    "dep": "KNFW"
+  },
+  "SWA396": {
+    "dep": "KSKA"
+  },
+  "WJA102": {
+    "arr": "CYYC"
+  },
+  "ROT273L": {
+    "dep": "LRBS"
+  },
+  "ENY3523": {
+    "arr": "KDPA"
+  },
+  "ENY3972": {
+    "dep": "KOKC"
+  },
+  "EJU9040": {
+    "arr": "LIMC"
+  },
+  "EJA790": {
+    "dep": "KDNL"
+  },
+  "SWA2275": {
+    "dep": "KLAS"
+  },
+  "TGU140": {
+    "dep": "MGGT"
+  },
+  "FFT2350": {
+    "arr": "KDEN"
+  },
+  "EZY737P": {
+    "dep": "EGKR"
+  },
+  "JIA5409": {
+    "arr": "KBOF"
+  },
+  "SKW5246": {
+    "dep": "KDEN"
+  },
+  "PAT960": {
+    "arr": "KORH"
+  },
+  "UAL351": {
+    "dep": "KDEN"
+  },
+  "SWA2063": {
+    "dep": "KRHV"
+  },
+  "AAL1222": {
+    "dep": "KJFK"
+  },
+  "JRE838": {
+    "dep": "KBHM"
+  },
+  "RPA5693": {
+    "dep": "KOWD"
+  },
+  "AZU4726": {
+    "arr": "SBKP"
+  },
+  "BOMR726": {
+    "arr": "KRKP"
+  },
+  "SWA3188": {
+    "arr": "KISM"
+  },
+  "NJE9QL": {
+    "arr": "EGLF"
+  },
+  "N140PC": {
+    "dep": "KBJC"
+  },
+  "DAL1708": {
+    "dep": "KMSP"
+  },
+  "EXS47S": {
+    "dep": "EGCC"
+  },
+  "SKW3402": {
+    "arr": "KSEE"
+  },
+  "SKW6390": {
+    "dep": "KCOS"
+  },
+  "FFT9570": {
+    "arr": "KFXE"
+  },
+  "JEDI33": {
+    "arr": "KJKA"
+  },
+  "SKW6259": {
+    "arr": "KDPA"
+  },
+  "UAL593": {
+    "dep": "KBKF"
+  },
+  "TAM3653": {
+    "arr": "SBGR"
+  },
+  "RNGR837": {
+    "arr": "KRKP"
+  },
+  "AAY1592": {
+    "dep": "KPVU"
+  },
+  "SKW3708": {
+    "arr": "KSLC"
+  },
+  "SWA939": {
+    "dep": "KBWI"
+  },
+  "JZA7883": {
+    "arr": "CYKZ"
+  },
+  "UAL2340": {
+    "arr": "KNUQ"
+  },
+  "UAL2418": {
+    "arr": "KOQN"
+  },
+  "SXAET": {
+    "arr": "LGKV"
+  },
+  "UAL786": {
+    "arr": "KDPA"
+  },
+  "AAL2216": {
+    "dep": "KTTD"
+  },
+  "UAL1767": {
+    "arr": "KDEN"
+  },
+  "GLO1605": {
+    "arr": "SBSP"
+  },
+  "EWG91E": {
+    "arr": "EDLE"
+  },
+  "RYR92AL": {
+    "dep": "LIPH"
+  },
+  "AAY523": {
+    "dep": "KLOU"
+  },
+  "UAL596": {
+    "arr": "KDEN"
+  },
+  "KATT10": {
+    "dep": "KNPA"
+  },
+  "CXK674": {
+    "arr": "KBJC"
+  },
+  "N25NX": {
+    "dep": "KSLC"
+  },
+  "TMN2": {
+    "arr": "NZAR"
+  },
+  "WJA1540": {
+    "dep": "CYYC"
+  },
+  "SKW4731": {
+    "dep": "KDEN"
+  },
+  "N884GL": {
+    "dep": "KSGR"
+  },
+  "UAL2316": {
+    "dep": "KDEN"
+  },
+  "RS194": {
+    "dep": "CYXE"
+  },
+  "NDU740": {
+    "arr": "KCGZ"
+  },
+  "N112UV": {
+    "arr": "KPVU",
+    "dep": "KPVU"
+  },
+  "MVK98": {
+    "dep": "KOWA"
+  },
+  "N9435W": {
+    "arr": "KGXY"
+  },
+  "RYR327E": {
+    "dep": "EGNR"
+  },
+  "CYO220": {
+    "arr": "KELP"
+  },
+  "N720CL": {
+    "dep": "KBJC"
+  },
+  "SWA2715": {
+    "arr": "KISM"
+  },
+  "AAL1523": {
+    "arr": "KDEN"
+  },
+  "N1CH": {
+    "dep": "KCOF"
+  },
+  "SIA21": {
+    "dep": "KTEB"
+  },
+  "DAL2688": {
+    "arr": "KOQN"
+  },
+  "RYR59WR": {
+    "arr": "LMMG"
+  },
+  "SKW151A": {
+    "dep": "KSKA"
+  },
+  "AAY79": {
+    "dep": "KLAS"
+  },
+  "AFR027": {
+    "arr": "LFPT"
+  },
+  "UAL260": {
+    "arr": "KDPA"
+  },
+  "EJA0362": {
+    "arr": "KADW"
+  },
+  "PAT104": {
+    "dep": "KFBG"
+  },
+  "SWA3026": {
+    "dep": "KONT"
+  },
+  "N525MH": {
+    "dep": "KNFW"
+  },
+  "SWA2156": {
+    "dep": "KLAS"
+  },
+  "SKW3792": {
+    "arr": "KMIC",
+    "dep": "KMSP"
+  },
+  "DAL873": {
+    "dep": "KFLU"
+  },
+  "LLN205": {
+    "arr": "KMWL"
+  },
+  "GUSTI3": {
+    "dep": "LSZH",
+    "arr": "LSZH"
+  },
+  "UAL621": {
+    "arr": "KDEN"
+  },
+  "DAL681": {
+    "dep": "KSLC"
+  },
+  "UCA4314": {
+    "dep": "KBHM"
+  },
+  "N80507": {
+    "dep": "KJHW"
+  },
+  "AER145": {
+    "dep": "PAKD"
+  },
+  "SKW3263": {
+    "dep": "KSFO"
+  },
+  "CXK297": {
+    "arr": "KOGD"
+  },
+  "UAL2039": {
+    "dep": "KSBD"
+  },
+  "SKW5288": {
+    "arr": "KDPA"
+  },
+  "TGMAW": {
+    "arr": "MGGT"
+  },
+  "N336MR": {
+    "dep": "KPBG"
+  },
+  "AIC2813": {
+    "arr": "VOBL"
+  },
+  "SKW3021": {
+    "dep": "KDEN"
+  },
+  "UAL878": {
+    "dep": "VHST"
+  },
+  "CMP380": {
+    "arr": "MGGT"
+  },
+  "UAL497": {
+    "dep": "KDEN"
+  },
+  "VJA676": {
+    "arr": "KMQS"
+  },
+  "JBU1601": {
+    "arr": "KFXE"
+  },
+  "TAM3522": {
+    "arr": "SBMT"
+  },
+  "LYM4801": {
+    "dep": "KPUB"
+  },
+  "AIP1848": {
+    "dep": "KSLC"
+  },
+  "SWA1290": {
+    "dep": "KNGZ"
+  },
+  "N795HC": {
+    "dep": "KAPA"
+  },
+  "N520MB": {
+    "dep": "KOKB"
+  },
+  "KAL093": {
+    "arr": "KFDK"
+  },
+  "EZY318C": {
+    "dep": "EGKK"
+  },
+  "UAL2119": {
+    "dep": "KEWR"
+  },
+  "N265SF": {
+    "dep": "KBJC"
+  },
+  "SKW4919": {
+    "dep": "KPWK"
+  },
+  "SWA4500": {
+    "dep": "KMCC"
+  },
+  "NSZ3731": {
+    "arr": "ESHM"
+  },
+  "PAL311": {
+    "dep": "VHST"
+  },
+  "VOI5750": {
+    "arr": "KRND"
+  },
+  "APG316": {
+    "dep": "RPLL"
+  },
+  "VJA60": {
+    "dep": "KSJC"
+  },
+  "T7AIRX": {
+    "dep": "ESSB"
+  },
+  "EJA409": {
+    "dep": "KRNT"
+  },
+  "N406JA": {
+    "dep": "KBJC"
+  },
+  "UAL375": {
+    "dep": "KTEB"
+  },
+  "AAL2488": {
+    "arr": "KUZA"
+  },
+  "SKW5038": {
+    "dep": "KDEN"
+  },
+  "EZY64GJ": {
+    "dep": "LKVO"
+  },
+  "CLX92": {
+    "arr": "EGVT"
+  },
+  "SJX706": {
+    "arr": "RCPO"
+  },
+  "TGTAP": {
+    "arr": "MGGT"
+  },
+  "N361CE": {
+    "dep": "KBVS"
+  },
+  "ABF9": {
+    "arr": "EGLF"
+  },
+  "ENY3881": {
+    "dep": "KPWK"
+  },
+  "N1UL": {
+    "arr": "KCOS"
+  },
+  "SWA3043": {
+    "dep": "KCNO"
+  },
+  "LOG907": {
+    "dep": "EGPD"
+  },
+  "AAL1585": {
+    "arr": "KDPA"
+  },
+  "ZKNXJ": {
+    "dep": "NZAA"
+  },
+  "SWA209": {
+    "arr": "KEDC"
+  },
+  "DAL1447": {
+    "dep": "KSLC"
+  },
+  "CPA3273": {
+    "dep": "KHWO"
+  },
+  "UAL1782": {
+    "arr": "KDEN"
+  },
+  "BMA603": {
+    "arr": "CYTZ"
+  },
+  "AFL1414": {
+    "dep": "UUEE"
+  },
+  "MSC2911": {
+    "dep": "LFSB"
+  },
+  "DEAPR": {
+    "arr": "EDHL"
+  },
+  "JZA821": {
+    "arr": "KADW"
+  },
+  "SIA308": {
+    "arr": "EGLC"
+  },
+  "UAL2865": {
+    "arr": "KDEN"
+  },
+  "SKW4803": {
+    "dep": "KRAC"
+  },
+  "DAL2140": {
+    "arr": "KDWH"
+  },
+  "VOI141": {
+    "arr": "MMMX"
+  },
+  "UAL821": {
+    "dep": "VHST"
+  },
+  "GLO1161": {
+    "arr": "SBMT"
+  },
+  "RPA3618": {
+    "arr": "KUZA"
+  },
+  "EJA757": {
+    "arr": "KEFD"
+  },
+  "N363D": {
+    "arr": "KSGR"
+  },
+  "DAL1087": {
+    "dep": "KSLC"
+  },
+  "SWA2394": {
+    "dep": "KTOA"
+  },
+  "UAL1620": {
+    "arr": "KDPA"
+  },
+  "SWA547": {
+    "dep": "KSJC"
+  },
+  "N2024K": {
+    "dep": "KBIL"
+  },
+  "X283": {
+    "dep": "EIKN"
+  },
+  "SKW5460": {
+    "arr": "KPAO"
+  },
+  "ROU1970": {
+    "dep": "CYUL"
+  },
+  "THY093": {
+    "arr": "LTBA"
+  },
+  "EJA728": {
+    "dep": "KSLC"
+  },
+  "NKS252": {
+    "dep": "KEWR"
+  },
+  "UAL1481": {
+    "dep": "KDEN"
+  },
+  "DEMFG": {
+    "dep": "EDGY"
+  },
+  "XBMOT": {
+    "dep": "KPMP"
   }
 }

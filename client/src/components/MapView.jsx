@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath, splitPathAtIDL } from '../utils/flightUtils';
+import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath, splitPathAtIDL, normalizeLongitude } from '../utils/flightUtils';
 
 /**
  * MapView — 管理 Leaflet 地圖、飛機 markers、軌跡線、機場圖層
@@ -525,18 +525,30 @@ export default function MapView({
                 livePoints.push([livePlane.lat, livePlane.lng]);
             }
 
-            const trackSegments = splitPathAtIDL(livePoints);
+            // 預校準：如果段落大於 1 且第一段長度極短（雜訊），則過濾掉
+            let trackSegments = splitPathAtIDL(livePoints);
+            if (trackSegments.length > 1) {
+                trackSegments = trackSegments.filter(seg => seg.length > 1);
+                // [v2.5.4] 額外保險：如果段落之間其實距離很近，強行合併，防止 MultiPolyline 渲染 BUG
+                if (trackSegments.length > 1 && Math.abs(trackSegments[0][0][1] - trackSegments[1][0][1]) < 180) {
+                    trackSegments = [trackSegments.flat()];
+                }
+            }
+
             trackLineRef.current = L.polyline(trackSegments, {
                 color: '#FFDC00',
                 weight: 3,
-                opacity: 0.8,
+                opacity: 0.9,
                 dashArray: '10, 5',
                 lineCap: 'round',
             }).addTo(map);
 
+            // [v2.5.4] 嚴格互斥：如果有軌跡，徹底移除預計航線，而不僅是降透明度
             if (routeLineRef.current) {
-                trackLineRef.current.bringToFront();
+                map.removeLayer(routeLineRef.current);
+                routeLineRef.current = null;
             }
+            if (trackLineRef.current) trackLineRef.current.bringToFront();
         } else if (selectedIcao24 && flightHistoryRef?.current?.[selectedIcao24]) {
             // Client-Side History Fallback
             const history = flightHistoryRef.current[selectedIcao24];
@@ -612,17 +624,35 @@ export default function MapView({
                     }
                 }
 
-                // [V2.0.0] Real-time Track Appending ("Snake Appending")
+                // [v2.5.4] Robust Snake Appending
                 if (id === selectedIcao24 && trackLineRef.current && !plane.onGround && plane.velocity > 0) {
                     const latLngs = trackLineRef.current.getLatLngs();
                     if (latLngs.length > 0) {
-                        const lastPoint = latLngs[latLngs.length - 1];
-                        const currentPos = marker.getLatLng();
+                        // Normalize the current marker position for accurate track comparison
+                        const currentPos = {
+                            lat: marker.getLatLng().lat,
+                            lng: normalizeLongitude(marker.getLatLng().lng)
+                        };
 
-                        // 只在移動超過一定距離時才追加點 (例如 50 公尺)，避免因微小震動導致數組無限膨脹
-                        const distToLast = currentPos.distanceTo(lastPoint);
-                        if (distToLast > 50) {
-                            trackLineRef.current.addLatLng(currentPos);
+                        // Leaflet LatLng utility for distance
+                        const currentL = L.latLng(currentPos.lat, currentPos.lng);
+
+                        // 判定資料結構：如果是 MultiPolyline, getLatLngs() 返回 [ [p,p...], [p,p...] ]
+                        // 如果是 Polyline, 返回 [ p,p... ]
+                        const isMulti = Array.isArray(latLngs[0]);
+                        const lastSegment = isMulti ? latLngs[latLngs.length - 1] : latLngs;
+                        const lastPoint = lastSegment[lastSegment.length - 1];
+                        const lastL = L.latLng(lastPoint.lat, normalizeLongitude(lastPoint.lng));
+
+                        if (lastPoint && currentL.distanceTo(lastL) > 50) {
+                            if (isMulti) {
+                                // 深度拷貝最後一段，修改後重新設回，防止 Leaflet 渲染遺留
+                                const newLatLngs = [...latLngs];
+                                newLatLngs[newLatLngs.length - 1] = [...lastSegment, currentPos];
+                                trackLineRef.current.setLatLngs(newLatLngs);
+                            } else {
+                                trackLineRef.current.addLatLng(currentPos);
+                            }
                         }
                     }
                 }

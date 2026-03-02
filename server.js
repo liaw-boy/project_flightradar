@@ -27,6 +27,58 @@ app.use(express.static(path.join(__dirname, 'public-react'), {
 app.use(express.static(path.join(__dirname, 'public')));        // 舊版 HTML
 
 // ==========================================
+// [v2.5.2] 資料缺失日誌系統 (Data Deficiency Logging)
+// ==========================================
+const MISSING_DATA_FILE = path.join(__dirname, 'missing-data.json');
+let missingDataLog = {};
+
+function loadMissingDataLog() {
+    try {
+        if (fs.existsSync(MISSING_DATA_FILE)) {
+            missingDataLog = JSON.parse(fs.readFileSync(MISSING_DATA_FILE, 'utf8'));
+        }
+    } catch (e) { console.error('❌ [MISSING LOG] Load error:', e.message); }
+}
+
+function saveMissingDataLog() {
+    try {
+        fs.writeFileSync(MISSING_DATA_FILE, JSON.stringify(missingDataLog, null, 2));
+    } catch (e) { console.error('❌ [MISSING LOG] Save error:', e.message); }
+}
+
+function logMissingData(icao24, type, callsign = null) {
+    const key = icao24.toLowerCase();
+    if (!missingDataLog[key]) {
+        missingDataLog[key] = { icao24, missing: [], firstSeen: new Date().toISOString() };
+    }
+    if (callsign) missingDataLog[key].callsign = callsign;
+    if (!missingDataLog[key].missing.includes(type)) {
+        missingDataLog[key].missing.push(type);
+        missingDataLog[key].lastAttempt = new Date().toISOString();
+        saveMissingDataLog();
+        console.log(`📝 [MISSING LOG] Recorded ${type} for ${icao24}`);
+    }
+}
+
+function resolveMissingData(icao24, type) {
+    const key = icao24.toLowerCase();
+    if (missingDataLog[key]) {
+        missingDataLog[key].missing = missingDataLog[key].missing.filter(m => m !== type);
+        if (missingDataLog[key].missing.length === 0) {
+            delete missingDataLog[key];
+            console.log(`✅ [MISSING LOG] Resolved all for ${icao24}`);
+        }
+        saveMissingDataLog();
+    }
+}
+
+loadMissingDataLog();
+
+app.get('/api/admin/missing-data', (req, res) => {
+    res.json(Object.values(missingDataLog));
+});
+
+// ==========================================
 // 快取系統
 // ==========================================
 const cache = new Map();
@@ -529,48 +581,6 @@ app.get('/api/planes/bbox', (req, res) => {
     });
 });
 
-// 取得飛行軌跡（代理 OpenSky /tracks/all）
-app.get('/api/tracks', async (req, res) => {
-    const { icao24 } = req.query;
-
-    if (!icao24) {
-        return res.status(400).json({ error: 'Missing required parameter: icao24' });
-    }
-
-    const cacheKey = `track_${icao24}`;
-    const cached = getCached(cacheKey);
-    if (cached) {
-        console.log(`✅ [CACHE HIT] Track: ${icao24}`);
-        return res.json(cached);
-    }
-
-    try {
-        const url = `https://opensky-network.org/api/tracks/all?icao24=${icao24}&time=0`;
-
-        console.log(`🌐 [API CALL] Fetching track for ${icao24}...`);
-        const headers = await getAuthHeaders();
-        const response = await fetch(url, {
-            headers,
-            signal: AbortSignal.timeout(15000)
-        });
-
-        if (!response.ok) {
-            if (response.status === 404) {
-                return res.status(404).json({ error: 'Track not found for this aircraft' });
-            }
-            return res.status(response.status).json({ error: `OpenSky API error: ${response.status}` });
-        }
-
-        const data = await response.json();
-        setCache(cacheKey, data);
-        console.log(`📦 [CACHED] Track: ${icao24} | Points: ${data.path ? data.path.length : 0}`);
-
-        res.json(data);
-    } catch (error) {
-        console.error(`❌ [FETCH ERROR] Track ${icao24}: ${error.message}`);
-        res.status(500).json({ error: 'Failed to fetch track data', detail: error.message });
-    }
-});
 
 // ==========================================
 // 飛機 Metadata（機型/製造商/註冊號）— 永久快取與靜態字典
@@ -630,6 +640,7 @@ app.get('/api/metadata/:icao24', async (req, res) => {
             // 記錄為「無資料」避免重複查詢
             aircraftMetadataCache[icao24] = { icao24, noData: true };
             saveMetadataCache();
+            logMissingData(icao24, 'metadata'); // [v2.5.2]
             return res.json(aircraftMetadataCache[icao24]);
         }
 
@@ -650,6 +661,7 @@ app.get('/api/metadata/:icao24', async (req, res) => {
 
         aircraftMetadataCache[icao24] = metadata;
         saveMetadataCache();
+        resolveMissingData(icao24, 'metadata'); // [v2.5.2]
         console.log(`📦 [METADATA] Cached: ${icao24} = ${metadata.typecode} ${metadata.model}`);
 
         res.json(metadata);
@@ -713,10 +725,12 @@ app.post('/api/metadata/batch', async function (req, res) {
                     built: data.built || '',
                     categoryDescription: data.categoryDescription || ''
                 };
+                resolveMissingData(icao24, 'metadata'); // [v2.5.2]
                 fetched++;
                 apiStats.lastSuccessTime = new Date().toISOString();
             } else {
                 aircraftMetadataCache[icao24] = { icao24: icao24, noData: true };
+                logMissingData(icao24, 'metadata'); // [v2.5.2]
             }
         } catch (e) {
             aircraftMetadataCache[icao24] = { icao24: icao24, noData: true };
@@ -937,7 +951,8 @@ app.get('/api/route/:icao24', async (req, res) => {
         const trackData = await trackRes.json();
 
         if (trackData && trackData.path && trackData.path.length > 0) {
-            const startPoint = trackData.path[0]; // [time, lat, lng, alt, heading, onGround]
+            resolveMissingData(icao24, 'route'); // [v2.5.2]
+            const startPoint = trackData.path[0];
             const startLat = startPoint[1];
             const startLng = startPoint[2];
 
@@ -1019,7 +1034,14 @@ app.get('/api/tracks', async (req, res) => {
             return res.json({ icao24, path: [], noData: true, error: msg });
         }
 
+        const data = await response.json();
         const path = data.path || [];
+
+        if (path.length > 0) {
+            resolveMissingData(icao24, 'track');
+        } else {
+            logMissingData(icao24, 'track');
+        }
 
         // [v2.5.0] 預防長直線：由下而上（從最新點往回查）偵測時間巨大斷層
         // 如果兩個點之間隔了 > 20 分鐘 (1200s) 或發生了極速移動，代表是不同航段
@@ -1123,9 +1145,7 @@ app.get('/api/metar', (req, res) => {
     res.json(metarCache.data);
 });
 
-// ==========================================
-// SPA Fallback — 未匹配的路由指向 React 前端
-// ==========================================
+// [v2.5.2] SPA Fallback — 未匹配的路由指向 React 前端
 app.use((req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
