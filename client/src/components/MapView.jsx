@@ -583,29 +583,31 @@ export default function MapView({
                 if (plane.onGround || plane.velocity <= 0 || plane.altitude === 'GROUND') {
                     // 地面目標：一般 Lerp (網路校正插值)
                     if (plane.targetLat && plane.targetLng) {
-                        const lerpSpeed = 0.08;
+                        const lerpSpeed = 0.1;
                         const newLat = currentLatLng.lat + (plane.targetLat - currentLatLng.lat) * lerpSpeed;
                         const newLng = currentLatLng.lng + (plane.targetLng - currentLatLng.lng) * lerpSpeed;
                         marker.setLatLng([newLat, newLng]);
                     }
                 } else {
-                    // [V2.0.0] 微觀推算 (Dead Reckoning)：基於速度和航向的持續物理運動
+                    // [V2.5.1] 微觀推算 (Dead Reckoning) 強化
+                    // 首先基於上一次的位置進行物理位移預測
                     const nextPos = predictPosition(currentLatLng.lat, currentLatLng.lng, plane.velocity, plane.heading, deltaTimeSec);
 
-                    // 網路位置與推算位置的融合 (Smooth catching up)
-                    // 當前端收到 API 的新 targetLat 時，我們將當前位置慢慢向 Target 靠攏，但同時保持向前的運動趨勢
+                    // 如果有來自 API 的新座標 (targetLat)，執行 LERP 校正
                     if (plane.targetLat && plane.targetLng) {
-                        const distToTargetSq = Math.pow(plane.targetLat - currentLatLng.lat, 2) + Math.pow(plane.targetLng - currentLatLng.lng, 2);
+                        const distToTargetSq = Math.pow(plane.targetLat - nextPos.lat, 2) + Math.pow(plane.targetLng - nextPos.lng, 2);
 
-                        // 如果誤差超過一定範圍 (例如斷線太久被拉回)，加快校正速度，否則平滑融入
-                        const lerpFactor = distToTargetSq > 0.0001 ? 0.3 : 0.05;
-
-                        const correctedLat = nextPos.lat + (plane.targetLat - nextPos.lat) * lerpFactor;
-                        const correctedLng = nextPos.lng + (plane.targetLng - nextPos.lng) * lerpFactor;
-
-                        marker.setLatLng([correctedLat, correctedLng]);
+                        // 混合因子：0.1 代表每幀向真實位置靠近 10%
+                        // 如果誤差過大 (> 0.5度)，直接跳轉以防飛機飛出地圖
+                        if (distToTargetSq > 0.25) {
+                            marker.setLatLng([plane.targetLat, plane.targetLng]);
+                        } else {
+                            const correctedLat = nextPos.lat + (plane.targetLat - nextPos.lat) * 0.1;
+                            const correctedLng = nextPos.lng + (plane.targetLng - nextPos.lng) * 0.1;
+                            marker.setLatLng([correctedLat, correctedLng]);
+                        }
                     } else {
-                        // 純靠慣性飛行
+                        // 無新資料時，純慣性飛行
                         marker.setLatLng([nextPos.lat, nextPos.lng]);
                     }
                 }
