@@ -44,7 +44,7 @@ export default function Dashboard({
             <div className="title-container">
                 <div className="brand-logo">
                     <div className="live-dot" />
-                    <h2>AEROSTRAT <span className="brand-suffix">RADAR</span> <span className="version-label">v2.7.0</span></h2>
+                    <h2>AEROSTRAT <span className="brand-suffix">RADAR</span> <span className="version-label">v2.8.2</span></h2>
                 </div>
                 <button className="lang-toggle" onClick={toggleLang}>
                     {lang === 'en' ? 'EN/中' : '中/EN'}

@@ -82,7 +82,7 @@ app.get('/api/admin/missing-data', (req, res) => {
 // 快取系統
 // ==========================================
 const cache = new Map();
-const CACHE_TTL = 8000; // 8 秒快取（配合前端快速輪詢）
+const CACHE_TTL = 20000; // 20 秒快取 (配合前端 20s 輪詢)
 
 function getCached(key) {
     if (cache.has(key)) {
@@ -139,7 +139,11 @@ const QUOTA_CACHE_FILE = path.join(__dirname, 'quota-cache.json');
 
 function saveQuotaCache() {
     try {
-        fs.writeFileSync(QUOTA_CACHE_FILE, JSON.stringify(apiStats.accounts, null, 2));
+        const payload = {
+            date: new Date().toISOString().split('T')[0], // YYYY-MM-DD (UTC)
+            accounts: apiStats.accounts
+        };
+        fs.writeFileSync(QUOTA_CACHE_FILE, JSON.stringify(payload, null, 2));
     } catch (e) {
         console.error('❌ [QUOTA] Failed to save quota cache:', e.message);
     }
@@ -149,20 +153,30 @@ function loadQuotaCache() {
     try {
         if (fs.existsSync(QUOTA_CACHE_FILE)) {
             const saved = JSON.parse(fs.readFileSync(QUOTA_CACHE_FILE, 'utf8'));
-            // 根據使用者名稱比對，恢復狀態
-            apiStats.accounts.forEach(acc => {
-                const found = saved.find(s => s.user === acc.user);
-                if (found) {
-                    acc.remainingCredits = found.remainingCredits;
-                    acc.unlockTime = found.unlockTime;
-                    acc.rateLimits = found.rateLimits || 0;
-                }
-            });
-            console.log(`💾 [QUOTA] Loaded persistent stats for ${apiStats.accounts.length} accounts.`);
+            const savedAccounts = Array.isArray(saved) ? saved : (saved.accounts || []);
+            const savedDate = Array.isArray(saved) ? null : saved.date;
+            const currentDate = new Date().toISOString().split('T')[0];
+
+            // 如果是舊格式或同一天，則載入
+            if (savedDate === currentDate || !savedDate) {
+                apiStats.accounts.forEach(acc => {
+                    const found = savedAccounts.find(s => s.user === acc.user);
+                    if (found) {
+                        acc.remainingCredits = found.remainingCredits;
+                        acc.unlockTime = found.unlockTime;
+                        acc.rateLimits = found.rateLimits || 0;
+                    }
+                });
+                console.log(`💾 [QUOTA] Loaded persistent stats for ${apiStats.accounts.length} accounts.`);
+                return savedDate === currentDate; // 回傳是否為當天
+            } else {
+                console.log(`📅 [QUOTA] Cache is from ${savedDate}, current is ${currentDate}. Forcing reset.`);
+            }
         }
     } catch (e) {
         console.error('❌ [QUOTA] Failed to load quota cache:', e.message);
     }
+    return false;
 }
 
 /**
@@ -496,22 +510,22 @@ async function fetchGlobalPlanes() {
     isFetchingGlobal = false;
 }
 
-// 啟動 60 秒全球資料輪詢機制 (User Specified: 60s)
-setInterval(fetchGlobalPlanes, 60000);
+// 啟動 20 秒全球資料輪詢機制 (配合 CACHE_TTL=20s)
+setInterval(fetchGlobalPlanes, 20000);
 // 啟動時讀取快取並初始化
-loadQuotaCache();
-initializeAccountQuotas();
+const isFreshQuota = loadQuotaCache();
+initializeAccountQuotas(isFreshQuota);
 
 /**
- * 啟動預熱：若帳號沒有額度紀錄，先各戳一次 API 建立狀態
+ * 啟動預熱：若帳號沒有額度紀錄，或跨日更新，先各戳一次 API 建立狀態
  */
-async function initializeAccountQuotas() {
+async function initializeAccountQuotas(isFreshQuota) {
     console.log(`🌐 [QUOTA] Initializing quotas for ${ACCOUNTS.length} accounts...`);
     for (let i = 0; i < ACCOUNTS.length; i++) {
         const acc = apiStats.accounts[i];
-        // 如果本地已經有額度紀錄，就不再額外請求 (User Request: skip if record exists)
-        if (acc.remainingCredits !== null) {
-            console.log(`✅ [QUOTA] Account ${acc.user} has cached quota: ${acc.remainingCredits}`);
+        // 如果本地已經有今日的額度紀錄，就不再額外請求
+        if (isFreshQuota && acc.remainingCredits !== null) {
+            console.log(`✅ [QUOTA] Account ${acc.user} has fresh cached quota: ${acc.remainingCredits}`);
             continue;
         }
 
@@ -577,7 +591,7 @@ app.get('/api/planes/bbox', (req, res) => {
         states: filteredStates,
         totalGlobal: globalPlanesCache.states.length,
         stats: apiStats,
-        recommendedInterval: 25
+        recommendedInterval: calculateRecommendedInterval()
     });
 });
 
@@ -1204,7 +1218,7 @@ app.listen(PORT, () => {
     console.log('║   ✈️  AEROSTRAT Surveillance Server      ║');
     console.log(`║   🌐 http://localhost:${PORT}               ║`);
     console.log(`║   📁 Serving: ./public-react             ║`);
-    console.log(`║   🔐 Version: v2.7.0                     ║`);
+    console.log(`║   🔐 Version: v2.8.2                     ║`);
     console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
     console.log('╚══════════════════════════════════════════╝');
     console.log('');

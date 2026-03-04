@@ -212,7 +212,7 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                         <DataRow label={t('squawk')} value={plane.squawk || '--'} />
                         <DataRow label={t('spiLabel')} value={plane.spi ? t('spiActive') : t('spiNormal')} valueClass={plane.spi ? 'spi-active' : ''} />
                         <DataRow label={t('lastContact')} value={contactTime} />
-                        <DataRow label={t('dataAge')} value={`${dataAge}s ago`} />
+                        <DataRow label={t('dataAge')} value={`${dataAge}s${t('dataAgeSuffix')}`} />
                     </div>
                 )}
 

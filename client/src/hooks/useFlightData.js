@@ -8,7 +8,7 @@ import { parseOpenSkyData } from '../utils/flightUtils';
  * - 從 /api/stats 拉取 API 使用統計
  * - 管理 planesDict、flightHistory
  */
-export function useFlightData(mapRef, showNotification) {
+export function useFlightData(mapRef) {
     const [planesDict, setPlanesDict] = useState({});
     const [planeCount, setPlaneCount] = useState(0);
     const [airCount, setAirCount] = useState(0);
@@ -19,14 +19,14 @@ export function useFlightData(mapRef, showNotification) {
     const [latency, setLatency] = useState(null);
     const [lastUpdateTime, setLastUpdateTime] = useState(null);
     const [apiStats, setApiStats] = useState(null);
-    const [throttleSeconds, setThrottleSeconds] = useState(30);
+    const [throttleSeconds, setThrottleSeconds] = useState(20);
 
     const flightHistoryRef = useRef({});
     const isFetchingRef = useRef(false);
     const planesDictRef = useRef({});
     const apiStatusRef = useRef('INIT');
     const globalLastUpdateRef = useRef(0);
-    const nextScheduledFetchRef = useRef(Date.now() + 60000); // 追蹤下一次預約自動更新的時間
+    const nextScheduledFetchRef = useRef(Date.now() + 20000); // 追蹤下一次預約自動更新的時間
 
     // 保持 ref 和 state 同步
     useEffect(() => {
@@ -134,11 +134,12 @@ export function useFlightData(mapRef, showNotification) {
 
             // 如果是自動刷新觸發的，就設定下一預約更新時間並排程
             if (isAutoRefresh) {
-                nextScheduledFetchRef.current = Date.now() + 60000;
-                setThrottleSeconds(60);
+                const interval = (data.recommendedInterval || 20) * 1000;
+                nextScheduledFetchRef.current = Date.now() + interval;
+                setThrottleSeconds(Math.round(interval / 1000));
                 setTimeout(() => {
                     fetchPlanes(true);
-                }, 60000);
+                }, interval);
             }
 
             isFetchingRef.current = false;

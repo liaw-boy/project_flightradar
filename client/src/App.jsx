@@ -4,10 +4,8 @@ import Dashboard from './components/Dashboard';
 import Sidebar from './components/Sidebar';
 import SearchBar from './components/SearchBar';
 import FilterPanel from './components/FilterPanel';
-import NotificationContainer from './components/NotificationContainer';
 import MapView from './components/MapView';
 import { useFlightData } from './hooks/useFlightData';
-import { useNotification } from './hooks/useNotification';
 import { useI18n } from './hooks/useI18n';
 import { logToServer } from './utils/logger';
 import './App.css';
@@ -56,7 +54,6 @@ export default function App() {
     }, []);
 
     const mapInstanceRef = useRef(null);
-    const { notifications, showNotification } = useNotification();
     const {
         planesDict,
         planeCount,
@@ -72,7 +69,7 @@ export default function App() {
         fetchPlanes,
         fetchTrack,
         flightHistoryRef,
-    } = useFlightData(mapInstanceRef, showNotification);
+    } = useFlightData(mapInstanceRef);
 
     // Initial URL Params parsing
     const initializedUrlRef = useRef(false);
@@ -92,7 +89,6 @@ export default function App() {
     useEffect(() => {
         const timer = setTimeout(() => {
             setLoading(false);
-            showNotification('🚀 雷達系統已啟動', 'info');
         }, 1500);
         return () => clearTimeout(timer);
     }, []);
@@ -134,8 +130,6 @@ export default function App() {
             const points = await fetchTrack(icao24, plane.lastContact);
             setTrackPoints(points);
 
-            // showNotification(`✈️ ${plane.callsign}`, 'info');
-
             // 背景取得 metadata + route (不阻塞 UI)
             fetch(`/api/metadata/${icao24}`)
                 .then(r => r.json())
@@ -159,7 +153,7 @@ export default function App() {
             url.searchParams.set('icao', icao24);
             window.history.replaceState({}, '', url);
         },
-        [fetchTrack, showNotification]
+        [fetchTrack]
     );
 
     // 取消選擇
@@ -260,8 +254,6 @@ export default function App() {
                     onClose={handleDeselectPlane}
                 />
             )}
-
-            <NotificationContainer notifications={notifications} />
         </div>
     );
 }

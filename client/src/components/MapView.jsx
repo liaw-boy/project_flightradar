@@ -327,25 +327,27 @@ export default function MapView({
         [filters, bounds, selectedIcao24]
     );
 
-    // ===== 同步 markers 到 planesDict =====
+    // [v2.8.0] Keep a ref of planesDict for the persistent animation loop
+    const planesDictRef = useRef(planesDict);
+    useEffect(() => {
+        planesDictRef.current = planesDict;
+    }, [planesDict]);
+
+    // ===== 同步 markers 到 planesDict (v2.8.0: Optimized Sync without Jumps) =====
     useEffect(() => {
         const map = mapRef.current;
         if (!map) return;
 
         const zoom = map.getZoom();
         const totalRawCount = Object.keys(planesDict).length;
-
-        // [v2.3.7] 動態上限與節流因子
-        // 調高節流門檻：當全域大於 12000 台飛機時才開始顯著節流
         const dynamicThrottle = totalRawCount > 12000 ? Math.max(0.4, 12000 / totalRawCount) : 1.0;
 
-        // 根據 zoom 設定 marker 上限 (階梯式平滑化)
         const MAX_MARKERS = zoom <= 4 ? 300 :
             zoom <= 5 ? 800 :
                 zoom <= 6 ? 1500 :
                     zoom <= 7 ? 3500 :
                         zoom <= 8 ? 6000 : 10000;
-        const showTooltips = zoom >= 6; // 低縮放隱藏 tooltip 以提升效能
+        const showTooltips = zoom >= 6;
 
         const currentIds = new Set(Object.keys(planesDict));
         const markerIds = new Set(Object.keys(markersRef.current));
@@ -358,49 +360,30 @@ export default function MapView({
             }
         });
 
-        // 篩選通過 filter 的飛機列表
+        // 篩選通過 filter 的飛機
         const filteredPlanes = [];
         let validRegex = null;
         if (filters.regexFilter) {
-            try {
-                validRegex = new RegExp(filters.regexFilter, 'i');
-            } catch (e) {
-                console.warn('Invalid Regex:', e.message);
-            }
+            try { validRegex = new RegExp(filters.regexFilter, 'i'); } catch (e) { }
         }
 
         currentIds.forEach((id) => {
             const plane = planesDict[id];
-
-            // Regex Check (If active)
             if (validRegex) {
-                if (!validRegex.test(plane.callsign || '') &&
-                    !validRegex.test(plane.icao24 || '') &&
-                    !validRegex.test(plane.category || '')) {
-                    return;
-                }
+                if (!validRegex.test(plane.callsign || '') && !validRegex.test(plane.icao24 || '') && !validRegex.test(plane.category || '')) return;
             }
-
-            // [v2.3.6] 將所有過濾邏輯統一到 shouldShowPlane 函數中
-            if (shouldShowPlane(plane, dynamicThrottle)) {
-                filteredPlanes.push({ id, plane });
-            }
+            if (shouldShowPlane(plane, dynamicThrottle)) filteredPlanes.push({ id, plane });
         });
 
-        // 如果飛機數超過上限，優先保留重要飛機
+        // 優先級排序與上限控制
         let visibleSet;
         const totalInView = filteredPlanes.length;
         if (totalInView > MAX_MARKERS) {
             filteredPlanes.sort((a, b) => {
-                // 選中飛機最優先
                 if (a.id === selectedIcao24) return -1;
                 if (b.id === selectedIcao24) return 1;
-                // 緊急優先
                 if (a.plane.isEmergency && !b.plane.isEmergency) return -1;
-                if (!a.plane.isEmergency && b.plane.isEmergency) return 1;
-                // 空中 > 地面
                 if (!a.plane.onGround && b.plane.onGround) return -1;
-                if (a.plane.onGround && !b.plane.onGround) return 1;
                 return 0;
             });
             visibleSet = new Set(filteredPlanes.slice(0, MAX_MARKERS).map(p => p.id));
@@ -408,14 +391,8 @@ export default function MapView({
             visibleSet = new Set(filteredPlanes.map(p => p.id));
         }
 
-        // [v2.3.8] 回報資源使用量
         if (onUsageUpdate) {
-            onUsageUpdate({
-                visibleCount: visibleSet.size,
-                totalInView: totalInView,
-                renderLimit: MAX_MARKERS,
-                throttleFactor: dynamicThrottle
-            });
+            onUsageUpdate({ visibleCount: visibleSet.size, totalInView, renderLimit: MAX_MARKERS, throttleFactor: dynamicThrottle });
         }
 
         // 移除超出上限或不通過篩選的 marker
@@ -426,11 +403,9 @@ export default function MapView({
             }
         });
 
-        // 新增或更新 markers
+        // 新增或更新 markers 性質 (但不跳轉座標)
         visibleSet.forEach((id) => {
             const plane = planesDict[id];
-
-            // Bounds check — 不在視野內的隱藏
             let inBounds = true;
             if (bounds) {
                 const lat = parseFloat(plane.lat);
@@ -450,49 +425,22 @@ export default function MapView({
             let tooltipHtml = '';
             if (showTooltips) {
                 const logoUrl = getAirlineLogoUrl(plane.callsign);
-                const logoHtml = logoUrl
-                    ? `<img src="${logoUrl}" onerror="this.style.display='none'" class="airline-logo">`
-                    : '';
-                tooltipHtml = `<div class="tactical-label css-tooltip">${logoHtml}<span>${plane.callsign}</span></div>`;
+                tooltipHtml = `<div class="tactical-label css-tooltip">${logoUrl ? `<img src="${logoUrl}" onerror="this.style.display='none'" class="airline-logo">` : ''}<span>${plane.callsign}</span></div>`;
             }
 
-            const iconHtml = `
-                <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">
-                    ${svg}
-                    ${tooltipHtml}
-                </div>
-            `;
-
-            const icon = L.divIcon({
-                html: iconHtml,
-                className: `plane-icon ${extraClass}`,
-                iconSize: [size, size],
-                iconAnchor: [size / 2, size / 2],
-            });
+            const iconHtml = `<div style="position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">${svg}${tooltipHtml}</div>`;
+            const icon = L.divIcon({ html: iconHtml, className: `plane-icon ${extraClass}`, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
 
             if (markersRef.current[id]) {
-                markersRef.current[id].setLatLng([plane.lat, plane.lng]);
-
-                // Only update the icon if the HTML actually changed.
-                // This preserves DOM state (like standard CSS :hover) and prevents tooltips from sticking.
+                // [v2.8.0] CRITICAL: DO NOT setLatLng here for existing markers to prevent jumps.
+                // The position is managed smoothly by the animation loop.
                 const oldHtml = markersRef.current[id].options.icon?.options?.html;
-                if (oldHtml !== iconHtml) {
-                    markersRef.current[id].setIcon(icon);
-                }
-
+                if (oldHtml !== iconHtml) markersRef.current[id].setIcon(icon);
                 const el = markersRef.current[id].getElement();
                 if (el) el.style.display = inBounds ? '' : 'none';
             } else if (inBounds) {
                 const marker = L.marker([plane.lat, plane.lng], { icon }).addTo(map);
-
-                marker.on('click', (e) => {
-                    L.DomEvent.stopPropagation(e);
-                    onSelectPlane(id, plane);
-                });
-
-                // [v2.6.5] No bindTooltip here to avoid persistent/redundant labels after click.
-                // The hover status is handled cleanly by CSS (.css-tooltip in iconHtml).
-
+                marker.on('click', (e) => { L.DomEvent.stopPropagation(e); onSelectPlane(id, plane); });
                 markersRef.current[id] = marker;
             }
         });
@@ -503,104 +451,69 @@ export default function MapView({
         const map = mapRef.current;
         if (!map) return;
 
-        // 1. 清除舊圖層
         if (trackLineRef.current) map.removeLayer(trackLineRef.current);
         if (routeLineRef.current) map.removeLayer(routeLineRef.current);
         trackLineRef.current = null;
         routeLineRef.current = null;
 
-        const getDistSq = (p1, p2) => Math.pow(p1[0] - p2[0], 2) + Math.pow(p1[1] - p2[1], 2);
-
-        // A. 繪製「預計航線」 (Theoretical Route Path - Bottom Layer)
         if (selectedRoute && selectedRoute.depCoord && selectedRoute.arrCoord) {
-            const pathPoints = getGreatCirclePath(
-                [selectedRoute.depCoord.lat, selectedRoute.depCoord.lng],
-                [selectedRoute.arrCoord.lat, selectedRoute.arrCoord.lng]
-            );
+            const pathPoints = getGreatCirclePath([selectedRoute.depCoord.lat, selectedRoute.depCoord.lng], [selectedRoute.arrCoord.lat, selectedRoute.arrCoord.lng]);
             const routeSegments = splitPathAtIDL(pathPoints);
-            routeLineRef.current = L.polyline(routeSegments, {
-                color: '#94a3b8', // Slate-400
-                weight: 2,
-                opacity: 0.5,
-                dashArray: '5, 5',
-                interactive: false
-            }).addTo(map);
+            routeLineRef.current = L.polyline(routeSegments, { color: '#94a3b8', weight: 2, opacity: 0.5, dashArray: '5, 5', interactive: false }).addTo(map);
         }
 
-        // B. 繪製「實際軌跡」 (Actual Track - Top Layer)
         if (trackPoints && trackPoints.length > 1) {
             const livePoints = [...trackPoints];
             if (selectedIcao24 && planesDict[selectedIcao24]) {
                 const livePlane = planesDict[selectedIcao24];
-                const trackEnd = livePoints[livePoints.length - 1];
-
-                // 擴展 livePoints，但避免因座標突變產生長線 (500km 限制已由 splitPathAtIDL 輔助處理)
                 livePoints.push([livePlane.lat, livePlane.lng]);
             }
 
-            // 預校準：如果段落大於 1 且第一段長度極短（雜訊），則過濾掉
             let trackSegments = splitPathAtIDL(livePoints);
             if (trackSegments.length > 1) {
                 trackSegments = trackSegments.filter(seg => seg.length > 1);
-                // [v2.5.4] 額外保險：如果段落之間其實距離很近，強行合併，防止 MultiPolyline 渲染 BUG
                 if (trackSegments.length > 1 && Math.abs(trackSegments[0][0][1] - trackSegments[1][0][1]) < 180) {
                     trackSegments = [trackSegments.flat()];
                 }
             }
 
-            trackLineRef.current = L.polyline(trackSegments, {
-                color: '#22d3ee', // Cyan-400
-                weight: 3,
-                opacity: 0.9,
-                dashArray: '10, 5',
-                lineCap: 'round',
-            }).addTo(map);
-
-            // [v2.5.4] 嚴格互斥：如果有軌跡，徹底移除預計航線，而不僅是降透明度
-            if (routeLineRef.current) {
-                map.removeLayer(routeLineRef.current);
-                routeLineRef.current = null;
-            }
+            trackLineRef.current = L.polyline(trackSegments, { color: '#22d3ee', weight: 3, opacity: 0.9, dashArray: '10, 5', lineCap: 'round' }).addTo(map);
+            if (routeLineRef.current) { map.removeLayer(routeLineRef.current); routeLineRef.current = null; }
             if (trackLineRef.current) trackLineRef.current.bringToFront();
         } else if (selectedIcao24 && flightHistoryRef?.current?.[selectedIcao24]) {
-            // Client-Side History Fallback
             const history = flightHistoryRef.current[selectedIcao24];
             if (history.length > 1) {
                 const points = history.map(p => [p[1], p[2]]);
-                if (planesDict[selectedIcao24]) {
-                    points.push([planesDict[selectedIcao24].lat, planesDict[selectedIcao24].lng]);
-                }
+                if (planesDict[selectedIcao24]) points.push([planesDict[selectedIcao24].lat, planesDict[selectedIcao24].lng]);
                 const trackSegments = splitPathAtIDL(points);
-                trackLineRef.current = L.polyline(trackSegments, {
-                    color: '#f59e0b', // Amber-500
-                    weight: 3,
-                    opacity: 0.8,
-                    dashArray: '10, 5',
-                    lineCap: 'round',
-                }).addTo(map);
+                trackLineRef.current = L.polyline(trackSegments, { color: '#f59e0b', weight: 3, opacity: 0.8, dashArray: '10, 5', lineCap: 'round' }).addTo(map);
             }
         }
     }, [trackPoints, planesDict, selectedIcao24, selectedRoute]);
 
-    // ===== 選中飛機時移動視角 =====
+    // ===== 選中飛機時移動視角 (v2.8.0: Follow current marker position, not just API data) =====
     useEffect(() => {
         const map = mapRef.current;
-        if (!map || !selectedIcao24 || !planesDict[selectedIcao24]) return;
-
-        const plane = planesDict[selectedIcao24];
-        map.setView([plane.lat, plane.lng], Math.max(map.getZoom(), 10), { animate: true });
+        if (!map || !selectedIcao24 || !markersRef.current[selectedIcao24]) return;
+        const marker = markersRef.current[selectedIcao24];
+        map.setView(marker.getLatLng(), Math.max(map.getZoom(), 10), { animate: true });
     }, [selectedIcao24]);
 
-    // ===== 動畫引擎：位置插值與微觀推算 (Dead Reckoning) =====
+    // ===== 動畫引擎：位置插值與微觀推算 (Dead Reckoning) [v2.8.0 Persistent Loop] =====
     useEffect(() => {
+        const map = mapRef.current;
+        if (!map) return;
         let lastTime = performance.now();
 
         function animate(time) {
             const deltaTimeSec = (time - lastTime) / 1000;
             lastTime = time;
 
+            // Use planesDictRef to avoid loop resets
+            const currentPlanes = planesDictRef.current || {};
+
             Object.entries(markersRef.current).forEach(([id, marker]) => {
-                const plane = planesDict[id];
+                const plane = currentPlanes[id];
                 if (!plane) return;
 
                 const currentLatLng = marker.getLatLng();
@@ -608,77 +521,65 @@ export default function MapView({
                 if (plane.onGround || plane.velocity <= 0 || plane.altitude === 'GROUND') {
                     // 地面目標：一般 Lerp (網路校正插值)
                     if (plane.targetLat && plane.targetLng) {
-                        const lerpSpeed = 0.1;
+                        const lerpSpeed = 0.05; // Slightly slower for ground targets to avoid jitters
                         const newLat = currentLatLng.lat + (plane.targetLat - currentLatLng.lat) * lerpSpeed;
                         const newLng = currentLatLng.lng + (plane.targetLng - currentLatLng.lng) * lerpSpeed;
                         marker.setLatLng([newLat, newLng]);
                     }
                 } else {
-                    // [V2.5.1] 微觀推算 (Dead Reckoning) 強化
-                    // 首先基於上一次的位置進行物理位移預測
+                    // [V2.8.0] 微觀推算 (Dead Reckoning) 2.0
+                    // 1. 基於物理向量推測下一位置 (恆定平滑移動)
                     const nextPos = predictPosition(currentLatLng.lat, currentLatLng.lng, plane.velocity, plane.heading, deltaTimeSec);
 
-                    // 如果有來自 API 的新座標 (targetLat)，執行 LERP 校正
+                    // 2. 基於 API 目標點進行微妙校準 (LERP)
                     if (plane.targetLat && plane.targetLng) {
+                        // 混合因子：0.02 (每幀向真實位置偏移 2%)，確保視覺平滑且逐漸收斂
                         const distToTargetSq = Math.pow(plane.targetLat - nextPos.lat, 2) + Math.pow(plane.targetLng - nextPos.lng, 2);
 
-                        // 混合因子：0.1 代表每幀向真實位置靠近 10%
-                        // 如果誤差過大 (> 0.5度)，直接跳轉以防飛機飛出地圖
-                        if (distToTargetSq > 0.25) {
+                        // 如果誤差過大 (> 0.2度)，代表座標突變（例如跳躍或回溯），則執行保護性跳轉
+                        if (distToTargetSq > 0.04) {
                             marker.setLatLng([plane.targetLat, plane.targetLng]);
                         } else {
-                            const correctedLat = nextPos.lat + (plane.targetLat - nextPos.lat) * 0.1;
-                            const correctedLng = nextPos.lng + (plane.targetLng - nextPos.lng) * 0.1;
+                            const correctedLat = nextPos.lat + (plane.targetLat - nextPos.lat) * 0.02;
+                            const correctedLng = nextPos.lng + (plane.targetLng - nextPos.lng) * 0.02;
                             marker.setLatLng([correctedLat, correctedLng]);
                         }
                     } else {
-                        // 無新資料時，純慣性飛行
+                        // 無新資料時，純慣性物理推導
                         marker.setLatLng([nextPos.lat, nextPos.lng]);
                     }
                 }
 
-                // [v2.5.4] Robust Snake Appending
+                // 軌跡更新 (保持連貫性)
                 if (id === selectedIcao24 && trackLineRef.current && !plane.onGround && plane.velocity > 0) {
                     const latLngs = trackLineRef.current.getLatLngs();
                     if (latLngs.length > 0) {
-                        // Normalize the current marker position for accurate track comparison
-                        const currentPos = {
-                            lat: marker.getLatLng().lat,
-                            lng: normalizeLongitude(marker.getLatLng().lng)
-                        };
-
-                        // Leaflet LatLng utility for distance
+                        const currentPos = { lat: marker.getLatLng().lat, lng: normalizeLongitude(marker.getLatLng().lng) };
                         const currentL = L.latLng(currentPos.lat, currentPos.lng);
-
-                        // 判定資料結構：如果是 MultiPolyline, getLatLngs() 返回 [ [p,p...], [p,p...] ]
-                        // 如果是 Polyline, 返回 [ p,p... ]
                         const isMulti = Array.isArray(latLngs[0]);
                         const lastSegment = isMulti ? latLngs[latLngs.length - 1] : latLngs;
                         const lastPoint = lastSegment[lastSegment.length - 1];
-                        const lastL = L.latLng(lastPoint.lat, normalizeLongitude(lastPoint.lng));
-
-                        if (lastPoint && currentL.distanceTo(lastL) > 50) {
-                            if (isMulti) {
-                                // 深度拷貝最後一段，修改後重新設回，防止 Leaflet 渲染遺留
-                                const newLatLngs = [...latLngs];
-                                newLatLngs[newLatLngs.length - 1] = [...lastSegment, currentPos];
-                                trackLineRef.current.setLatLngs(newLatLngs);
-                            } else {
-                                trackLineRef.current.addLatLng(currentPos);
+                        if (lastPoint) {
+                            const lastL = L.latLng(lastPoint.lat, normalizeLongitude(lastPoint.lng));
+                            if (currentL.distanceTo(lastL) > 50) {
+                                if (isMulti) {
+                                    const newLatLngs = [...latLngs];
+                                    newLatLngs[newLatLngs.length - 1] = [...lastSegment, currentPos];
+                                    trackLineRef.current.setLatLngs(newLatLngs);
+                                } else {
+                                    trackLineRef.current.addLatLng(currentPos);
+                                }
                             }
                         }
                     }
                 }
             });
-
             animFrameRef.current = requestAnimationFrame(animate);
         }
 
         animFrameRef.current = requestAnimationFrame(animate);
-        return () => {
-            if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-        };
-    }, [planesDict]);
+        return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
+    }, []); // Persistent loop!
 
     return <div ref={mapContainerRef} className="map-container" />;
 }

@@ -1,11 +1,22 @@
 @echo off
-title FlightRadar Server
+title AEROSTRAT Surveillance Server v2.8.2
 echo =======================================
-echo     Starting Flightradar Server
+echo     Starting AEROSTRAT v2.8.2
 echo =======================================
+
+:: Change to script directory
 cd /d "%~dp0"
-cd .\client\
-npm run build
+
+echo [1/2] Building Client...
+cd client
+call npm run build
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ Build failed!
+    pause
+    exit /b %ERRORLEVEL%
+)
+
+echo.
+echo [2/2] Starting Server...
 cd ..
 npm start
-pause
