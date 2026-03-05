@@ -19,14 +19,14 @@ export function useFlightData(mapRef) {
     const [latency, setLatency] = useState(null);
     const [lastUpdateTime, setLastUpdateTime] = useState(null);
     const [apiStats, setApiStats] = useState(null);
-    const [throttleSeconds, setThrottleSeconds] = useState(20);
+    const [throttleSeconds, setThrottleSeconds] = useState(60);
 
     const flightHistoryRef = useRef({});
     const isFetchingRef = useRef(false);
     const planesDictRef = useRef({});
     const apiStatusRef = useRef('INIT');
     const globalLastUpdateRef = useRef(0);
-    const nextScheduledFetchRef = useRef(Date.now() + 20000); // 追蹤下一次預約自動更新的時間
+    const nextScheduledFetchRef = useRef(Date.now() + 60000); // 追蹤下一次預約自動更新的時間
 
     // 保持 ref 和 state 同步
     useEffect(() => {
@@ -193,7 +193,7 @@ export function useFlightData(mapRef) {
                 if (history[icao24].length > 500) history[icao24].shift();
 
                 if (!next[icao24]) {
-                    next[icao24] = { ...pData, isDirty: true, lastCallsign: '' };
+                    next[icao24] = { ...pData, isDirty: true, lastCallsign: '', targetLat: pData.lat, targetLng: pData.lng, targetUpdatedAt: Date.now() };
                 } else {
                     const existing = next[icao24];
                     const isDirty =
@@ -209,6 +209,7 @@ export function useFlightData(mapRef) {
                         isDirty,
                         targetLat: pData.lat,
                         targetLng: pData.lng,
+                        targetUpdatedAt: Date.now(), // [v2.8.4] LERP 校正起始時間戳
                     };
                 }
             });

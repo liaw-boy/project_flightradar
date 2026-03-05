@@ -1,9 +1,3 @@
-@echo off
-title AEROSTRAT Surveillance Server v2.8.2
-echo =======================================
-echo     Starting AEROSTRAT v2.8.2
-echo =======================================
-
 :: Change to script directory
 cd /d "%~dp0"
 

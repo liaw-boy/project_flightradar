@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath, splitPathAtIDL, normalizeLongitude } from '../utils/flightUtils';
+import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath, splitPathAtIDL, normalizeLongitude, predictPosition } from '../utils/flightUtils';
 
 /**
  * MapView — 管理 Leaflet 地圖、飛機 markers、軌跡線、機場圖層
@@ -327,11 +327,12 @@ export default function MapView({
         [filters, bounds, selectedIcao24]
     );
 
-    // [v2.8.0] Keep a ref of planesDict for the persistent animation loop
+    // [v2.8.0] Keep refs of mutable props for the persistent animation loop (avoids stale closures)
     const planesDictRef = useRef(planesDict);
-    useEffect(() => {
-        planesDictRef.current = planesDict;
-    }, [planesDict]);
+    useEffect(() => { planesDictRef.current = planesDict; }, [planesDict]);
+
+    const selectedIcao24Ref = useRef(selectedIcao24);
+    useEffect(() => { selectedIcao24Ref.current = selectedIcao24; }, [selectedIcao24]);
 
     // ===== 同步 markers 到 planesDict (v2.8.0: Optimized Sync without Jumps) =====
     useEffect(() => {
@@ -425,7 +426,13 @@ export default function MapView({
             let tooltipHtml = '';
             if (showTooltips) {
                 const logoUrl = getAirlineLogoUrl(plane.callsign);
-                tooltipHtml = `<div class="tactical-label css-tooltip">${logoUrl ? `<img src="${logoUrl}" onerror="this.style.display='none'" class="airline-logo">` : ''}<span>${plane.callsign}</span></div>`;
+                if (isSelected) {
+                    // 選中飛機：FR24 黃色氣泡樣式
+                    tooltipHtml = `<div class="fr24-label fr24-label--selected">${logoUrl ? `<img src="${logoUrl}" onerror="this.style.display='none'" class="airline-logo-sm">` : ''}<span>${plane.callsign}</span></div>`;
+                } else {
+                    // 其他飛機：小型永久標籤
+                    tooltipHtml = `<div class="fr24-label">${plane.callsign || plane.icao24?.slice(0, 6) || ''}</div>`;
+                }
             }
 
             const iconHtml = `<div style="position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">${svg}${tooltipHtml}</div>`;
@@ -439,7 +446,16 @@ export default function MapView({
                 const el = markersRef.current[id].getElement();
                 if (el) el.style.display = inBounds ? '' : 'none';
             } else if (inBounds) {
-                const marker = L.marker([plane.lat, plane.lng], { icon }).addTo(map);
+                // [v2.8.6] 新 marker 直接放在 ADS-B 預測位置，避免從舊座標出發的閃爍
+                const nowSec = Date.now() / 1000;
+                const initElapsed = plane.lastContact ? Math.min(Math.max(0, nowSec - plane.lastContact), 120) : 0;
+                let initLat = plane.lat, initLng = plane.lng;
+                if (plane.velocity > 0 && !plane.onGround && initElapsed > 0) {
+                    const initPredicted = predictPosition(plane.lat, plane.lng, plane.velocity, plane.heading, initElapsed);
+                    initLat = initPredicted.lat;
+                    initLng = initPredicted.lng;
+                }
+                const marker = L.marker([initLat, initLng], { icon }).addTo(map);
                 marker.on('click', (e) => { L.DomEvent.stopPropagation(e); onSelectPlane(id, plane); });
                 markersRef.current[id] = marker;
             }
@@ -506,11 +522,11 @@ export default function MapView({
         let lastTime = performance.now();
 
         function animate(time) {
-            const deltaTimeSec = (time - lastTime) / 1000;
+            // deltaTimeSec 只用於地面目標的 Lerp，空中目標改用絕對 elapsed
             lastTime = time;
 
-            // Use planesDictRef to avoid loop resets
             const currentPlanes = planesDictRef.current || {};
+            const currentSelected = selectedIcao24Ref.current;
 
             Object.entries(markersRef.current).forEach(([id, marker]) => {
                 const plane = currentPlanes[id];
@@ -519,39 +535,34 @@ export default function MapView({
                 const currentLatLng = marker.getLatLng();
 
                 if (plane.onGround || plane.velocity <= 0 || plane.altitude === 'GROUND') {
-                    // 地面目標：一般 Lerp (網路校正插值)
+                    // 地面目標：Lerp 到 API 真實位置
                     if (plane.targetLat && plane.targetLng) {
-                        const lerpSpeed = 0.05; // Slightly slower for ground targets to avoid jitters
+                        const lerpSpeed = 0.05;
                         const newLat = currentLatLng.lat + (plane.targetLat - currentLatLng.lat) * lerpSpeed;
                         const newLng = currentLatLng.lng + (plane.targetLng - currentLatLng.lng) * lerpSpeed;
                         marker.setLatLng([newLat, newLng]);
                     }
-                } else {
-                    // [V2.8.0] 微觀推算 (Dead Reckoning) 2.0
-                    // 1. 基於物理向量推測下一位置 (恆定平滑移動)
-                    const nextPos = predictPosition(currentLatLng.lat, currentLatLng.lng, plane.velocity, plane.heading, deltaTimeSec);
+                } else if (plane.targetLat && plane.targetLng) {
+                    // [v2.8.6] 絕對定位式 Dead Reckoning：
+                    // 每幀從「ADS-B lastContact 真實座標」+ elapsed 推算位置
+                    // 不累積誤差，API 更新時自然歸零，徹底消除倒退
+                    const nowSec = Date.now() / 1000;
+                    // 優先使用 lastContact（ADS-B 精確接收時間），次選 targetUpdatedAt
+                    const anchorSec = plane.lastContact || (plane.targetUpdatedAt ? plane.targetUpdatedAt / 1000 : nowSec);
+                    const elapsedSec = Math.min(nowSec - anchorSec, 120); // 最多預測 120 秒
 
-                    // 2. 基於 API 目標點進行微妙校準 (LERP)
-                    if (plane.targetLat && plane.targetLng) {
-                        // 混合因子：0.02 (每幀向真實位置偏移 2%)，確保視覺平滑且逐漸收斂
-                        const distToTargetSq = Math.pow(plane.targetLat - nextPos.lat, 2) + Math.pow(plane.targetLng - nextPos.lng, 2);
+                    const predictedPos = predictPosition(plane.targetLat, plane.targetLng, plane.velocity, plane.heading, Math.max(0, elapsedSec));
 
-                        // 如果誤差過大 (> 0.2度)，代表座標突變（例如跳躍或回溯），則執行保護性跳轉
-                        if (distToTargetSq > 0.04) {
-                            marker.setLatLng([plane.targetLat, plane.targetLng]);
-                        } else {
-                            const correctedLat = nextPos.lat + (plane.targetLat - nextPos.lat) * 0.02;
-                            const correctedLng = nextPos.lng + (plane.targetLng - nextPos.lng) * 0.02;
-                            marker.setLatLng([correctedLat, correctedLng]);
-                        }
-                    } else {
-                        // 無新資料時，純慣性物理推導
-                        marker.setLatLng([nextPos.lat, nextPos.lng]);
-                    }
+                    // lerpFactor = 0.5 → 約 4 幀 (67ms) 收斂，肉眼完全不可察
+                    // 比 0.15 快 3.5 倍，API 更新後的位置校正幾乎瞬間完成
+                    const lerpFactor = 0.5;
+                    const newLat = currentLatLng.lat + (predictedPos.lat - currentLatLng.lat) * lerpFactor;
+                    const newLng = currentLatLng.lng + (predictedPos.lng - currentLatLng.lng) * lerpFactor;
+                    marker.setLatLng([newLat, newLng]);
                 }
 
-                // 軌跡更新 (保持連貫性)
-                if (id === selectedIcao24 && trackLineRef.current && !plane.onGround && plane.velocity > 0) {
+                // 軌跡更新 (使用 Ref 取得最新 selectedIcao24)
+                if (id === currentSelected && trackLineRef.current && !plane.onGround && plane.velocity > 0) {
                     const latLngs = trackLineRef.current.getLatLngs();
                     if (latLngs.length > 0) {
                         const currentPos = { lat: marker.getLatLng().lat, lng: normalizeLongitude(marker.getLatLng().lng) };

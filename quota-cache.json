@@ -1,33 +1,33 @@
 {
-  "date": "2026-03-03",
+  "date": "2026-03-04",
   "accounts": [
     {
       "user": "lbw-api-client",
-      "remainingCredits": 3952,
+      "remainingCredits": 1947,
       "unlockTime": null,
       "rateLimits": 0
     },
     {
       "user": "liaocho-api-client",
-      "remainingCredits": 3473,
+      "remainingCredits": 3999,
       "unlockTime": null,
       "rateLimits": 0
     },
     {
       "user": "sgeric-api-client",
-      "remainingCredits": 3472,
+      "remainingCredits": 3999,
       "unlockTime": null,
       "rateLimits": 0
     },
     {
       "user": "erictseng1-api-client",
-      "remainingCredits": 3471,
+      "remainingCredits": 3999,
       "unlockTime": null,
       "rateLimits": 0
     },
     {
       "user": "erictseng-api-client",
-      "remainingCredits": 3998,
+      "remainingCredits": 3999,
       "unlockTime": null,
       "rateLimits": 0
     }

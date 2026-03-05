@@ -1,51 +1,60 @@
-# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - 極致效能版 v2.5.0
+# ✈️ 暗黑全球航空雷達 (Dark Flight Radar) - 極致效能版 v2.8.7
 
-這是一款專門為「大數據效能」與「極致流暢視覺」而生的專業級全球航空監控系統。基於 **React (Vite 6)**、**Node.js (Worker Threads)** 與 **OpenSky Network API**，V2.5.0 引進了革命性的 **混合動態架構 (Hybrid Dynamic Architecture)** 與 **機場學習系統 (Airport Learning System)**。
+這是一款專門為「大數據效能」與「極致流暢視覺」而生的專業級全球航空監控系統。基於 **React (Vite 6)**、**Node.js (Worker Threads)** 與 **OpenSky Network API**，最新版本的系統引進了革命性的 **混合動態架構 (Hybrid Dynamic Architecture)**、**機場預測引擎 (Airport Logic Inference)** 與多種進階伺服器優化。
 
 ---
 
-## 🚀 v2.5.0 核心技術突破 (Technical Breakthroughs)
+## 🚀 v2.8.2 核心技術突破 (Technical Breakthroughs)
 
-### 🧠 1. 機場學習系統 (Airport Learning System)
-系統現在具備「自我進化」能力，能從物理軌跡中自動學習並補完全球航線庫。
-*   **🛫 自動起降偵測 (Auto Event Detection)**：透過即時比較飛機的先後狀態，自動識別起飛與降落事件。
-*   **� 規律補完 (Logic Inference)**：偵測到起降後，會自動從本地 20 萬筆機場資料中計算最近的機場，並永久寫入 `routes-cache.json`。
-*   **�️ 資料庫成長 (DB Growth)**：運行時間越長，本地航線資料越完整，徹底擺脫對收費 API 的依賴。
+### 🧠 1. 機場學習系統 (Airport Learning Engine)
+系統具備「自我進化」能力，能從飛機物理軌跡中自動學習並補完全球航線庫。
+*   **🛫 自動起降偵測 (Auto Event Detection)**：透過即時比較飛機的歷史與當前狀態，自動識別起飛與降落事件。
+*   **📡 空間推算邏輯 (Spatial Inference)**：偵測到起降事件後，自動計算座標周圍的 BBox，並從本地萬筆機場資料庫中尋找最短距離的機場，永久寫入 `routes-cache.json`。
+*   **🛠️ 本地龐大資料庫**：內建靜態飛機庫 (`aircraft_static.json`) 與手動航線修正檔 (`local_routes.json`)，最大化降低對第三方付費 API 的依賴。
 
 ### 🏎️ 2. 混合智慧架構 (Hybrid 60s/60fps Hub)
-解決了數據更新頻率與視覺流暢度之間的矛盾。
-*   **💓 60s 低功耗數據中心**：後端每 60 秒擷取一次全球數據，大幅降低 API 額度消耗並提升伺服器穩定性。
-*   **🧬 60fps 物理預測引擎 (Dead Reckoning)**：前端採用大圓航法 (Great Circle) 公式，在數據更新的間隔內，每秒 60 幀即時推算飛機「下一秒的位置」。
-*   **✨ 視覺感官**：即使數據 60 秒才更新一次，但在雷達螢幕上，飛機依然維持 **絲滑飛行、永不停歇**。
+解決了數據更新頻率極低與視覺流暢度需求極高之間的矛盾。
+*   **💓 低功耗數據中心**：後端預設採用背景拉取制，以動態推薦間隔（如每 20-60 秒）擷取全球數據，避免伺服器因頻繁 API 請求而遭到封鎖。
+*   **🧬 絕對定位式 60fps 預測引擎 (Absolute Dead Reckoning)**：前端脫離 React DOM 渲染，透過 `requestAnimationFrame` 與大圓航法，每幀從「真實 ADS-B 接收時間戳 (lastContact)」推算飛機位置，徹底根除長時間預測累積的誤差與 API 更新時的倒退滑動現象。
+*   **✨ FR24 專業級視覺感官**：導入 Flightradar24 風格的永久智慧標籤系統 (Smart LOD Labels)。選中飛機擁有專屬帶箭頭氣泡與航空公司 Logo，並支援依據 Zoom 級別自動隱藏重疊標籤，確保畫面清爽。
 
-### 📊 3. API 配額保護系統 (Quota Shield)
-*   **🔄 多帳號輪控系統**：支援 5+ 組帳號自動切換，當一組額度快用完時自動切換至下一組，確保系統 24/7 不間斷。
-*   **🛡️ 智能防抖 (Request Debounce)**：地圖移動時自動合併請求，避免產生多餘的 API 負載。
+### 📊 3. API 配額保護系統 (Quota Shield & Stretching)
+*   **🔄 多帳號輪控系統**：支援多達 5 組帳號無縫自動切換。當其中一組額度枯竭 (HTTP 429)，自動更換 Header 進行請求。
+*   **🛡️ 動態延展 (Quota Stretching)**：演算法動態計算當日剩餘額度、距離 UTC 00:00 重置的時間，智慧調整最佳輪詢間隔 (Recommended Interval)，確保系統 24/7 持續運作。
+*   **⏱️ 更新同步**：完美同步伺服器輪詢、快取 TTL 與用戶端更新間隔。
+
+### 🐞 4. 容錯與除錯系統 (Fault Tolerance & Logging)
+*   **📝 資料缺失日誌 (Data Deficiency Logging)**：自動追蹤解析失敗的 ICAO24、機型與航班號，保存至 `missing-data.json` 提供管理者進行資料庫查修。
+*   **✅ 背景自我修復 (Self-Healing Cache)**：針對過期或損壞的快取，系統會在啟動與運作期間自動進行清理與預熱。
 
 ---
 
-## 📂 核心架構地圖
+## 📂 核心架構地圖 (Architecture Map)
 
 ```text
 project_flightradar/
-├── server.js               # 高效能中樞：機場學習邏輯、帳號輪替、BBox Slicer
+├── server.js               # 高效能中樞：路由、多帳號輪控、BBox API、動態額度計算
 ├── workers/
-├── parser.js           # ⚡ Worker Thread: 負載解析全球 >15,000 架飛機數據
+│   └── parser.js           # ⚡ Worker Thread: 背景非同步解析上萬筆 OpenSky 狀態，不卡主執行緒
 ├── data/
-│   ├── processed/          # 🌍 2 萬筆全球機場 (ICAO/IATA/時區)
-│   ├── local_routes.json   # 📚 手動航線修正檔 (Priority: 1)
-│   ├── routes-cache.json   # 🧠 [NEW] 自動學習生成的航線知識庫
-│   └── aircraft_static.json# ✈️ 高精細航空器型號庫
+│   ├── processed/          # 🌍 全球機場與導航點資料表
+│   ├── local_routes.json   # 📚 手動航線強固檔 (最高優先級)
+│   ├── routes-cache.json   # 🧠 自動學習引擎生成的航線知識庫
+│   └── aircraft_static.json# ✈️ 高精細航空器型號映射表
 ├── client/src/
+│   ├── App.jsx             # React 主流與 UI 控制中心
+│   ├── hooks/
+│   │   ├── useFlightData.js# 🪝 狀態管理與 API 狀態/定時器同步
+│   │   └── useI18n.js      # 🌐 多語系(i18n)即時切換邏輯
 │   ├── utils/
-│   │   └── flightUtils.js  # 🧮 60fps 物理推算算法核心
+│   │   └── flightUtils.js  # 🧮 物理推算算法 (大圓航法/SVG生成)核心
 │   └── components/
-│       └── MapView.jsx     # 🎨 渲染與 LOD 邏輯中樞
+│       └── MapView.jsx     # 🎨 Leaflet 地圖渲染、虛擬化列表與 60fps LERP 邏輯中樞
 ```
 
 ---
 
-## ⚙️ 快速部署
+## ⚙️ 快速部署 (Quick Start)
 
 ### 1. 安裝環境
 需 Node.js v18+。
@@ -54,61 +63,53 @@ npm install && cd client && npm install
 ```
 
 ### 2. 環境變數 (.env)
+系統可依據配置自動分配負載。
 ```env
 OPENSKY_USER=user1
 OPENSKY_PASS=pass1
 OPENSKY_USER2=user2
 OPENSKY_PASS2=pass2
-# 支援多組帳號輪替
+# 最高支持 5 組帳號輪替
 ```
 
 ### 3. 一鍵啟動
 ```bash
-npm run build   # 前端編譯
-npm start       # 啟動後端並託管前端
+npm run build   # 編譯 React 生產版本
+npm run start   # 以生產模式啟動 Node.js 後端
+# 或使用 npm run dev 進行後端熱重載開發
 ```
 
 ---
 
-## 🛠️ 專業級操作細節
-*   **座標校正 (LERP)**：當 60 秒真實數據進來時，物理引擎會自動平滑校正前端推算位置與真實觀測點的微小落差，維持軌跡絕對真實性。
-*   **效能分級 (LOD)**：系統會根據縮放層級動態調整顯示的飛機數量，確保在低階設備上也能流暢運行。
+## 🛠️ 專業級實戰算法拆解 (In-Depth Mechanisms)
 
----
+### ✨ 實戰一：反瞬移與絕對定位推算 (Absolute DR & LERP)
+**核心挑戰**：免費 API 更新間隔長達 60 秒，若採增量推算 (前一幀座標 + 速度)，60 秒後預測點會大幅偏離真實軌道，導致 API 更新時飛機發生嚴重的「倒退滑動」。
 
-## 🛡️ 實戰一：多帳號 API 輪控系統 (Quota Shield)
-**核心挑戰**：當 OpenSky 回傳 HTTP 429 (Too Many Requests) 時，系統必須瞬間切換帳號並重試，確保服務不中斷。
+**實作技術 (Client: MapView.jsx)**：
+*   **絕對定位式推算 (Absolute Dead Reckoning)**：拋棄增量計算。每幀一律從「API 最後一次真實 ADS-B 接收座標」出發，加上「距今真實流逝時間 (elapsed)」算出目前應處位置。API 更新時座標與時間戳同步刷新，新舊預測路徑完美銜接。
+*   **極速線性插值 (Aggressive LERP)**：收到新資料的第一瞬間，利用極高的 `lerpFactor (0.5)` 在 3~4 幀 (約 67ms) 內收斂微小誤差，人類視覺無法察覺任何跳躍，只會覺得飛機順滑地拐了一個極小且迅速的彎。
 
-**實作技術 (Node.js)**：
-*   **建立帳號池**：啟動時讀取 `.env`，將所有帳號密碼封裝成陣列。
-*   **指標追蹤 (Cursor Tracking)**：使用 `currentAccountIndex` 全域變數管理當前使用的帳號。
-*   **攔截器邏輯**：系統會攔截 429 錯誤，自動執行 `currentAccountIndex = (currentAccountIndex + 1) % accounts.length`，更新 Headers 並重新發送原請求。對主程式而言，這一切都是透明且無感的。
+### 🧮 實戰二：60fps 物理預測與大圓航法 (Great Circle)
+**核心挑戰**：在全球範圍的球面地圖中移動，直線預測會導致嚴重的路徑變形。
 
-## 🧮 實戰二：60fps 物理預測與大圓航法
-**核心挑戰**：在沒有新資料的 60 秒內，精準推算飛機在地圖上的即時位置。
-
-**實作技術 (前端 JavaScript Math)**：
-*   **Destination Point 公式**：基於球面三角學，利用速度、時間與方位角計算下一點。
-*   **角距離 ($\delta$)**：將移動距離 $d$ 除以地球半徑 $R$。
+**實作技術 (Client: flightUtils.js)**：
+*   **Destination Point 算法**：基於球面三角學，利用飛機的真實速度 (m/s)、UTC 時間差與方位角 (True Track) 精準計算。
 *   **大圓公式**：
     $$\varphi_2 = \arcsin( \sin\varphi_1\cos\delta + \cos\varphi_1\sin\delta\cos\theta )$$
     $$\lambda_2 = \lambda_1 + \operatorname{arctan2}(\sin\theta\sin\delta\cos\varphi_1, \cos\delta - \sin\varphi_1\sin\varphi_2)$$
-*   **電競級渲染**：透過 `requestAnimationFrame` 脫離 React 渲染束縛，在獨立的動畫迴圈中更新 Marker 座標，達成 60fps 的滑順感。
 
-## 🧠 實戰三：機場學習系統 (Auto Learning)
-**核心挑戰**：系統如何主動發現「飛機降落了」，並識別其降落機場？
+### 📡 實戰三：BBox Slicer 與虛擬化渲染 (LOD & Virtualization)
+**核心挑戰**：渲染數萬架飛機與數千個機場圖標會瞬間癱瘓瀏覽器的 DOM 系統。
 
-**實作技術 (後端 Node.js + JSON 快取)**：
-*   **狀態機快取**：維護一個 `previousStates` Map，對比前後兩次資料的 `onGround` 狀態。
-*   **事件觸發**：當飛機從「空中」轉為「地面」時，觸發降落事件。
-*   **空間搜尋 (Spatial Query)**：拿飛機座標與 2 萬筆機場資料進行比對。
-*   **效能優化**：不跑全量迴圈，先用正方形 BBox 粗篩出區域機場，再精算最短距離鎖定 ICAO 代碼。
+**實作技術 (Server & Client)**：
+*   **空間切割 (BBox)**：前端根據目前可視範圍 (Bounds) 向後端發出切割請求，後端只回傳在這個矩形範圍內的航班。
+*   **LOD (Level of Detail)**：根據地圖 Zoom 等級，決定機場顯示的顆粒度（縮小顯示大型機場，放大才顯示小型機場與氣象 Popup）。
+*   **DOM 即時回收**：飛機離開可視範圍或消失時，即刻從 Leaflet Layer 中移除，嚴格限制最大渲染數量。
 
-## ✨ 實戰四：反瞬移的平滑校正 (LERP)
-**核心挑戰**：真實數據進來時，如何消除預測座標與真實座標之間的「跳轉感」？
+### 🛡️ 實戰四：API 狀態與 UTC 00:00 完美同步
+**核心挑戰**：API 額度每日重置，如果前端無法準確預測重置時間，容易造成恐慌式頻繁重試。
 
-**實作技術 (前端 LERP)**：
-*   **線性插值 (Linear Interpolation)**：當收到新資料，系統不會立刻「閃現」到新點。
-*   **過渡期補償**：在接下來的 0.5 秒 (約 30 幀) 內，讓飛機稍微偏離預測軌道，朝向真實位置滑行。
-*   **公式**：`currentPos = 預測位置 + (真實位置 - 預測位置) * (已經過時間 / 校正時間)`。
-
+**實作技術 (Full Stack Sync)**：
+*   由後端負責精算 `unlockTime`，前端利用此指標顯示「Next Refresh」倒數計時器。
+*   徹底對齊前後端的 API Request 生命週期，包含緩存過期時間 (TTL) 與計時器，達成資料庫、快取與 UI 的三重狀態同步。
