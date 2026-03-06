@@ -22,6 +22,7 @@ export default function MapView({
     colorScheme = 'TACTICAL',
     mapLayer = 'dark',        // [v2.9.0] tile layer id
     trackMode = false,        // [v3.0] auto-follow selected plane
+    playbackTime = null,      // [v3.1] UNIX timestamp for historical playback (null = live)
     t,
     translateMetar,
 }) {
@@ -29,6 +30,7 @@ export default function MapView({
     const mapRef = useRef(null);
     const markersRef = useRef({});
     const trackLineRef = useRef(null);
+    const trackLineFutureRef = useRef(null); // [v3.1] For future/predicted path during playback
     const routeLineRef = useRef(null);
     const predictiveLineRef = useRef(null);
     const animFrameRef = useRef(null);
@@ -39,6 +41,8 @@ export default function MapView({
     const tileLayerRef = useRef(null);     // [v2.9.0] current tile layer
     const speedVectorLayerRef = useRef(null); // [v2.9.0] speed vector arrows
     const trackModeRef = useRef(trackMode);  // [v3.0] ref for animation loop
+    const playbackTimeRef = useRef(playbackTime); // [v3.1] ref for animation loop
+    const trackPointsRef = useRef(trackPoints);   // [v3.1] ref for animation loop
 
     // [v3.0] Smart Tracking Interaction Refs
     const userInteractingRef = useRef(false);
@@ -51,6 +55,9 @@ export default function MapView({
             if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
         }
     }, [trackMode]);
+
+    useEffect(() => { playbackTimeRef.current = playbackTime; }, [playbackTime]);
+    useEffect(() => { trackPointsRef.current = trackPoints; }, [trackPoints]);
 
     const [airports, setAirports] = useState([]);
     const airportsRef = useRef([]);
@@ -591,8 +598,10 @@ export default function MapView({
         if (!map) return;
 
         if (trackLineRef.current) map.removeLayer(trackLineRef.current);
+        if (trackLineFutureRef.current) map.removeLayer(trackLineFutureRef.current);
         if (routeLineRef.current) map.removeLayer(routeLineRef.current);
         trackLineRef.current = null;
+        trackLineFutureRef.current = null;
         routeLineRef.current = null;
 
         if (selectedRoute && selectedRoute.depCoord && selectedRoute.arrCoord) {
@@ -602,23 +611,45 @@ export default function MapView({
         }
 
         if (trackPoints && trackPoints.length > 1) {
-            const livePoints = [...trackPoints];
-            if (selectedIcao24 && planesDict[selectedIcao24]) {
+            // [v3.1 Fix] Separate Past and Future segments if playback is active
+            const pbTime = playbackTime;
+            let pastPointsRaw = [];
+            let futurePointsRaw = [];
+
+            if (pbTime !== null) {
+                pastPointsRaw = trackPoints.filter(p => p[0] <= pbTime);
+                futurePointsRaw = trackPoints.filter(p => p[0] > pbTime);
+                // Add the boundary point to both to ensure they connect
+                const lastPast = pastPointsRaw[pastPointsRaw.length - 1];
+                if (lastPast && futurePointsRaw[0]) futurePointsRaw.unshift(lastPast);
+            } else {
+                pastPointsRaw = trackPoints;
+            }
+
+            const pastCoords = pastPointsRaw.map(p => [p[1], p[2]]);
+            if (pbTime === null && selectedIcao24 && planesDict[selectedIcao24]) {
                 const livePlane = planesDict[selectedIcao24];
-                livePoints.push([livePlane.lat, livePlane.lng]);
+                pastCoords.push([livePlane.lat, livePlane.lng]);
             }
 
-            let trackSegments = splitPathAtIDL(livePoints);
-            if (trackSegments.length > 1) {
-                trackSegments = trackSegments.filter(seg => seg.length > 1);
-                if (trackSegments.length > 1 && Math.abs(trackSegments[0][0][1] - trackSegments[1][0][1]) < 180) {
-                    trackSegments = [trackSegments.flat()];
+            const pastSegments = splitPathAtIDL(pastCoords);
+            trackLineRef.current = L.polyline(pastSegments, { color: '#22d3ee', weight: 4, opacity: 1, lineCap: 'round' }).addTo(map);
+
+            if (futurePointsRaw.length > 0) {
+                const futureCoords = futurePointsRaw.map(p => [p[1], p[2]]);
+                // Always add live position to the end of future segment if in playback
+                if (selectedIcao24 && planesDict[selectedIcao24]) {
+                    futureCoords.push([planesDict[selectedIcao24].lat, planesDict[selectedIcao24].lng]);
                 }
+                const futureSegments = splitPathAtIDL(futureCoords);
+                trackLineFutureRef.current = L.polyline(futureSegments, {
+                    color: '#22d3ee', weight: 3, opacity: 0.4, dashArray: '8, 8', lineCap: 'round'
+                }).addTo(map);
             }
 
-            trackLineRef.current = L.polyline(trackSegments, { color: '#22d3ee', weight: 3, opacity: 0.9, dashArray: '10, 5', lineCap: 'round' }).addTo(map);
             if (routeLineRef.current) { map.removeLayer(routeLineRef.current); routeLineRef.current = null; }
             if (trackLineRef.current) trackLineRef.current.bringToFront();
+            if (trackLineFutureRef.current) trackLineFutureRef.current.bringToBack();
         } else if (selectedIcao24 && flightHistoryRef?.current?.[selectedIcao24]) {
             const history = flightHistoryRef.current[selectedIcao24];
             if (history.length > 1) {
@@ -628,7 +659,7 @@ export default function MapView({
                 trackLineRef.current = L.polyline(trackSegments, { color: '#f59e0b', weight: 3, opacity: 0.8, dashArray: '10, 5', lineCap: 'round' }).addTo(map);
             }
         }
-    }, [trackPoints, planesDict, selectedIcao24, selectedRoute]);
+    }, [trackPoints, planesDict, selectedIcao24, selectedRoute, playbackTime]);
 
     // ===== 選中飛機時移動視角 (v2.8.0: Follow current marker position, not just API data) =====
     useEffect(() => {
@@ -691,7 +722,8 @@ export default function MapView({
                 }
 
                 // 軌跡更新 (使用 Ref 取得最新 selectedIcao24)
-                if (id === currentSelected && trackLineRef.current && !plane.onGround && plane.velocity > 0) {
+                // Only append live points to the track line if NOT in playback mode
+                if (playbackTimeRef.current === null && id === currentSelected && trackLineRef.current && !plane.onGround && plane.velocity > 0) {
                     const latLngs = trackLineRef.current.getLatLngs();
                     if (latLngs.length > 0) {
                         const currentPos = { lat: marker.getLatLng().lat, lng: normalizeLongitude(marker.getLatLng().lng) };
@@ -715,8 +747,43 @@ export default function MapView({
                 }
             });
 
-            // [v3.0] Track mode: pan map to follow selected plane
-            if (trackModeRef.current && currentSelected && !userInteractingRef.current) {
+            // [v3.1] Historical Playback Override — interpolate selected plane's position
+            const pbTime = playbackTimeRef.current;
+            let isPlaybackActive = false;
+
+            if (pbTime !== null && currentSelected) {
+                const pts = trackPointsRef.current;
+                if (pts && pts.length >= 2) {
+                    // Binary-search for the two surrounding track points
+                    let lo = 0, hi = pts.length - 1;
+                    while (lo < hi - 1) {
+                        const mid = Math.floor((lo + hi) / 2);
+                        if (pts[mid][0] <= pbTime) lo = mid;
+                        else hi = mid;
+                    }
+                    const p0 = pts[lo];
+                    const p1 = pts[hi];
+                    let lat, lng;
+                    if (p1[0] === p0[0]) {
+                        lat = p0[1]; lng = p0[2];
+                    } else {
+                        const t = Math.max(0, Math.min(1, (pbTime - p0[0]) / (p1[0] - p0[0])));
+                        lat = p0[1] + (p1[1] - p0[1]) * t;
+                        lng = p0[2] + (p1[2] - p0[2]) * t;
+                    }
+                    const selectedMarker = markersRef.current[currentSelected];
+                    if (selectedMarker) {
+                        selectedMarker.setLatLng([lat, lng]);
+                        // During playback, if following, pan to the historical position
+                        if (trackModeRef.current && !userInteractingRef.current) {
+                            map.panTo([lat, lng], { animate: true, duration: 0.1, easeLinearity: 0.5 });
+                        }
+                    }
+                    isPlaybackActive = true;
+                }
+            }
+
+            if (!isPlaybackActive && trackModeRef.current && currentSelected && !userInteractingRef.current) {
                 const selectedMarker = markersRef.current[currentSelected];
                 if (selectedMarker) {
                     map.panTo(selectedMarker.getLatLng(), { animate: true, duration: 0.3, easeLinearity: 0.5 });

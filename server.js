@@ -1278,15 +1278,13 @@ app.get('/api/tracks', async (req, res) => {
         let filteredPath = path;
         if (path.length > 1) {
             let splitIndex = 0;
-            // 從最後一個點往回找
+            // From the latest point going backwards, find where there's a true flight segment break
             for (let i = path.length - 1; i > 0; i--) {
                 const timeDiff = path[i][0] - path[i - 1][0];
-                const latDiff = Math.abs(path[i][1] - path[i - 1][1]);
-                const lngDiff = Math.abs(path[i][2] - path[i - 1][2]);
-
-                // 1. 時間斷層 > 20 分鐘
-                // 2. 座標突變 > 5 度 (約 500km) 且時間短
-                if (timeDiff > 1200 || (latDiff > 5 || lngDiff > 5)) {
+                // Only cut on TIME gaps > 20 minutes between any two consecutive points
+                // (Removing the overly-aggressive lat/lng degree difference check
+                //  which was cutting normal cross-ocean flight tracks incorrectly)
+                if (timeDiff > 1200) {
                     splitIndex = i;
                     break;
                 }

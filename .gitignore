@@ -4,14 +4,18 @@ opensky-credentials.json
 *.log
 .DS_Store
 Thumbs.db
-credentials1.json
-credentials2.json
-credentials3.json
-credentials4.json
-credentials5.json
+credentials*.json
+nghs*credentials.json
 doc/
 public/
-nghs104901credentials.json
-nghs107207credentials.json
-nghs104901credentials.json
-nghs107207credentials.json
+public-react/
+dist/
+
+# Application Caches
+*-cache.json
+track_data.json
+missing-data.json
+aircraft-cache.json
+metar-cache.json
+routes-cache.json
+quota-cache.json

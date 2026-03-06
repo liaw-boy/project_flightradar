@@ -6,6 +6,7 @@ import SearchBar from './components/SearchBar';
 import TopBar from './components/TopBar';
 import MapView from './components/MapView';
 import PlaneList from './components/PlaneList';
+import TimePlayer from './components/TimePlayer';
 import { useFlightData } from './hooks/useFlightData';
 import { useI18n } from './hooks/useI18n';
 import { logToServer } from './utils/logger';
@@ -64,6 +65,12 @@ export default function App() {
     // [v3.0] Track mode — map auto-pans to follow selected plane
     const [trackMode, setTrackMode] = useState(false);
     const handleToggleTrackMode = useCallback(() => setTrackMode(p => !p), []);
+
+    // [v3.1] TimePlayer playback state — null means live, unix timestamp means historical
+    const [playbackTime, setPlaybackTime] = useState(null);
+    const handlePlaybackChange = useCallback((unixTime) => {
+        setPlaybackTime(unixTime);
+    }, []);
 
     const handleColorSchemeChange = useCallback((scheme) => {
         setColorScheme(scheme);
@@ -167,6 +174,7 @@ export default function App() {
             setTrackPoints([]); // Clear previous tracks immediately to prevent "ghost lines"
             setSelectedMetadata(null);
             setSelectedRoute(null);
+            setPlaybackTime(null); // [v3.1] always start in LIVE mode when selecting a new plane
             setTrackMode(true); // 自動開啟追蹤模式
 
             // 取得軌跡
@@ -206,6 +214,7 @@ export default function App() {
         setSelectedMetadata(null);
         setSelectedRoute(null);
         setTrackMode(false); // 取消追蹤模式
+        setPlaybackTime(null); // [v3.1] clear playback on deselect
 
         // Remove ICAO from URL
         const url = new URL(window.location);
@@ -260,6 +269,7 @@ export default function App() {
                 colorScheme={colorScheme}
                 mapLayer={mapLayer}
                 trackMode={trackMode}
+                playbackTime={playbackTime}
                 t={t}
                 translateMetar={translateMetar}
             />
@@ -335,6 +345,9 @@ export default function App() {
                     icao24={selectedIcao24}
                     metadata={selectedMetadata}
                     route={selectedRoute}
+                    trackPoints={trackPoints}
+                    playbackTime={playbackTime}
+                    onPlaybackChange={handlePlaybackChange}
                     flightHistoryRef={flightHistoryRef}
                     onClose={handleDeselectPlane}
                     trackMode={trackMode}

@@ -180,7 +180,8 @@ export function useFlightData(mapRef) {
             planes.forEach(({ icao24, data: pData }) => {
                 if (!history[icao24]) history[icao24] = [];
                 const nowUnix = Math.floor(Date.now() / 1000);
-                history[icao24].push([nowUnix, pData.lat, pData.lng, pData.onGround]);
+                // [v3.1 Fix] Include altitude and heading so Sidebar Chart works
+                history[icao24].push([nowUnix, pData.lat, pData.lng, pData.onGround, pData.altitude, pData.heading]);
                 if (history[icao24].length > 500) history[icao24].shift();
 
                 if (!next[icao24]) {
@@ -304,13 +305,24 @@ export function useFlightData(mapRef) {
                     }
                 }
 
-                return validPoints.slice(latestSegmentStartIdx).map((p) => [p[1], p[2]]);
+                // [v3.1] Return full data tuple [time, lat, lng, altitude, heading, velocity] for TimePlayer
+                // [v3.1] Ensure strictly sorted by time (UNIX)
+                validPoints.sort((a, b) => a[0] - b[0]);
+
+                return validPoints.slice(latestSegmentStartIdx).map((p) => [
+                    p[0],  // time (UNIX)
+                    p[1],  // lat
+                    p[2],  // lng
+                    p[3],  // altitude (meters)
+                    p[4],  // true_track (heading)
+                    null   // velocity (not in track path API)
+                ]);
             }
         } catch (e) {
             console.warn('無法獲取完整軌跡，使用本地歷史:', e.message);
         }
 
-        // Fallback: 本地歷史
+        // Fallback: 本地歷史 — format: [time, lat, lng, onGround]
         const history = flightHistoryRef.current[icao24];
         if (!history || history.length < 2) return [];
 
@@ -318,7 +330,6 @@ export function useFlightData(mapRef) {
         for (let i = 1; i < history.length; i++) {
             const timeDiff = history[i][0] - history[i - 1][0];
             const wasOnGround = history[i - 1][3] === true;
-            // [OPT 4.2] 修復：在迴圈內正確宣告 isOnGround
             const isOnGround = history[i][3] === true;
             const dist = getDistance(history[i - 1][1], history[i - 1][2], history[i][1], history[i][2]);
 
@@ -328,7 +339,12 @@ export function useFlightData(mapRef) {
                 latestSegmentStartIdx = i;
             }
         }
-        return history.slice(latestSegmentStartIdx).map((p) => [p[1], p[2]]);
+        const sortedHistory = [...history].sort((a, b) => a[0] - b[0]);
+
+        // [v3.1] Return full tuple for TimePlayer from local history
+        return sortedHistory.slice(latestSegmentStartIdx).map((p) => [
+            p[0], p[1], p[2], null, null, null
+        ]);
     }, []);
 
     // 定時更新飛機    // 初次載入驅動迴圈

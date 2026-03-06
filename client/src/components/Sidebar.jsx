@@ -6,6 +6,7 @@ import {
 } from '../utils/flightUtils';
 import { useI18n } from '../hooks/useI18n';
 import { logToServer } from '../utils/logger';
+import TimePlayer from './TimePlayer';
 import './Sidebar.css';
 
 // ─── Haversine distance (km) ──────────────────────────────────────────────────
@@ -98,7 +99,10 @@ function FlightProgress({ plane, depInfo, arrInfo }) {
 }
 
 // ─── Main Sidebar Component ────────────────────────────────────────────────────
-export default function Sidebar({ plane, icao24, metadata, route, flightHistoryRef, onClose, trackMode, onToggleTrack }) {
+export default function Sidebar({
+    plane, icao24, metadata, route, trackPoints, playbackTime, onPlaybackChange,
+    flightHistoryRef, onClose, trackMode, onToggleTrack
+}) {
     if (!plane || !icao24) return null;
 
     const { t } = useI18n();
@@ -250,6 +254,18 @@ export default function Sidebar({ plane, icao24, metadata, route, flightHistoryR
 
                     {/* [v2.9.0] Flight Progress Bar */}
                     <FlightProgress plane={plane} depInfo={depInfo} arrInfo={arrInfo} />
+
+                    {/* [v3.1] TimePlayer - Historical Playback integrated into Sidebar */}
+                    {trackPoints && trackPoints.length >= 2 && (
+                        <div style={{ padding: '0 20px 15px 20px' }}>
+                            <div style={{ fontSize: 10, color: 'var(--color-text-dim)', marginBottom: 8, letterSpacing: 1, fontWeight: 700 }}>HISTORICAL REPLAY</div>
+                            <TimePlayer
+                                trackPoints={trackPoints}
+                                onPlaybackChange={onPlaybackChange}
+                                mode="sidebar-mode"
+                            />
+                        </div>
+                    )}
                 </div>
 
                 {/* Spatial Section */}

@@ -3,13 +3,13 @@
   "accounts": [
     {
       "user": "lbw-api-client",
-      "remainingCredits": 219,
+      "remainingCredits": 43,
       "unlockTime": null,
       "rateLimits": 0
     },
     {
       "user": "liaocho-api-client",
-      "remainingCredits": 3997,
+      "remainingCredits": 3613,
       "unlockTime": null,
       "rateLimits": 0
     },
