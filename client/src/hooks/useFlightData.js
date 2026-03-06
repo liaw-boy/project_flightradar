@@ -27,6 +27,8 @@ export function useFlightData(mapRef) {
     const apiStatusRef = useRef('INIT');
     const globalLastUpdateRef = useRef(0);
     const nextScheduledFetchRef = useRef(Date.now() + 60000); // 追蹤下一次預約自動更新的時間
+    const workerRef = useRef(null);
+    const usesWebSocketRef = useRef(false); // [Project AERO-SYNC]
 
     // 保持 ref 和 state 同步
     useEffect(() => {
@@ -38,6 +40,9 @@ export function useFlightData(mapRef) {
     }, [apiStatus]);
 
     const fetchPlanes = useCallback(async (isAutoRefresh = false) => {
+        // 如果 WebSocket 正在運作，則略過傳統輪詢
+        if (usesWebSocketRef.current && isAutoRefresh) return;
+
         // 如果是正在抓取中，就跳過
         if (isFetchingRef.current) return;
         isFetchingRef.current = true;
@@ -355,11 +360,65 @@ export function useFlightData(mapRef) {
 
         // Timer countdown sync for UI (不負責 fetch，只負責反映距離下一個 nextScheduledFetchRef 的剩餘時間)
         const uiTimer = setInterval(() => {
+            if (usesWebSocketRef.current) {
+                setThrottleSeconds(0); // WebSocket is realtime
+                return;
+            }
             const remaining = Math.max(0, Math.round((nextScheduledFetchRef.current - Date.now()) / 1000));
             setThrottleSeconds(remaining);
         }, 1000);
 
         return () => clearInterval(uiTimer);
+    }, [fetchPlanes]);
+
+    // [Project AERO-SYNC] Initialize WebWorker for WebSocket Binary Stream
+    useEffect(() => {
+        const worker = new Worker(new URL('../workers/FlightDataWorker.js', import.meta.url), { type: 'module' });
+        workerRef.current = worker;
+
+        worker.onmessage = (event) => {
+            const { type, payload } = event.data;
+            if (type === 'WS_CONNECTED') {
+                setApiStatus('AERO-SYNC (WS)');
+                setApiStatusClass('stat-success');
+                usesWebSocketRef.current = true;
+                setApiErrorDetail('');
+            } else if (type === 'WS_DISCONNECTED' || type === 'WS_ERROR') {
+                usesWebSocketRef.current = false;
+                setApiStatus('FALLBACK (Polling)');
+                setApiStatusClass('stat-warning');
+                fetchPlanes(false); // Trigger immediate fallback fetch
+            } else if (type === 'PLANES_UPDATED') {
+                const { planesDict: newDict, globalTime } = payload;
+                globalLastUpdateRef.current = globalTime;
+                setLastUpdateTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
+
+                const history = flightHistoryRef.current;
+                const nowUnix = Math.floor(Date.now() / 1000);
+
+                // Inject metadata needed by the Map renderer
+                Object.keys(newDict).forEach(id => {
+                    const pData = newDict[id];
+                    if (!history[id]) history[id] = [];
+                    history[id].push([nowUnix, pData.lat, pData.lng, pData.onGround, pData.altitude, pData.heading]);
+                    if (history[id].length > 500) history[id].shift();
+
+                    pData.targetLat = pData.lat;
+                    pData.targetLng = pData.lng;
+                    pData.targetUpdatedAt = Date.now();
+                });
+
+                setPlanesDict(newDict);
+            }
+        };
+
+        const currentUrl = window.location.origin;
+        worker.postMessage({ type: 'INIT', payload: { baseUrl: currentUrl } });
+
+        return () => {
+            worker.postMessage({ type: 'DISCONNECT' });
+            worker.terminate();
+        };
     }, [fetchPlanes]);
 
     return {

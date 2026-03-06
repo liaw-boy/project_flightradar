@@ -7,6 +7,8 @@ const fs = require('fs');
 const path = require('path');
 const cron = require('node-cron');
 const { Worker } = require('worker_threads');
+const http = require('http');
+const { initWebSocketServer, broadcastPlanes } = require('./socketEngine');
 require('dotenv').config();
 
 // ==========================================
@@ -655,6 +657,9 @@ async function fetchGlobalPlanes() {
                     // [v2.9.0] SSE
                     broadcastSSE({ type: 'planes-updated', time: timestamp, count: newStates.length });
 
+                    // [Project AERO-SYNC] WebSocket / Binary Delta Push
+                    broadcastPlanes(newStates, timestamp);
+
                     // [v3.0] 飛行異常偵測
                     detectAnomalies(newStates);
                 } else {
@@ -1275,21 +1280,43 @@ app.get('/api/tracks', async (req, res) => {
 
         // [v2.5.0] 預防長直線：由下而上（從最新點往回查）偵測時間巨大斷層
         // 如果兩個點之間隔了 > 20 分鐘 (1200s) 或發生了極速移動，代表是不同航段
-        let filteredPath = path;
+        let filteredPath = [];
         if (path.length > 1) {
             let splitIndex = 0;
             // From the latest point going backwards, find where there's a true flight segment break
             for (let i = path.length - 1; i > 0; i--) {
                 const timeDiff = path[i][0] - path[i - 1][0];
-                // Only cut on TIME gaps > 20 minutes between any two consecutive points
-                // (Removing the overly-aggressive lat/lng degree difference check
-                //  which was cutting normal cross-ocean flight tracks incorrectly)
                 if (timeDiff > 1200) {
                     splitIndex = i;
                     break;
                 }
             }
-            filteredPath = path.slice(splitIndex);
+            const segment = path.slice(splitIndex);
+
+            // [v3.8 Fix] Geometry Sanitization: Remove duplicate/corrupted points causing zigzag polygons
+            for (let i = 0; i < segment.length; i++) {
+                const pt = segment[i];
+                if (i === 0) {
+                    filteredPath.push(pt);
+                    continue;
+                }
+                const prev = filteredPath[filteredPath.length - 1];
+
+                // Ensure time moves strictly forward (prevents temporal loops in tracks)
+                if (pt[0] <= prev[0]) continue;
+
+                // Ensure coordinate actually moved a reasonable distance to avoid micro-jitter polygons
+                const latDiff = Math.abs(pt[1] - prev[1]);
+                const lngDiff = Math.abs(pt[2] - prev[2]);
+
+                // If it moved less than 0.005 degrees (~500m) but more than 0, it might be jitter. 
+                // Mostly we just want to strictly kill duplicate exact coordinates.
+                if (latDiff < 0.0001 && lngDiff < 0.0001) continue;
+
+                filteredPath.push(pt);
+            }
+        } else {
+            filteredPath = path;
         }
 
         const result = { icao24, path: filteredPath };
@@ -1425,7 +1452,10 @@ cron.schedule('0 3 * * *', () => {
 });
 
 // 啟動伺服器
-app.listen(PORT, () => {
+const server = http.createServer(app);
+initWebSocketServer(server);
+
+server.listen(PORT, () => {
     const readyTime = new Date().toLocaleTimeString();
     console.log('');
     console.log('╔══════════════════════════════════════════╗');

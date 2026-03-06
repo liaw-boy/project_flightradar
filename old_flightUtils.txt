@@ -5,12 +5,12 @@
 const EARTH_RADIUS = 6371000;
 
 /**
- * [OPT 6.1] 將經度正規化至 -180 ~ 180 之間
- * 改用模算運算，防止 NaN/Infinity 造成無空迴圈
+ * 將經度正規化至 -180 ~ 180 之間
  */
 export function normalizeLongitude(lng) {
-    if (!isFinite(lng)) return 0;
-    return ((lng + 180) % 360 + 360) % 360 - 180;
+    while (lng > 180) lng -= 360;
+    while (lng < -180) lng += 360;
+    return lng;
 }
 
 // ==========================================
@@ -91,10 +91,9 @@ const CATEGORY_NAMES = {
 };
 
 // ==========================================
-// [OPT 3.1] 合併 AIRLINE_LOGOS 與 ICAO_TO_IATA 為單一來源
-// ICAO 呼號前綴 -> IATA 代碼 對照表
+// 航空公司 Logo Map (使用 IATA 縮寫)
 // ==========================================
-export const ICAO_TO_IATA = {
+export const AIRLINE_LOGOS = {
     // Taiwan
     'CAL': 'CI', 'EVA': 'BR', 'MDA': 'AE', 'UIA': 'B7', 'SJX': 'JX', 'TTW': 'IT', 'FEA': 'FE',
     // Japan
@@ -115,16 +114,13 @@ export const ICAO_TO_IATA = {
     'EZY': 'U2', 'RYR': 'FR', 'WZZ': 'W6',
     // Americas
     'AAL': 'AA', 'DAL': 'DL', 'UAL': 'UA', 'SWA': 'WN', 'JBU': 'B6', 'ASA': 'AS',
-    'ACA': 'AC', 'TAM': 'JJ', 'AVA': 'AV',
+    'ACA': 'AC', 'TAM': 'LA', 'AVA': 'AV',
     // Oceania
     'QFA': 'QF', 'ANZ': 'NZ', 'JST': 'JQ', 'VOZ': 'VA',
     // Cargo
     'FDX': 'FX', 'UPS': '5X', 'GTI': '5Y', 'CLX': 'CV', 'CKS': 'K4', 'ABW': 'RU',
-    'AHK': 'LD', 'CAO': 'CA',
+    'AHK': 'AHK', 'CAO': 'CA',
 };
-// 向下相容別名
-/** @deprecated Use ICAO_TO_IATA instead */
-export const AIRLINE_LOGOS = ICAO_TO_IATA;
 
 // ==========================================
 // 國家旗幟 Emoji
@@ -209,58 +205,15 @@ export function getNearestAirport(lat, lng) {
 }
 
 /**
- * 根據高度回傳對應顏色 (支援多重配色方案)
+ * 根據高度回傳對應顏色
  */
-export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'TACTICAL') {
-    if (isEmergency) return '#ef4444'; // Red-500 (Emergency)
-    if (onGround || altitude === 'N/A' || altitude === 'GROUND') return '#64748b'; // Slate-500 (Ground)
-
-    const alt = parseFloat(altitude);
-
-    const SCHEMES = {
-        // [v2.6.6] Current Default
-        TACTICAL: {
-            low: '#f59e0b',    // Amber
-            mid: '#10b981',    // Emerald
-            high: '#6366f1'    // Indigo
-        },
-        // [v2.6.5] Classic
-        CLASSIC: {
-            low: '#fbbf24',    // Amber-400
-            mid: '#22d3ee',    // Cyan-400
-            high: '#3b82f6'    // Blue-500
-        },
-        // Maximum Visibility
-        VIVID: {
-            low: '#fb923c',    // Orange-400
-            mid: '#a3e635',    // Lime-400
-            high: '#d946ef'    // Fuchsia-500
-        },
-        // Pro-Contrast
-        MONO: {
-            low: '#fde047',    // Yellow-300
-            mid: '#4ade80',    // Green-400
-            high: '#f472b6'    // Pink-400
-        },
-        // Thermal / Heat look
-        HEATMAP: {
-            low: '#dc2626',    // Red-600
-            mid: '#facc15',    // Yellow-400
-            high: '#f8fafc'    // Slate-50
-        },
-        // Stealth / Night look
-        MIDNIGHT: {
-            low: '#475569',    // Slate-600
-            mid: '#1e3a8a',    // Blue-900
-            high: '#7c3aed'    // Violet-600
-        }
-    };
-
-    const colors = SCHEMES[scheme] || SCHEMES.TACTICAL;
-
-    if (alt < 2500) return colors.low;
-    if (alt < 9000) return colors.mid;
-    return colors.high;
+export function getAltitudeColor(altitude, onGround, isEmergency) {
+    if (isEmergency) return '#FF4136';
+    if (onGround) return '#888888';
+    if (altitude === 'N/A' || altitude === 'GROUND') return '#888';
+    if (altitude < 1500) return '#FF4136';
+    if (altitude < 5000) return '#FFDC00';
+    return '#01FF70';
 }
 
 /**
@@ -282,36 +235,13 @@ export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'TACT
  * 17: Surface Vehicle - Service
  * 18: Point Obstacle
  */
-// [OPT 2.2] SVG 生成 LRU 快取，避免每幀對所有飛機重複建立字串
-// key: heading_altitude_isSelected_onGround_isEmergency_category_scheme
-const _svgCache = new Map();
-const _SVG_CACHE_MAX = 500;
+export function createPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category) {
+    const color = getAltitudeColor(altitude, onGround, isEmergency);
+    const size = onGround ? 24 : Math.min(36, 24 + (altitude !== 'N/A' && altitude !== 'GROUND' ? altitude / 500 : 0));
+    const glow = isSelected ? 'drop-shadow(0 0 15px #FFDC00)' : `drop-shadow(0 0 6px ${color})`;
+    const planeColor = isSelected ? '#FFDC00' : color;
 
-export function createPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category, scheme = 'TACTICAL') {
-    // 不要對選中飛機快取（選中狀態爽少）
-    if (!isSelected) {
-        const cacheKey = `${Math.round(heading)}_${altitude}_0_${onGround ? 1 : 0}_${isEmergency ? 1 : 0}_${category}_${scheme}`;
-        if (_svgCache.has(cacheKey)) return _svgCache.get(cacheKey);
-        const result = _buildPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category, scheme);
-        if (_svgCache.size >= _SVG_CACHE_MAX) {
-            // LRU 送出最舊條目
-            _svgCache.delete(_svgCache.keys().next().value);
-        }
-        _svgCache.set(cacheKey, result);
-        return result;
-    }
-    return _buildPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category, scheme);
-}
-
-function _buildPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category, scheme = 'TACTICAL') {
-    const color = getAltitudeColor(altitude, onGround, isEmergency, scheme);
-    const size = onGround ? 26 : Math.min(36, 26 + (altitude !== 'N/A' && altitude !== 'GROUND' ? altitude / 1000 : 0));
-    const glowColor = isSelected ? '#f59e0b' : color;
-    const glow = `drop-shadow(0 0 6px ${glowColor})`;
-    const planeColor = isSelected ? '#ffffff' : color;
-    const strokeWidth = isSelected ? 1.5 : 0.8;
-    const strokeColor = isSelected ? '#f59e0b' : 'rgba(255,255,255,0.4)';
-
+    // SVG paths centered in a 24x24 viewBox pointing straight UP (to be rotated by CSS)
     const SVG_PATHS = {
         // Standard Jet (Default / Cat 4 large)
         default: 'M21,16V14L13,9V3.5A1.5,1.5 0 0,0 11.5,2A1.5,1.5 0 0,0 10,3.5V9L2,14V16L10,13.5V19L8,20.5V22L11.5,21L15,22V20.5L13,19V13.5L21,16Z',
@@ -352,61 +282,14 @@ function _buildPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, ca
     if (selectedPath === SVG_PATHS.heavy) scaleTransform = 'scale(1.1) translate(-1, -1)';
 
     const svg = `
-    <svg viewBox="0 0 24 24" width="${size}" height="${size}" style="filter: ${glow}; overflow: visible;">
+    <svg viewBox="0 0 24 24" width="${size}" height="${size}" style="filter: ${glow};">
       <g transform="rotate(${heading} 12 12)">
-         <path fill="${planeColor}" 
-               stroke="${strokeColor}" 
-               stroke-width="${strokeWidth}" 
-               stroke-linejoin="round"
+         <path fill="${planeColor}" stroke="${isSelected ? '#fff' : 'none'}" stroke-width="${isSelected ? 0.5 : 0}"
                d="${selectedPath}" transform="${scaleTransform}" />
       </g>
     </svg>
   `;
     return { svg, size };
-}
-
-// [Project AERO-SYNC] WebGL / Canvas2D Helper
-export const AERO_PATHS = {
-    default: 'M21,16V14L13,9V3.5A1.5,1.5 0 0,0 11.5,2A1.5,1.5 0 0,0 10,3.5V9L2,14V16L10,13.5V19L8,20.5V22L11.5,21L15,22V20.5L13,19V13.5L21,16Z',
-    heavy: 'M13.5,9L21.5,15V17L13.5,13.5V19.5L16.5,21.5V23L12,22L7.5,23V21.5L10.5,19.5V13.5L2.5,17V15L10.5,9V3.5C10.5,2 11.5,1 12,1C12.5,1 13.5,2 13.5,3.5Z',
-    light: 'M13.5,9.5L20,13.5V15L13.5,12V18.5L15.5,20.5V22L12,21L8.5,22V20.5L10.5,18.5V12L4,15V13.5L10.5,9.5V3.5C10.5,2.5 11,2 12,2C13,2 13.5,2.5 13.5,3.5Z',
-    rotorcraft: 'M12,2A2,2 0 0,1 14,4V6H16V4H18V6.5L14,10.5V12H18L20,14V15H18V17A2,2 0 0,1 16,19H14V21H12V19H10A2,2 0 0,1 8,17V15H6V14L8,12V10.5L4,6.5V4H6V6H8V4A2,2 0 0,1 10,2H12Z',
-    glider: 'M12,2 C13,2 13.5,3 13.5,4 V8 L23.5,9 V10 L13.5,11 V18 L15,19 V20 L12,19 L9,20 V19 L10.5,18 V11 L0.5,10 V9 L10.5,8 V4 C10.5,3 11,2 12,2 Z',
-    drone: 'M12,10 A2,2 0 1,0 12,14 A2,2 0 1,0 12,10 M4.5,2 A2.5,2.5 0 1,1 4.5,7 A2.5,2.5 0 1,1 4.5,2 M19.5,2 A2.5,2.5 0 1,1 19.5,7 A2.5,2.5 0 1,1 19.5,2 M4.5,17 A2.5,2.5 0 1,1 4.5,22 A2.5,2.5 0 1,1 4.5,17 M19.5,17 A2.5,2.5 0 1,1 19.5,22 A2.5,2.5 0 1,1 19.5,17 M6.5,6 L10,10.5 M17.5,6 L14,10.5 M6.5,18 L10,13.5 M17.5,18 L14,13.5',
-    ground: 'M5,11 V19 H19 V11 Z M7,13 H17 V17 H7 Z M10,5 V11 H14 V5 Z M8,19 V21 H10 V19 M14,19 V21 H16 V19'
-};
-
-export function getPlaneCanvasData(altitude, isSelected, onGround, isEmergency, category, scheme = 'TACTICAL') {
-    const color = getAltitudeColor(altitude, onGround, isEmergency, scheme);
-
-    // [v3.5 Fix] Restore EXACT original aesthetics formula and size scaling
-    const size = onGround ? 24 : Math.min(36, 24 + (altitude !== 'N/A' && altitude !== 'GROUND' ? altitude / 500 : 0));
-
-    // Restore original colors: selected is YELLOW fill with WHITE stroke. Normal has NO stroke.
-    const planeColor = isSelected ? '#FFDC00' : color;
-    const strokeColor = isSelected ? '#ffffff' : 'none';
-    const strokeWidth = isSelected ? 0.5 : 0;
-
-    let pathMap = AERO_PATHS.default;
-    let scale = 1.0;
-
-    if (onGround || altitude === 'GROUND' || category === 16 || category === 17) {
-        pathMap = AERO_PATHS.ground;
-    } else if (category === 2 || category === 3) {
-        pathMap = AERO_PATHS.light;
-    } else if (category === 5 || category === 6) {
-        pathMap = AERO_PATHS.heavy;
-        scale = 1.1;
-    } else if (category === 8) {
-        pathMap = AERO_PATHS.rotorcraft;
-    } else if (category === 9) {
-        pathMap = AERO_PATHS.glider;
-    } else if (category === 14) {
-        pathMap = AERO_PATHS.drone;
-        scale = 0.85;
-    }
-
-    return { pathData: pathMap, scale, size, planeColor, strokeColor, strokeWidth, isSelected, isEmergency, onGround, callsign: '', icao24: '' };
 }
 
 /**
@@ -518,22 +401,15 @@ export function splitPathAtIDL(points) {
 
     for (let i = 1; i < points.length; i++) {
         const p1 = currentSegment[currentSegment.length - 1];
-        const p1LngSrc = points[i - 1][1];
-        const p1LngNor = p1[1];
-        const p2LngSrc = points[i][1];
-        const p2LngNor = normalizeLongitude(p2LngSrc);
-
-        const p2 = [points[i][0], p2LngNor];
+        const p2 = [points[i][0], normalizeLongitude(points[i][1])];
 
         // 檢測經度突變 (超過 180 度視為跨換日線)
         const lonDiff = Math.abs(p2[1] - p1[1]);
         if (lonDiff > 180) {
             segments.push(currentSegment);
-            // When wrapping, we must start a clean new segment
-            currentSegment = [p2];
-        } else {
-            currentSegment.push(p2);
+            currentSegment = [];
         }
+        currentSegment.push(p2);
     }
     segments.push(currentSegment);
     return segments;
@@ -592,8 +468,40 @@ export function formatVerticalRate(vRate) {
 }
 
 /**
- * [OPT 3.1] 取得航空公司 Logo URL
- * 使用已合併的 ICAO_TO_IATA 单一來源
+ * ICAO 呼號前綴 → IATA 代碼對照表
+ * (pics.avs.io 使用 IATA 代碼)
+ */
+const ICAO_TO_IATA = {
+    // Taiwan
+    'CAL': 'CI', 'EVA': 'BR', 'MDA': 'AE', 'UIA': 'B7', 'SJX': 'JX', 'TTW': 'IT', 'FEA': 'FE',
+    // Japan
+    'JAL': 'JL', 'ANA': 'NH', 'JJP': 'GK', 'APJ': 'MM', 'SFJ': '7G', 'ADO': 'HD', 'SNJ': '6J',
+    // Korea
+    'KAL': 'KE', 'AAR': 'OZ', 'JNA': 'LJ', 'TWB': 'TW', 'JJA': '7C', 'ABL': 'BX', 'ESR': 'ZE',
+    // China
+    'CCA': 'CA', 'CES': 'MU', 'CSN': 'CZ', 'HXA': 'HX', 'CPA': 'CX', 'SHQ': '9C',
+    'CSZ': 'ZH', 'CDG': 'SC', 'CHH': 'HU',
+    // Southeast Asia
+    'SIA': 'SQ', 'THA': 'TG', 'MAS': 'MH', 'AXM': 'AK', 'GIA': 'GA', 'PAL': 'PR',
+    'CEB': '5J', 'VJC': 'VJ', 'HVN': 'VN', 'SCO': 'TR', 'JSA': '3K', 'TGW': 'TR',
+    // Middle East
+    'UAE': 'EK', 'ETD': 'EY', 'QTR': 'QR', 'THY': 'TK', 'SVA': 'SV', 'GFA': 'GF',
+    // Europe
+    'BAW': 'BA', 'DLH': 'LH', 'AFR': 'AF', 'KLM': 'KL', 'SAS': 'SK', 'FIN': 'AY',
+    'SWR': 'LX', 'AUA': 'OS', 'TAP': 'TP', 'IBE': 'IB', 'AZA': 'AZ', 'LOT': 'LO',
+    'EZY': 'U2', 'RYR': 'FR', 'WZZ': 'W6',
+    // Americas
+    'AAL': 'AA', 'DAL': 'DL', 'UAL': 'UA', 'SWA': 'WN', 'JBU': 'B6', 'ASA': 'AS',
+    'ACA': 'AC', 'TAM': 'JJ', 'AVA': 'AV',
+    // Oceania
+    'QFA': 'QF', 'ANZ': 'NZ', 'JST': 'JQ', 'VOZ': 'VA',
+    // Cargo
+    'FDX': 'FX', 'UPS': '5X', 'GTI': '5Y', 'CLX': 'CV', 'AHK': 'LD', 'CAO': 'CA',
+};
+
+/**
+ * 取得航空公司 Logo URL
+ * 使用 pics.avs.io CDN (免費，無 hotlink 限制)
  */
 export function getAirlineLogoUrl(callsign) {
     if (!callsign || callsign === 'UNKNOWN') return '';
