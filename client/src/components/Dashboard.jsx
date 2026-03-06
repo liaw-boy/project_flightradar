@@ -3,31 +3,18 @@ import { useI18n } from '../hooks/useI18n';
 import './Dashboard.css';
 
 export default function Dashboard({
-    planeCount,
-    airCount,
-    groundCount,
     apiStatus,
     apiStatusClass,
     apiErrorDetail,
     latency,
-    lastUpdateTime,
     nextRefresh,
     apiStats,
-    zoom, // ADDED PROP
     usageStats, // [v2.3.8] NEW PROP
 }) {
-    const [time, setTime] = useState('--:--:--');
     const [isOnline, setIsOnline] = useState(true);
     const [showApiStats, setShowApiStats] = useState(false);
     const [showResourceUsage, setShowResourceUsage] = useState(false); // [v2.3.8] Collapsible state
-    const { t, lang, toggleLang } = useI18n();
-
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
-        }, 1000);
-        return () => clearInterval(interval);
-    }, []);
+    const { t } = useI18n();
 
     useEffect(() => {
         setIsOnline(apiStatus !== 'ERROR' && apiStatus !== 'INIT');
@@ -41,53 +28,11 @@ export default function Dashboard({
 
     return (
         <div className="dashboard">
-            <div className="title-container">
-                <div className="brand-logo">
-                    <div className="live-dot" />
-                    <h2>AEROSTRAT <span className="brand-suffix">RADAR</span> <span className="version-label">v2.8.7</span></h2>
-                </div>
-                <button className="lang-toggle" onClick={toggleLang}>
-                    {lang === 'en' ? 'EN/中' : '中/EN'}
-                </button>
-            </div>
-            <div className="stat-row">
-                <span>{t('sysTime')}</span>
-                <span className="stat-value">{time}</span>
-            </div>
-            <div className="stat-row">
-                <span>{t('aircraft')}</span>
-                <span className="stat-value">
-                    {planeCount > 0 ? String(planeCount) : t('scanning')}
-                </span>
-            </div>
-            <div className="stat-row">
-                <span>{t('airGround')}</span>
-                <span className="stat-value">
-                    {planeCount > 0 ? `${airCount} / ${groundCount}` : '-- / --'}
-                </span>
-            </div>
-            <div className="stat-row">
-                <span>{t('zoomLevel') || 'Zoom Level'}</span>
-                <span className="stat-value">{zoom}</span>
-            </div>
-            <div className="stat-row">
-                <span>{t('lastUpdate')}</span>
-                <span className="stat-value">{lastUpdateTime || '--'}</span>
-            </div>
-            <div className="stat-row">
-                <span>{t('nextRefresh')}</span>
-                <span className={`stat-value ${nextRefreshClass}`}>
-                    {nextRefresh !== null ? `${nextRefresh}s` : '--'}
-                </span>
-            </div>
-
             {apiErrorDetail && (
-                <div style={{ marginTop: '10px', fontSize: '11px', color: '#ff4136', wordBreak: 'break-all', border: '1px solid rgba(255,65,54,0.3)', padding: '6px', borderRadius: '4px', background: 'rgba(255,65,54,0.1)' }}>
+                <div style={{ marginBottom: '10px', fontSize: '11px', color: '#ff4136', wordBreak: 'break-all', border: '1px solid rgba(255,65,54,0.3)', padding: '6px', borderRadius: '4px', background: 'rgba(255,65,54,0.1)' }}>
                     {apiErrorDetail}
                 </div>
             )}
-
-            <div className="stat-divider" />
 
             {/* [v2.3.8] Resource Usage Section */}
             <div

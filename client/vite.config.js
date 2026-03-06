@@ -4,11 +4,7 @@ import legacy from '@vitejs/plugin-legacy';
 
 export default defineConfig({
     plugins: [
-        react(),
-        legacy({
-            targets: ['ios >= 12', 'chrome >= 60', 'safari >= 12'],
-            additionalLegacyPolyfills: ['regenerator-runtime/runtime']
-        })
+        react()
     ],
     server: {
         port: 5173,

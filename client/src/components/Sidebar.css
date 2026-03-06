@@ -1,10 +1,11 @@
 .sidebar {
     position: absolute;
-    top: 0;
+    top: 60px;
+    /* Offset for TopBar */
     left: 0;
     width: 380px;
-    height: 100vh;
-    height: 100dvh;
+    height: calc(100vh - 60px);
+    height: calc(100dvh - 60px);
     z-index: 2000;
     background: var(--color-glass-panel);
     border-right: 1px solid var(--color-glass-border);

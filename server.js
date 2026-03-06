@@ -1,10 +1,27 @@
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression'); // [v2.9.0] Gzip
+const helmet = require('helmet'); // [v3.0] Security headers
+const rateLimit = require('express-rate-limit'); // [v3.0] API abuse protection
 const fs = require('fs');
 const path = require('path');
 const cron = require('node-cron');
 const { Worker } = require('worker_threads');
 require('dotenv').config();
+
+// ==========================================
+// [OPT] Debounce utility — 合併高頻磁碟寫入
+// ==========================================
+function debounce(fn, delayMs) {
+    let timer = null;
+    return function (...args) {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+            timer = null;
+            fn.apply(this, args);
+        }, delayMs);
+    };
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,8 +30,10 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 // ==========================================
 app.use(cors());
-app.use(express.json());
-// 提供前端靜態檔案
+app.use(compression()); // [v2.9.0] Gzip
+
+// [v2.9.0] Serve static files BEFORE security middleware
+// This prevents helmet's nosniff from blocking JS/CSS MIME types
 app.use(express.static(path.join(__dirname, 'public-react'), {
     setHeaders: (res, filePath) => {
         if (filePath.endsWith('.html')) {
@@ -22,9 +41,28 @@ app.use(express.static(path.join(__dirname, 'public-react'), {
             res.setHeader('Pragma', 'no-cache');
             res.setHeader('Expires', '0');
         }
+        if (filePath.endsWith('.js')) res.setHeader('Content-Type', 'application/javascript');
+        if (filePath.endsWith('.css')) res.setHeader('Content-Type', 'text/css');
     }
-})); // React build
-app.use(express.static(path.join(__dirname, 'public')));        // 舊版 HTML
+}));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// [v3.0] Security Headers
+app.use(helmet({
+    contentSecurityPolicy: false, // Prevents blocking of inline scripts and external map tiles
+    crossOriginEmbedderPolicy: false, // Prevents blocking of external assets
+}));
+// [v3.0] Rate limiter: 120 req/min per IP on all API endpoints
+const apiLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, please wait a moment.' },
+    skip: (req) => req.path === '/api/events', // SSE exempt
+});
+app.use('/api', apiLimiter);
+app.use(express.json());
 
 // ==========================================
 // [v2.5.2] 資料缺失日誌系統 (Data Deficiency Logging)
@@ -40,11 +78,13 @@ function loadMissingDataLog() {
     } catch (e) { console.error('❌ [MISSING LOG] Load error:', e.message); }
 }
 
-function saveMissingDataLog() {
-    try {
-        fs.writeFileSync(MISSING_DATA_FILE, JSON.stringify(missingDataLog, null, 2));
-    } catch (e) { console.error('❌ [MISSING LOG] Save error:', e.message); }
-}
+// [OPT] 防抖寫入：5秒內的多次觸發合併為一次磁碟寫入
+const _saveMissingDataLogNow = () => {
+    fs.writeFile(MISSING_DATA_FILE, JSON.stringify(missingDataLog, null, 2), (e) => {
+        if (e) console.error('❌ [MISSING LOG] Save error:', e.message);
+    });
+};
+const saveMissingDataLog = debounce(_saveMissingDataLogNow, 5000);
 
 function logMissingData(icao24, type, callsign = null) {
     const key = icao24.toLowerCase();
@@ -280,6 +320,96 @@ app.post('/api/log', (req, res) => {
     console.log(`${prefix} [${timestamp}] ${message}`, Object.keys(data).length > 0 ? data : '');
     res.json({ status: 'ok' });
 });
+
+// ==========================================
+// [v2.9.0] SSE 即時推送系統
+// 每次 globalPlanesCache 更新就廣播給所有連接的客戶端
+// 客戶端收到事件後立即觸發 fetchPlanes()，延遲從 60s 降至 <1s
+// ==========================================
+const sseClients = new Set();
+
+app.get('/api/events', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.flushHeaders();
+
+    // 登錄這個客戶端
+    sseClients.add(res);
+    console.log(`📡 [SSE] Client connected. Total: ${sseClients.size}`);
+
+    // 立即發送当前資料快照
+    res.write(`data: ${JSON.stringify({ type: 'connected', time: globalPlanesCache.time, count: globalPlanesCache.states.length })}\n\n`);
+
+    // 心跳機制：每 30 秒發送一次 ping 防止連線超時斷開
+    const heartbeat = setInterval(() => {
+        res.write(`: ping\n\n`);
+    }, 30000);
+
+    // 客戶端斷開後清理
+    req.on('close', () => {
+        sseClients.delete(res);
+        clearInterval(heartbeat);
+        console.log(`📡 [SSE] Client disconnected. Total: ${sseClients.size}`);
+    });
+});
+
+function broadcastSSE(data) {
+    const payload = `data: ${JSON.stringify(data)}\n\n`;
+    for (const client of sseClients) {
+        try { client.write(payload); }
+        catch (e) { sseClients.delete(client); }
+    }
+}
+
+// ==========================================
+// [v3.0] 飛行異常偵測引擎
+// 每次 globalPlanesCache 更新後這行，偵測危險狀態後用 SSE 廣播
+// ==========================================
+const _prevStates = new Map(); // icao24 -> prev state for diff
+
+function detectAnomalies(states) {
+    const alerts = [];
+    for (const s of states) {
+        const icao24 = s[0];
+        const callsign = (s[1] || '').trim();
+        const lat = s[6];
+        const lng = s[5];
+        const altitude = s[7];
+        const velocity = s[9];
+        const vRate = s[11];
+        const onGround = s[8];
+        const squawk = s[14];
+
+        if (!lat || !lng) continue;
+
+        const prev = _prevStates.get(icao24);
+        _prevStates.set(icao24, { lat, lng, altitude, velocity, onGround, timestamp: Date.now() });
+
+        // Squawk emergency codes
+        if (squawk === '7700') alerts.push({ icao24, callsign, lat, lng, type: 'SQUAWK_7700', message: '🚨 MAYDAY — Squawk 7700 General Emergency', severity: 'critical' });
+        if (squawk === '7500') alerts.push({ icao24, callsign, lat, lng, type: 'SQUAWK_7500', message: '✈️ HIJACK — Squawk 7500 Unlawful Interference', severity: 'critical' });
+        if (squawk === '7600') alerts.push({ icao24, callsign, lat, lng, type: 'SQUAWK_7600', message: '📵 NORDO — Squawk 7600 Radio Failure', severity: 'warning' });
+
+        // Low-altitude high-speed
+        if (!onGround && altitude !== null && altitude < 300 && velocity !== null && velocity > 50) {
+            alerts.push({ icao24, callsign, lat, lng, type: 'LOW_ALT', message: `⚠️ LOW ALTITUDE: ${Math.round(altitude)}m at ${Math.round(velocity * 3.6)}km/h`, severity: 'warning' });
+        }
+
+        // Sudden velocity loss (possible stall/crash)
+        if (prev && !onGround && prev.velocity !== null && velocity !== null) {
+            const velDrop = prev.velocity - velocity;
+            if (velDrop > 80 && prev.onGround === false) {
+                alerts.push({ icao24, callsign, lat, lng, type: 'SUDDEN_DECEL', message: `⚠️ RAPID SPEED LOSS: -${Math.round(velDrop * 3.6)}km/h`, severity: 'warning' });
+            }
+        }
+    }
+
+    if (alerts.length > 0) {
+        broadcastSSE({ type: 'anomalies', alerts });
+    }
+}
 
 // 健康檢查
 app.get('/api/health', (req, res) => {
@@ -521,6 +651,12 @@ async function fetchGlobalPlanes() {
                     globalPlanesCache = { states: newStates, time: timestamp };
                     console.log(`📦 [WORKER] Parse complete. Parsed ${newStates.length} planes in ${msg.parseTimeMs}ms.`);
                     apiStats.lastSuccessTime = new Date().toISOString();
+
+                    // [v2.9.0] SSE
+                    broadcastSSE({ type: 'planes-updated', time: timestamp, count: newStates.length });
+
+                    // [v3.0] 飛行異常偵測
+                    detectAnomalies(newStates);
                 } else {
                     console.error(`❌ [WORKER ERROR] ${msg.error}`);
                 }
@@ -613,9 +749,21 @@ app.get('/api/planes/bbox', (req, res) => {
     const bufLomin = minLng - (lonDiff * 0.1);
     const bufLomax = maxLng + (lonDiff * 0.1);
 
-    // Filter `globalPlanesCache`
+    // Helper to check if a longitude (-180 to +180) is within the unnormalized BBox [bufLomin, bufLomax]
+    const isLngInBounds = (lng, min, max) => {
+        if (max - min >= 360) return true; // Box covers whole world
+        const center = (min + max) / 2;
+        let pLng = lng;
+        while (pLng < center - 180) pLng += 360;
+        while (pLng > center + 180) pLng -= 360;
+        return pLng >= min && pLng <= max;
+    };
+
+    // globalPlanesCache.states is an array of pre-parsed objects from workers/parser.js
     const filteredStates = globalPlanesCache.states.filter(p => {
-        return p.lat >= bufLamin && p.lat <= bufLamax && p.lng >= bufLomin && p.lng <= bufLomax;
+        if (p.lat === null || p.lng === null || p.lat === undefined || p.lng === undefined) return false;
+        if (p.lat < bufLamin || p.lat > bufLamax) return false;
+        return isLngInBounds(p.lng, bufLomin, bufLomax);
     });
 
     res.json({
@@ -651,13 +799,13 @@ try {
     console.warn('⚠️ Failed to load metadata files:', e.message);
 }
 
-function saveMetadataCache() {
-    try {
-        fs.writeFileSync(METADATA_CACHE_FILE, JSON.stringify(aircraftMetadataCache), 'utf8');
-    } catch (e) {
-        console.warn('⚠️ Failed to save metadata cache:', e.message);
-    }
-}
+// [OPT] 防抖寫入：5秒內的多次觸發合併為一次磁碟寫入，避免阻塞 Event Loop
+const _saveMetadataCacheNow = () => {
+    fs.writeFile(METADATA_CACHE_FILE, JSON.stringify(aircraftMetadataCache), 'utf8', (e) => {
+        if (e) console.warn('⚠️ Failed to save metadata cache:', e.message);
+    });
+};
+const saveMetadataCache = debounce(_saveMetadataCacheNow, 5000);
 
 app.get('/api/metadata/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
@@ -732,6 +880,13 @@ app.post('/api/metadata/batch', async function (req, res) {
 
     if (uncached.length === 0) {
         return res.json({ fetched: 0, total: Object.keys(aircraftMetadataCache).length });
+    }
+
+    // [OPT 5.1] 如果當前帳號 quota 已低於安全線，跳過本次批次
+    const currentAcc = apiStats.accounts[currentAccountIndex];
+    if (currentAcc.remainingCredits !== null && currentAcc.remainingCredits <= SAFE_RESERVE_CAP) {
+        console.warn(`⚠️ [BATCH] Skipping metadata batch — quota low (${currentAcc.remainingCredits} remaining).`);
+        return res.json({ fetched: 0, skipped: uncached.length, reason: 'quota_low' });
     }
 
     // 最多同時查詢 10 架，避免限流
@@ -832,8 +987,24 @@ function loadGlobalData() {
     }
 }
 
+// [OPT 1.1] 機場清單快取變數與函式——必須在 loadGlobalData()/buildAirportGrid() 之前宣告
+let _cachedAirportList = null;
+let _cachedAirportListETag = '';
+
+function buildAirportListCache() {
+    _cachedAirportList = Object.entries(globalAirportsDB)
+        .filter(([key, ap]) => {
+            if (ap.icao) return key === ap.icao;
+            return key === ap.iata;
+        })
+        .map(([key, ap]) => ap);
+    _cachedAirportListETag = `"${_cachedAirportList.length}-${Date.now()}"`;
+    console.log(`✅ [OPT] Airport list cache built: ${_cachedAirportList.length} airports.`);
+}
+
 loadGlobalData();
 buildAirportGrid(); // [v2.8.4] 建立空間格狀索引
+buildAirportListCache(); // [OPT 1.1] 預計算機場清單快取
 
 // Helper to resolve airline aliases (e.g., APJ -> MM, TTW -> IT)
 function resolveAirlineAlias(callsign) {
@@ -869,29 +1040,28 @@ try {
     console.error('❌ [ROUTE DB] Failed to load route JSONs:', e.message);
 }
 
-function saveRoutesDatabase() {
-    try {
-        fs.writeFileSync(ROUTES_CACHE_FILE, JSON.stringify(routesDatabase, null, 2));
-    } catch (e) {
-        console.error('❌ Error saving routes-cache.json:', e.message);
-    }
-}
+// [OPT] 防抖寫入：5秒內的多次觸發合併為一次磁碟寫入
+const _saveRoutesDatabaseNow = () => {
+    fs.writeFile(ROUTES_CACHE_FILE, JSON.stringify(routesDatabase, null, 2), (e) => {
+        if (e) console.error('❌ Error saving routes-cache.json:', e.message);
+    });
+};
+const saveRoutesDatabase = debounce(_saveRoutesDatabaseNow, 5000);
 
 const routeCache = new Map(); // icao24 -> { data, timestamp } (動態航線快取)
 const ROUTE_CACHE_TTL = 1800000; // 30 分鐘
 
-app.get('/api/airports/list', (req, res) => {
-    // Return all unique airports (key == icao or if no icao, key == iata)
-    // To avoid double-sending (as dictionary has both icao and iata as keys)
-    const airportList = Object.entries(globalAirportsDB)
-        .filter(([key, ap]) => {
-            if (ap.icao) return key === ap.icao;
-            return key === ap.iata;
-        })
-        .map(([key, ap]) => ap);
+// 快取變數與函式已在上方 loadGlobalData() 前方訝明
 
-    console.log(`🌐 [API] Serving ${airportList.length} airports to client (Global Search/Display)`);
-    res.json(airportList);
+app.get('/api/airports/list', (req, res) => {
+    if (!_cachedAirportList) buildAirportListCache();
+    // ETag 瀏覽器快取：若資料未變，回傳 304 Not Modified 節省頻寬
+    if (req.headers['if-none-match'] === _cachedAirportListETag) {
+        return res.status(304).end();
+    }
+    res.setHeader('ETag', _cachedAirportListETag);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.json(_cachedAirportList);
 });
 
 app.get('/api/airport/:code', (req, res) => {
@@ -994,9 +1164,8 @@ app.get('/api/route/:icao24', async (req, res) => {
         // --- Layer 3: Spatial Reverse-Geocoding (物理足跡推測) ---
         console.log(`🔍 [SPATIAL] Attempting inference for ${cleanCallsign} (${icao24})...`);
 
-        // Fetch tracks history to find the starting point
-        const trackRes = await fetch(`http://localhost:${PORT}/api/tracks?icao24=${icao24}`);
-        const trackData = await trackRes.json();
+        // [OPT 1.3] 直接呼叫內部函式取得 track，不再透過 localhost HTTP 請求
+        const trackData = await fetchTracksInternal(icao24);
 
         if (trackData && trackData.path && trackData.path.length > 0) {
             resolveMissingData(icao24, 'route'); // [v2.5.2]
@@ -1004,19 +1173,8 @@ app.get('/api/route/:icao24', async (req, res) => {
             const startLat = startPoint[1];
             const startLng = startPoint[2];
 
-            // Find nearest airport within 10km
-            let nearestAp = null;
-            let minDict = 10; // 門檻 10km
-
-            // 我們優化搜尋，僅對有 ICAO 代碼的真實機場進行比對
-            for (const ap of Object.values(globalAirportsDB)) {
-                if (!ap.icao || !ap.lat || !ap.lng) continue;
-                const dist = getDistance(startLat, startLng, ap.lat, ap.lng);
-                if (dist < minDict) {
-                    minDict = dist;
-                    nearestAp = ap;
-                }
-            }
+            // [OPT 1.2] 使用空間索引 O(k) 取代 O(n) 全量搜尋 (~1000x 加速)
+            const nearestAp = findNearestAirport(startLat, startLng, 10);
 
             if (nearestAp) {
                 console.log(`✅ [SPATIAL] Inferred Departure: ${nearestAp.icao} (${nearestAp.name}) for ${cleanCallsign}`);
@@ -1048,6 +1206,30 @@ app.get('/api/route/:icao24', async (req, res) => {
 // ==========================================
 const trackCache = new Map();
 const TRACK_CACHE_TTL = 30000; // 30 秒快取
+
+/**
+ * [OPT 1.3] 內部 track 取得函式，不透過 HTTP 迴環
+ * 供 /api/route 的空間推測直接呼叫
+ */
+async function fetchTracksInternal(icao24, time = 0) {
+    const cached = trackCache.get(icao24);
+    if (cached && (Date.now() - cached.timestamp < TRACK_CACHE_TTL)) {
+        return cached.data;
+    }
+    try {
+        const headers = await getAuthHeaders();
+        const url = `https://opensky-network.org/api/tracks/all?icao24=${icao24}&time=${time}`;
+        const response = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+        if (!response.ok) return { icao24, path: [], noData: true };
+        const data = await response.json();
+        const path = data.path || [];
+        const result = { icao24, path };
+        trackCache.set(icao24, { data: result, timestamp: Date.now() });
+        return result;
+    } catch (e) {
+        return { icao24, path: [], noData: true, error: e.message };
+    }
+}
 
 app.get('/api/tracks', async (req, res) => {
     const icao24 = req.query.icao24;
@@ -1222,14 +1404,14 @@ async function syncSchedulesDatabase() {
         }
 
         const newData = await response.json();
-        const SCHEDULE_FILE = path.join(__dirname, 'schedules_static.json');
+        // [OPT 4.3] 修復路徑：使用與 loadGlobalData 相同的路徑 (data/schedules_static.json)
+        const SCHEDULE_FILE = SCHEDULES_STATIC_FILE;
 
-        // [轉譯與覆寫]
-        // 原則上我們直接覆寫，但如果是 CSV 或其他格式，這裡需要加入清洗邏輯
+        // 寫入修正後的路徑
         fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(newData, null, 2));
 
         // 同步完成後更新記憶體中的變數
-        global.schedulesStaticDB = newData;
+        schedulesStaticDB = newData;
 
         console.log(`✅ [AUTO-SYNC] Successfully synced ${Object.keys(newData).length} flights. Schedules updated.`);
     } catch (error) {
@@ -1252,7 +1434,7 @@ app.listen(PORT, () => {
     console.log('║   ✈️  AEROSTRAT Surveillance Server      ║');
     console.log(`║   🌐 http://localhost:${PORT}               ║`);
     console.log(`║   📁 Serving: ./public-react             ║`);
-    console.log(`║   🔐 Version: v2.8.4                     ║`);
+    console.log(`║   🔐 Version: v2.9.0                     ║`);
     console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
     console.log('╚══════════════════════════════════════════╝');
     console.log('');

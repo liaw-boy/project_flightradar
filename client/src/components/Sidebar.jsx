@@ -1,19 +1,104 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
-    getAirlineLogoUrl,
-    getAirlineName,
-    getCountryFlag,
-    getCategoryName,
-    getNearestAirport,
-    formatVerticalRate,
-    getAirportDisplayData,
+    getAirlineLogoUrl, getAirlineName, getCountryFlag, getCategoryName,
+    getNearestAirport, formatVerticalRate, getAirportDisplayData,
     formatLocalTime
 } from '../utils/flightUtils';
 import { useI18n } from '../hooks/useI18n';
 import { logToServer } from '../utils/logger';
 import './Sidebar.css';
 
-export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
+// ─── Haversine distance (km) ──────────────────────────────────────────────────
+function haversineKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ─── Altitude Profile Mini-Chart (SVG) ────────────────────────────────────────
+function AltitudeChart({ history, icao24 }) {
+    const data = history?.[icao24];
+    if (!data || data.length < 2) return null;
+
+    const points = data.slice(-60);
+    const altitudes = points.map((p, i) => ({ x: i, alt: p[3] ? 0 : (p[4] || 0) }));
+    const trueMax = Math.max(...altitudes.map(p => p.alt));
+    if (trueMax < 10) return null; // Hide chart if plane never left the ground
+
+    const maxAlt = Math.max(trueMax, 1000);
+
+    const W = 220;
+    const H = 52;
+    const xStep = W / Math.max(1, altitudes.length - 1);
+
+    // Build SVG path
+    const pathD = altitudes.map((p, i) => {
+        const x = i * xStep;
+        const y = H - (p.alt / maxAlt) * (H - 4);
+        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+
+    const fillD = `${pathD} L ${W},${H} L 0,${H} Z`;
+
+    return (
+        <div style={{ margin: '14px 20px 4px 20px' }}>
+            <div style={{ fontSize: 10, color: 'var(--color-text-dim)', marginBottom: 6, letterSpacing: 1, fontWeight: 700 }}>ALTITUDE PROFILE</div>
+            <div style={{ position: 'relative', width: '100%', height: '52px', borderRadius: '6px', overflow: 'hidden', background: 'rgba(0,0,0,0.2)' }}>
+                <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
+                    <defs>
+                        <linearGradient id="altGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="rgba(34,211,238,0.4)" />
+                            <stop offset="100%" stopColor="rgba(34,211,238,0)" />
+                        </linearGradient>
+                    </defs>
+                    <path d={fillD} fill="url(#altGrad)" />
+                    <path d={pathD} fill="none" stroke="#22d3ee" strokeWidth="1.5" strokeLinejoin="round" />
+                    <text x="4" y="14" fill="rgba(255,255,255,0.7)" fontSize="10" fontFamily="JetBrains Mono, monospace" fontWeight="600">
+                        {Math.round(maxAlt)}m
+                    </text>
+                </svg>
+            </div>
+        </div>
+    );
+}
+
+// ─── Flight Progress Bar ───────────────────────────────────────────────────────
+function FlightProgress({ plane, depInfo, arrInfo }) {
+    const progress = useMemo(() => {
+        if (!depInfo?.lat || !arrInfo?.lat || !plane?.lat) return null;
+        const total = haversineKm(depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng);
+        const done = haversineKm(depInfo.lat, depInfo.lng, plane.lat, plane.lng);
+        const remaining = haversineKm(plane.lat, plane.lng, arrInfo.lat, arrInfo.lng);
+        const pct = Math.min(100, Math.round((done / total) * 100));
+        const etaMin = plane.velocity > 0 ? Math.round((remaining * 1000) / plane.velocity / 60) : null;
+        return { pct, remaining: Math.round(remaining), etaMin };
+    }, [plane, depInfo, arrInfo]);
+
+    if (!progress) return null;
+    const { pct, remaining, etaMin } = progress;
+    const etaStr = etaMin !== null ? `${Math.floor(etaMin / 60)}h ${etaMin % 60}min` : '--';
+
+    return (
+        <div className="flight-progress">
+            <div className="fp-header">
+                <span className="fp-pct">{pct}% complete</span>
+                <span className="fp-eta">ETA {etaStr} · {remaining}km</span>
+            </div>
+            <div className="fp-bar">
+                <div className="fp-fill" style={{ width: `${pct}%` }}>
+                    <div className="fp-plane-dot" />
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Main Sidebar Component ────────────────────────────────────────────────────
+export default function Sidebar({ plane, icao24, metadata, route, flightHistoryRef, onClose, trackMode, onToggleTrack }) {
     if (!plane || !icao24) return null;
 
     const { t } = useI18n();
@@ -22,10 +107,6 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
     const dataAge = nowUnix - (plane.lastContact || nowUnix);
     const contactTime = new Date((plane.lastContact || nowUnix) * 1000).toLocaleTimeString();
     const fr24Url = `https://www.flightradar24.com/${plane.callsign}`;
-
-    const handleFr24Click = () => {
-        logToServer(`User tracking flight on FR24: ${plane.callsign}`, 'info', { callsign: plane.callsign, icao24 });
-    };
 
     const airlineName = getAirlineName(plane.callsign);
     const flag = getCountryFlag(plane.country);
@@ -44,6 +125,10 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
 
     const [depInfo, setDepInfo] = useState(null);
     const [arrInfo, setArrInfo] = useState(null);
+    const [photos, setPhotos] = useState([]);
+    const [openSections, setOpenSections] = useState({
+        spatial: true, specs: false, status: false, nearest: false,
+    });
 
     useEffect(() => {
         if (depCode && depCode !== 'N/A') getAirportDisplayData(depCode).then(setDepInfo);
@@ -54,21 +139,6 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
         if (arrCode && arrCode !== 'N/A') getAirportDisplayData(arrCode).then(setArrInfo);
         else setArrInfo(null);
     }, [arrCode]);
-
-    const depName = depInfo ? (depInfo.city || depInfo.name) : (depCode || '...');
-    const arrName = arrInfo ? (arrInfo.city || arrInfo.name) : (arrCode || '...');
-
-    const [photos, setPhotos] = useState([]);
-    const [openSections, setOpenSections] = useState({
-        spatial: true,
-        specs: false,
-        status: false,
-        nearest: false
-    });
-
-    const toggleSection = (section) => {
-        setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
-    };
 
     useEffect(() => {
         let isMounted = true;
@@ -95,6 +165,11 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
         return () => { isMounted = false; };
     }, [icao24, registration]);
 
+    const toggleSection = (s) => setOpenSections(prev => ({ ...prev, [s]: !prev[s] }));
+
+    const depName = depInfo ? (depInfo.city || depInfo.name) : (depCode || '...');
+    const arrName = arrInfo ? (arrInfo.city || arrInfo.name) : (arrCode || '...');
+
     return (
         <div className="sidebar active">
             <div className="sb-header">
@@ -103,20 +178,25 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                         {plane.callsign || 'UNKNOWN'}
                         {typecode && <span className="sb-badge">{typecode}</span>}
                     </h2>
-                    <div className="sb-subtitle">
-                        {airlineName || 'Unknown'} — {registration}
-                    </div>
+                    <div className="sb-subtitle">{airlineName || 'Unknown'} — {registration}</div>
                 </div>
-                <div className="sb-close" onClick={onClose}>
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="3">
-                        <path d="M18 6L6 18M6 6l12 12" />
-                    </svg>
+                <div className="sb-header-actions">
+                    <div className="sb-close" onClick={onClose}>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="3">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                    </div>
                 </div>
             </div>
 
             <div className="sb-content">
                 {plane.isEmergency && (
-                    <div className="alert-box">🚨 EMERGENCY SQUAWK: {plane.squawk}</div>
+                    <div className="alert-box" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                            <path d="M12 2L1 21h22L12 2zm1 16h-2v-2h2v2zm0-4h-2v-5h2v5z" />
+                        </svg>
+                        EMERGENCY SQUAWK: {plane.squawk}
+                    </div>
                 )}
 
                 {photos.length > 0 ? (
@@ -134,6 +214,8 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                     )
                 )}
 
+
+
                 <div className="sb-route-card">
                     <div className="sb-route-display">
                         <div className="sb-route-node">
@@ -141,7 +223,6 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                             <div className="route-city">{depName}</div>
                             {route?.isInferred && <div className="inferred-tag">{t('inferred')}</div>}
                         </div>
-
                         <div className="sb-route-center">
                             <div className="route-path-line"></div>
                             <div className="route-plane-icon">
@@ -150,7 +231,6 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                                 </svg>
                             </div>
                         </div>
-
                         <div className="sb-route-node">
                             <div className="route-iata">{arrInfo?.iata || arrCode || '---'}</div>
                             <div className="route-city">{arrName}</div>
@@ -167,6 +247,9 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                             <div className="time-val">{formatLocalTime(route?.lastSeen, arrInfo?.timezone) || '--:--'}</div>
                         </div>
                     </div>
+
+                    {/* [v2.9.0] Flight Progress Bar */}
+                    <FlightProgress plane={plane} depInfo={depInfo} arrInfo={arrInfo} />
                 </div>
 
                 {/* Spatial Section */}
@@ -183,6 +266,10 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                         <DataRow label={t('vertRate')} value={formatVerticalRate(plane.vRate)} />
                         <DataRow label={t('position')} value={`${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}`} />
                         <DataRow label={t('source')} value={posSourceMap[plane.positionSource] || 'ADS-B'} />
+                        {/* [v2.9.0] Altitude Profile Chart */}
+                        {flightHistoryRef?.current && (
+                            <AltitudeChart history={flightHistoryRef.current} icao24={icao24} />
+                        )}
                     </div>
                 )}
 
@@ -232,7 +319,7 @@ export default function Sidebar({ plane, icao24, metadata, route, onClose }) {
                     </>
                 )}
 
-                <a href={fr24Url} target="_blank" rel="noopener noreferrer" className="route-btn" onClick={handleFr24Click}>
+                <a href={fr24Url} target="_blank" rel="noopener noreferrer" className="route-btn" onClick={() => logToServer(`FR24 track: ${plane.callsign}`, 'info')}>
                     {t('trackOnFR24')}
                 </a>
             </div>

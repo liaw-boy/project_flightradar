@@ -5,12 +5,12 @@
 const EARTH_RADIUS = 6371000;
 
 /**
- * 將經度正規化至 -180 ~ 180 之間
+ * [OPT 6.1] 將經度正規化至 -180 ~ 180 之間
+ * 改用模算運算，防止 NaN/Infinity 造成無空迴圈
  */
 export function normalizeLongitude(lng) {
-    while (lng > 180) lng -= 360;
-    while (lng < -180) lng += 360;
-    return lng;
+    if (!isFinite(lng)) return 0;
+    return ((lng + 180) % 360 + 360) % 360 - 180;
 }
 
 // ==========================================
@@ -91,9 +91,10 @@ const CATEGORY_NAMES = {
 };
 
 // ==========================================
-// 航空公司 Logo Map (使用 IATA 縮寫)
+// [OPT 3.1] 合併 AIRLINE_LOGOS 與 ICAO_TO_IATA 為單一來源
+// ICAO 呼號前綴 -> IATA 代碼 對照表
 // ==========================================
-export const AIRLINE_LOGOS = {
+export const ICAO_TO_IATA = {
     // Taiwan
     'CAL': 'CI', 'EVA': 'BR', 'MDA': 'AE', 'UIA': 'B7', 'SJX': 'JX', 'TTW': 'IT', 'FEA': 'FE',
     // Japan
@@ -114,13 +115,16 @@ export const AIRLINE_LOGOS = {
     'EZY': 'U2', 'RYR': 'FR', 'WZZ': 'W6',
     // Americas
     'AAL': 'AA', 'DAL': 'DL', 'UAL': 'UA', 'SWA': 'WN', 'JBU': 'B6', 'ASA': 'AS',
-    'ACA': 'AC', 'TAM': 'LA', 'AVA': 'AV',
+    'ACA': 'AC', 'TAM': 'JJ', 'AVA': 'AV',
     // Oceania
     'QFA': 'QF', 'ANZ': 'NZ', 'JST': 'JQ', 'VOZ': 'VA',
     // Cargo
     'FDX': 'FX', 'UPS': '5X', 'GTI': '5Y', 'CLX': 'CV', 'CKS': 'K4', 'ABW': 'RU',
-    'AHK': 'AHK', 'CAO': 'CA',
+    'AHK': 'LD', 'CAO': 'CA',
 };
+// 向下相容別名
+/** @deprecated Use ICAO_TO_IATA instead */
+export const AIRLINE_LOGOS = ICAO_TO_IATA;
 
 // ==========================================
 // 國家旗幟 Emoji
@@ -278,7 +282,28 @@ export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'TACT
  * 17: Surface Vehicle - Service
  * 18: Point Obstacle
  */
+// [OPT 2.2] SVG 生成 LRU 快取，避免每幀對所有飛機重複建立字串
+// key: heading_altitude_isSelected_onGround_isEmergency_category_scheme
+const _svgCache = new Map();
+const _SVG_CACHE_MAX = 500;
+
 export function createPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category, scheme = 'TACTICAL') {
+    // 不要對選中飛機快取（選中狀態爽少）
+    if (!isSelected) {
+        const cacheKey = `${Math.round(heading)}_${altitude}_0_${onGround ? 1 : 0}_${isEmergency ? 1 : 0}_${category}_${scheme}`;
+        if (_svgCache.has(cacheKey)) return _svgCache.get(cacheKey);
+        const result = _buildPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category, scheme);
+        if (_svgCache.size >= _SVG_CACHE_MAX) {
+            // LRU 送出最舊條目
+            _svgCache.delete(_svgCache.keys().next().value);
+        }
+        _svgCache.set(cacheKey, result);
+        return result;
+    }
+    return _buildPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category, scheme);
+}
+
+function _buildPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category, scheme = 'TACTICAL') {
     const color = getAltitudeColor(altitude, onGround, isEmergency, scheme);
     const size = onGround ? 26 : Math.min(36, 26 + (altitude !== 'N/A' && altitude !== 'GROUND' ? altitude / 1000 : 0));
     const glowColor = isSelected ? '#f59e0b' : color;
@@ -517,40 +542,8 @@ export function formatVerticalRate(vRate) {
 }
 
 /**
- * ICAO 呼號前綴 → IATA 代碼對照表
- * (pics.avs.io 使用 IATA 代碼)
- */
-const ICAO_TO_IATA = {
-    // Taiwan
-    'CAL': 'CI', 'EVA': 'BR', 'MDA': 'AE', 'UIA': 'B7', 'SJX': 'JX', 'TTW': 'IT', 'FEA': 'FE',
-    // Japan
-    'JAL': 'JL', 'ANA': 'NH', 'JJP': 'GK', 'APJ': 'MM', 'SFJ': '7G', 'ADO': 'HD', 'SNJ': '6J',
-    // Korea
-    'KAL': 'KE', 'AAR': 'OZ', 'JNA': 'LJ', 'TWB': 'TW', 'JJA': '7C', 'ABL': 'BX', 'ESR': 'ZE',
-    // China
-    'CCA': 'CA', 'CES': 'MU', 'CSN': 'CZ', 'HXA': 'HX', 'CPA': 'CX', 'SHQ': '9C',
-    'CSZ': 'ZH', 'CDG': 'SC', 'CHH': 'HU',
-    // Southeast Asia
-    'SIA': 'SQ', 'THA': 'TG', 'MAS': 'MH', 'AXM': 'AK', 'GIA': 'GA', 'PAL': 'PR',
-    'CEB': '5J', 'VJC': 'VJ', 'HVN': 'VN', 'SCO': 'TR', 'JSA': '3K', 'TGW': 'TR',
-    // Middle East
-    'UAE': 'EK', 'ETD': 'EY', 'QTR': 'QR', 'THY': 'TK', 'SVA': 'SV', 'GFA': 'GF',
-    // Europe
-    'BAW': 'BA', 'DLH': 'LH', 'AFR': 'AF', 'KLM': 'KL', 'SAS': 'SK', 'FIN': 'AY',
-    'SWR': 'LX', 'AUA': 'OS', 'TAP': 'TP', 'IBE': 'IB', 'AZA': 'AZ', 'LOT': 'LO',
-    'EZY': 'U2', 'RYR': 'FR', 'WZZ': 'W6',
-    // Americas
-    'AAL': 'AA', 'DAL': 'DL', 'UAL': 'UA', 'SWA': 'WN', 'JBU': 'B6', 'ASA': 'AS',
-    'ACA': 'AC', 'TAM': 'JJ', 'AVA': 'AV',
-    // Oceania
-    'QFA': 'QF', 'ANZ': 'NZ', 'JST': 'JQ', 'VOZ': 'VA',
-    // Cargo
-    'FDX': 'FX', 'UPS': '5X', 'GTI': '5Y', 'CLX': 'CV', 'AHK': 'LD', 'CAO': 'CA',
-};
-
-/**
- * 取得航空公司 Logo URL
- * 使用 pics.avs.io CDN (免費，無 hotlink 限制)
+ * [OPT 3.1] 取得航空公司 Logo URL
+ * 使用已合併的 ICAO_TO_IATA 单一來源
  */
 export function getAirlineLogoUrl(callsign) {
     if (!callsign || callsign === 'UNKNOWN') return '';

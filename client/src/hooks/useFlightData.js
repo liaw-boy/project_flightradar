@@ -143,9 +143,7 @@ export function useFlightData(mapRef) {
             }
 
             isFetchingRef.current = false;
-            return;
-
-            return; // 成功結束，不需要走 default finally
+            return; // 成功結束
         } catch (error) {
             const elapsed = Math.round(performance.now() - startTime);
             setLatency(elapsed);
@@ -175,18 +173,11 @@ export function useFlightData(mapRef) {
 
     // 處理飛機資料 (非破壞性合併)
     const processPlaneData = useCallback((planes) => {
-        const history = flightHistoryRef.current;
-        let air = 0;
-        let gnd = 0;
-
         setPlanesDict((prev) => {
+            const history = flightHistoryRef.current;
             const next = { ...prev };
 
             planes.forEach(({ icao24, data: pData }) => {
-                // 更新 AIR / GND 計數
-                if (pData.onGround) gnd++;
-                else air++;
-
                 if (!history[icao24]) history[icao24] = [];
                 const nowUnix = Math.floor(Date.now() / 1000);
                 history[icao24].push([nowUnix, pData.lat, pData.lng, pData.onGround]);
@@ -226,12 +217,37 @@ export function useFlightData(mapRef) {
                 }
             });
 
-            setPlaneCount(Object.keys(next).length);
-            setAirCount(air);
-            setGroundCount(gnd);
+            // [OPT 3.3] 限制記憶體內採蹤的飛機檔案數，防止長時間運行記憶體漉漏
+            const MAX_HISTORY_ENTRIES = 3000;
+            const historyKeys = Object.keys(history);
+            if (historyKeys.length > MAX_HISTORY_ENTRIES) {
+                // 清理超界的最舊條目
+                const globalSnapshotTime2 = globalLastUpdateRef.current || Math.floor(Date.now() / 1000);
+                for (const hid of historyKeys) {
+                    if (!next[hid]) {
+                        delete history[hid];
+                    }
+                }
+            }
+
+            // [OPT 2.3] 合併多個 setState，從 updater 回傳後再分手更新計數
             return next;
         });
     }, []);
+
+    // [v3.1] Reliable dynamic tally of aircraft states
+    useEffect(() => {
+        const list = Object.values(planesDict);
+        let air = 0;
+        let ground = 0;
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].onGround) ground++;
+            else air++;
+        }
+        setPlaneCount(list.length);
+        setAirCount(air);
+        setGroundCount(ground);
+    }, [planesDict]);
 
     // Haversine distance (meters)
     const getDistance = (lat1, lon1, lat2, lon2) => {
@@ -302,6 +318,8 @@ export function useFlightData(mapRef) {
         for (let i = 1; i < history.length; i++) {
             const timeDiff = history[i][0] - history[i - 1][0];
             const wasOnGround = history[i - 1][3] === true;
+            // [OPT 4.2] 修復：在迴圈內正確宣告 isOnGround
+            const isOnGround = history[i][3] === true;
             const dist = getDistance(history[i - 1][1], history[i - 1][2], history[i][1], history[i][2]);
 
             if ((isOnGround && history[history.length - 1][3] === true) ||

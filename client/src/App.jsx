@@ -3,8 +3,9 @@ import LoadingScreen from './components/LoadingScreen';
 import Dashboard from './components/Dashboard';
 import Sidebar from './components/Sidebar';
 import SearchBar from './components/SearchBar';
-import FilterPanel from './components/FilterPanel';
+import TopBar from './components/TopBar';
 import MapView from './components/MapView';
+import PlaneList from './components/PlaneList';
 import { useFlightData } from './hooks/useFlightData';
 import { useI18n } from './hooks/useI18n';
 import { logToServer } from './utils/logger';
@@ -33,6 +34,7 @@ export default function App() {
         showEmergency: true,
         showLow: true,
         showAirports: true,
+        fleetFocus: '', // [v3.1] Airline ICAO filter (e.g. 'EVA', 'CAL')
     });
 
     const [zoom, setZoom] = useState(10);
@@ -47,6 +49,22 @@ export default function App() {
         return localStorage.getItem('radar_color_scheme') || 'TACTICAL';
     });
 
+    // [v2.9.0] Map tile layer
+    const [mapLayer, setMapLayer] = useState(() =>
+        localStorage.getItem('radar_map_layer') || 'dark'
+    );
+    const handleMapLayerChange = useCallback((layerId) => {
+        setMapLayer(layerId);
+        localStorage.setItem('radar_map_layer', layerId);
+    }, []);
+
+    // [v3.0] Anomaly alerts from server SSE
+    const [anomalyAlerts, setAnomalyAlerts] = useState([]);
+
+    // [v3.0] Track mode — map auto-pans to follow selected plane
+    const [trackMode, setTrackMode] = useState(false);
+    const handleToggleTrackMode = useCallback(() => setTrackMode(p => !p), []);
+
     const handleColorSchemeChange = useCallback((scheme) => {
         setColorScheme(scheme);
         localStorage.setItem('radar_color_scheme', scheme);
@@ -54,6 +72,7 @@ export default function App() {
     }, []);
 
     const mapInstanceRef = useRef(null);
+
     const {
         planesDict,
         planeCount,
@@ -70,6 +89,29 @@ export default function App() {
         fetchTrack,
         flightHistoryRef,
     } = useFlightData(mapInstanceRef);
+
+    // [v2.9.0] SSE EventSource — real-time server push
+    useEffect(() => {
+        const es = new EventSource('/api/events');
+        es.onmessage = (e) => {
+            try {
+                const data = JSON.parse(e.data);
+                if (data.type === 'planes-updated') {
+                    fetchPlanes(); // Immediate fetch on new data
+                } else if (data.type === 'anomalies' && data.alerts?.length > 0) {
+                    setAnomalyAlerts(prev => {
+                        // Merge, deduplicate by icao24+type, keep latest 10
+                        const merged = [...data.alerts, ...prev.filter(a =>
+                            !data.alerts.some(b => b.icao24 === a.icao24 && b.type === a.type)
+                        )].slice(0, 10);
+                        return merged;
+                    });
+                }
+            } catch (e) { /* ignore parse error */ }
+        };
+        es.onerror = () => { }; // Auto-reconnects natively
+        return () => es.close();
+    }, [fetchPlanes]);
 
     // Initial URL Params parsing
     const initializedUrlRef = useRef(false);
@@ -125,6 +167,7 @@ export default function App() {
             setTrackPoints([]); // Clear previous tracks immediately to prevent "ghost lines"
             setSelectedMetadata(null);
             setSelectedRoute(null);
+            setTrackMode(true); // 自動開啟追蹤模式
 
             // 取得軌跡
             const points = await fetchTrack(icao24, plane.lastContact);
@@ -162,6 +205,7 @@ export default function App() {
         setTrackPoints([]);
         setSelectedMetadata(null);
         setSelectedRoute(null);
+        setTrackMode(false); // 取消追蹤模式
 
         // Remove ICAO from URL
         const url = new URL(window.location);
@@ -214,36 +258,76 @@ export default function App() {
                 onMapMove={handleMapMove}
                 onUsageUpdate={setUsageStats}
                 colorScheme={colorScheme}
+                mapLayer={mapLayer}
+                trackMode={trackMode}
                 t={t}
                 translateMetar={translateMetar}
             />
 
-            <SearchBar
-                planesDict={planesDict}
-                onSelectPlane={handleSearchSelect}
-            />
-
-            <Dashboard
+            <TopBar
                 planeCount={planeCount}
                 airCount={airCount}
                 groundCount={groundCount}
                 apiStatus={apiStatus}
                 apiStatusClass={apiStatusClass}
-                apiErrorDetail={apiErrorDetail}
-                latency={latency}
-                lastUpdateTime={lastUpdateTime}
-                nextRefresh={throttleSeconds}
-                apiStats={apiStats}
-                zoom={zoom}
-                usageStats={usageStats}
-            />
-
-            <FilterPanel
+                planesDict={planesDict}
+                onSearchSelect={handleSearchSelect}
                 filters={filters}
                 onFilterChange={handleFilterChange}
                 colorScheme={colorScheme}
                 onColorSchemeChange={handleColorSchemeChange}
+                mapLayer={mapLayer}
+                onMapLayerChange={handleMapLayerChange}
             />
+
+            {/* Right Status Column */}
+            <div className="right-hud">
+                <Dashboard
+                    planeCount={planeCount}
+                    airCount={airCount}
+                    groundCount={groundCount}
+                    apiStatus={apiStatus}
+                    apiStatusClass={apiStatusClass}
+                    apiErrorDetail={apiErrorDetail}
+                    latency={latency}
+                    lastUpdateTime={lastUpdateTime}
+                    nextRefresh={throttleSeconds}
+                    apiStats={apiStats}
+                    zoom={zoom}
+                    usageStats={usageStats}
+                />
+                <PlaneList
+                    planesDict={planesDict}
+                    onSelectPlane={handleSelectPlane}
+                    selectedIcao24={selectedIcao24}
+                    filters={filters}
+                />
+            </div>
+
+            {/* [v3.0] Anomaly Alert Panel */}
+            {anomalyAlerts.length > 0 && (
+                <div className="anomaly-panel">
+                    <div className="anomaly-header">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                            </svg>
+                            <span>ALERTS ({anomalyAlerts.length})</span>
+                        </div>
+                        <button onClick={() => setAnomalyAlerts([])} className="anomaly-close">✕</button>
+                    </div>
+                    {anomalyAlerts.map((alert, i) => (
+                        <div
+                            key={`${alert.icao24}-${alert.type}`}
+                            className={`anomaly-item anomaly-${alert.severity}`}
+                            onClick={() => handleSelectPlane(alert.icao24, planesDict[alert.icao24])}
+                        >
+                            <span className="anomaly-callsign">{alert.callsign || alert.icao24}</span>
+                            <span className="anomaly-msg">{alert.message}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {selectedPlane && (
                 <Sidebar
@@ -251,7 +335,10 @@ export default function App() {
                     icao24={selectedIcao24}
                     metadata={selectedMetadata}
                     route={selectedRoute}
+                    flightHistoryRef={flightHistoryRef}
                     onClose={handleDeselectPlane}
+                    trackMode={trackMode}
+                    onToggleTrack={handleToggleTrackMode}
                 />
             )}
         </div>

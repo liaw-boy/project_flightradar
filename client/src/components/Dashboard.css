@@ -1,8 +1,4 @@
 .dashboard {
-    position: absolute;
-    top: 24px;
-    right: 24px;
-    z-index: 1100;
     background: var(--color-glass-panel);
     border: 1px solid var(--color-glass-border);
     border-radius: 16px;
