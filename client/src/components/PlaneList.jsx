@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useI18n } from '../hooks/useI18n';
+import { List, ChevronDown, ChevronUp } from 'lucide-react';
 import './PlaneList.css';
 
 export default function PlaneList({ planesDict, bounds, onSelectPlane, selectedIcao24, filters }) {
@@ -57,13 +58,15 @@ export default function PlaneList({ planesDict, bounds, onSelectPlane, selectedI
 
     const getSortIndicator = (field) => {
         if (sortBy !== field) return '';
-        return sortDesc ? ' ▼' : ' ▲';
+        return sortDesc ? <ChevronDown size={14} style={{ marginLeft: '2px', marginTop: '-2px' }} /> : <ChevronUp size={14} style={{ marginLeft: '2px', marginTop: '-2px' }} />;
     };
 
     return (
         <div className={`plane-list-panel ${isOpen ? 'open' : ''}`}>
             <div className="plane-list-toggle" onClick={() => setIsOpen(!isOpen)}>
-                {isOpen ? '▼' : '▶'} {t('planeList') || 'AIRCRAFT LIST'} ({Object.keys(planesDict).length})
+                {isOpen ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+                <List size={16} style={{ marginLeft: '8px', marginRight: '6px' }} />
+                {t('planeList') || 'AIRCRAFT LIST'} ({Object.keys(planesDict).length})
             </div>
 
             <div className="plane-list-content">

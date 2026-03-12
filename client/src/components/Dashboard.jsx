@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Activity, Server } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import './Dashboard.css';
 
@@ -39,7 +40,10 @@ export default function Dashboard({
                 className={`api-stats-header ${showResourceUsage ? 'open' : ''}`}
                 onClick={() => setShowResourceUsage(!showResourceUsage)}
             >
-                <span>{t('resourceUsage')}</span>
+                <span style={{ display: 'flex', alignItems: 'center' }}>
+                    <Activity size={16} style={{ marginRight: '8px' }} />
+                    {t('resourceUsage')}
+                </span>
                 <span className="api-stats-icon">▼</span>
             </div>
             <div className={`api-stats-content ${showResourceUsage ? 'open' : ''}`}>
@@ -69,7 +73,10 @@ export default function Dashboard({
                 className={`api-stats-header ${showApiStats ? 'open' : ''}`}
                 onClick={() => setShowApiStats(!showApiStats)}
             >
-                <span>💻 API STATS <span className="api-stats-provider">[{apiStatus}]</span></span>
+                <span style={{ display: 'flex', alignItems: 'center' }}>
+                    <Server size={16} style={{ marginRight: '8px' }} />
+                    API STATS <span className="api-stats-provider" style={{ marginLeft: '6px' }}>[{apiStatus}]</span>
+                </span>
                 <span className="api-stats-icon">▼</span>
             </div>
 

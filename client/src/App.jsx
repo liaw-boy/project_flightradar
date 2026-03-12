@@ -7,6 +7,7 @@ import TopBar from './components/TopBar';
 import MapView from './components/MapView';
 import PlaneList from './components/PlaneList';
 import TimePlayer from './components/TimePlayer';
+import PerformanceMonitor from './components/PerformanceMonitor';
 import { useFlightData } from './hooks/useFlightData';
 import { useI18n } from './hooks/useI18n';
 import { logToServer } from './utils/logger';
@@ -354,6 +355,8 @@ export default function App() {
                     onToggleTrack={handleToggleTrackMode}
                 />
             )}
+
+            <PerformanceMonitor usageStats={usageStats} />
         </div>
     );
 }

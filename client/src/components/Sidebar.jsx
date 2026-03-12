@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { X, AlertTriangle, Plane as PlaneIcon, Map, Fingerprint, Activity, MapPin } from 'lucide-react';
 import {
     getAirlineLogoUrl, getAirlineName, getCountryFlag, getCategoryName,
     getNearestAirport, formatVerticalRate, getAirportDisplayData,
@@ -186,9 +187,7 @@ export default function Sidebar({
                 </div>
                 <div className="sb-header-actions">
                     <div className="sb-close" onClick={onClose}>
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="3">
-                            <path d="M18 6L6 18M6 6l12 12" />
-                        </svg>
+                        <X size={24} />
                     </div>
                 </div>
             </div>
@@ -196,9 +195,7 @@ export default function Sidebar({
             <div className="sb-content">
                 {plane.isEmergency && (
                     <div className="alert-box" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                            <path d="M12 2L1 21h22L12 2zm1 16h-2v-2h2v2zm0-4h-2v-5h2v5z" />
-                        </svg>
+                        <AlertTriangle size={18} />
                         EMERGENCY SQUAWK: {plane.squawk}
                     </div>
                 )}
@@ -230,9 +227,7 @@ export default function Sidebar({
                         <div className="sb-route-center">
                             <div className="route-path-line"></div>
                             <div className="route-plane-icon">
-                                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                                    <path d="M21,16V14L13,9V3.5A1.5,1.5 0 0,0 11.5,2A1.5,1.5 0 0,0 10,3.5V9L2,14V16L10,13.5V19L8,20.5V22L11.5,21L15,22V20.5L13,19V13.5L21,16Z" />
-                                </svg>
+                                <PlaneIcon size={18} />
                             </div>
                         </div>
                         <div className="sb-route-node">
@@ -270,7 +265,10 @@ export default function Sidebar({
 
                 {/* Spatial Section */}
                 <div className={`sb-section-title accordion ${openSections.spatial ? 'open' : ''}`} onClick={() => toggleSection('spatial')}>
-                    <span>{t('spatialData')}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--color-text-primary)' }}>
+                        <div className="sb-section-icon"><Map size={14} strokeWidth={2.5} /></div>
+                        {t('spatialData')}
+                    </span>
                     <span className={`chevron ${openSections.spatial ? 'open' : ''}`}></span>
                 </div>
                 {openSections.spatial && (
@@ -291,7 +289,10 @@ export default function Sidebar({
 
                 {/* Specs Section */}
                 <div className={`sb-section-title accordion ${openSections.specs ? 'open' : ''}`} onClick={() => toggleSection('specs')}>
-                    <span>{t('flightIdentity')}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--color-text-primary)' }}>
+                        <div className="sb-section-icon"><Fingerprint size={14} strokeWidth={2.5} /></div>
+                        {t('flightIdentity')}
+                    </span>
                     <span className={`chevron ${openSections.specs ? 'open' : ''}`}></span>
                 </div>
                 {openSections.specs && (
@@ -307,7 +308,10 @@ export default function Sidebar({
 
                 {/* Status Section */}
                 <div className={`sb-section-title accordion ${openSections.status ? 'open' : ''}`} onClick={() => toggleSection('status')}>
-                    <span>{t('status')}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--color-text-primary)' }}>
+                        <div className="sb-section-icon"><Activity size={14} strokeWidth={2.5} /></div>
+                        {t('status')}
+                    </span>
                     <span className={`chevron ${openSections.status ? 'open' : ''}`}></span>
                 </div>
                 {openSections.status && (
@@ -323,7 +327,10 @@ export default function Sidebar({
                 {nearest && (
                     <>
                         <div className={`sb-section-title accordion ${openSections.nearest ? 'open' : ''}`} onClick={() => toggleSection('nearest')}>
-                            <span>{t('nearestAirport')}</span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--color-text-primary)' }}>
+                                <div className="sb-section-icon"><MapPin size={14} strokeWidth={2.5} /></div>
+                                {t('nearestAirport')}
+                            </span>
                             <span className={`chevron ${openSections.nearest ? 'open' : ''}`}></span>
                         </div>
                         {openSections.nearest && (

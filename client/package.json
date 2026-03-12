@@ -1,7 +1,7 @@
 {
     "name": "flight-radar-client",
     "private": true,
-    "version": "2.9.0",
+    "version": "3.6.0",
     "type": "module",
     "scripts": {
         "dev": "vite",
@@ -10,6 +10,7 @@
     },
     "dependencies": {
         "leaflet": "^1.9.4",
+        "lucide-react": "^0.577.0",
         "msgpack-lite": "^0.1.26",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",

@@ -40,6 +40,12 @@ const PlaneCanvasLayer = L.Layer.extend({
         const size = this._map.getSize();
         this._canvas.width = size.x;
         this._canvas.height = size.y;
+
+        // Critical Fix: Clear canvas immediately on move/reset before the next animation frame
+        if (this.ctx) {
+            this.ctx.clearRect(0, 0, size.x, size.y);
+        }
+
         const topLeft = this._map.containerPointToLayerPoint([0, 0]);
         L.DomUtil.setPosition(this._canvas, topLeft);
     },
@@ -723,6 +729,13 @@ export default function MapView({
             const pbTime = playbackTimeRef.current;
             let isPlaybackActive = false;
 
+            // Calculate a safe delta-time for animations, capped at 100ms
+            // to prevent "teleportation" after switching tabs
+            const nowMs = performance.now();
+            const rawDt = nowMs - lastDrawTimeRef.current;
+            const dt = Math.min(rawDt, 100) / 1000; // in seconds
+            lastDrawTimeRef.current = nowMs;
+
             // Update Positions
             Object.keys(currentPlanes).forEach(id => {
                 const plane = currentPlanes[id];
@@ -736,14 +749,26 @@ export default function MapView({
                         plane.renderLng = currentLng + (plane.targetLng - currentLng) * lerpSpeed;
                     }
                 } else if (plane.targetLat && plane.targetLng) {
-                    const nowSec = Date.now() / 1000;
-                    const anchorSec = plane.lastContact || (plane.targetUpdatedAt ? plane.targetUpdatedAt / 1000 : nowSec);
-                    const elapsedSec = Math.min(nowSec - anchorSec, 120);
+                    // Update the simulated tracking time, rather than jumping based on wall clock
+                    if (!plane.simTime) {
+                        plane.simTime = plane.lastContact || (plane.targetUpdatedAt ? plane.targetUpdatedAt / 1000 : Date.now() / 1000);
+                    }
+                    // Advance simulated time by bounded dt
+                    plane.simTime += dt;
+
+                    const anchorSec = plane.lastContact || (plane.targetUpdatedAt ? plane.targetUpdatedAt / 1000 : Date.now() / 1000);
+                    // Prevent simulating too far ahead (max 120s)
+                    const elapsedSec = Math.min(plane.simTime - anchorSec, 120);
 
                     const predictedPos = predictPosition(plane.targetLat, plane.targetLng, plane.velocity, plane.heading, Math.max(0, elapsedSec));
                     const lerpFactor = 0.5;
                     plane.renderLat = currentLat + (predictedPos.lat - currentLat) * lerpFactor;
                     plane.renderLng = currentLng + (predictedPos.lng - currentLng) * lerpFactor;
+
+                    // Sync simTime back to real time if it receives a fresh target update
+                    if (plane.targetUpdatedAt && dt === 0.1) {
+                        plane.simTime = plane.targetUpdatedAt / 1000;
+                    }
                 } else {
                     plane.renderLat = plane.lat;
                     plane.renderLng = plane.lng;

@@ -126,5 +126,13 @@
     ],
     "firstSeen": "2026-03-06T10:35:12.482Z",
     "lastAttempt": "2026-03-06T10:35:12.482Z"
+  },
+  "4bbd14": {
+    "icao24": "4bbd14",
+    "missing": [
+      "metadata"
+    ],
+    "firstSeen": "2026-03-06T14:48:48.912Z",
+    "lastAttempt": "2026-03-06T14:48:48.912Z"
   }
 }

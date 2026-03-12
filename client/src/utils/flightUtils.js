@@ -366,6 +366,7 @@ function _buildPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, ca
 }
 
 // [Project AERO-SYNC] WebGL / Canvas2D Helper
+// [Project AERO-SYNC] WebGL / Canvas2D Helper - Premium High-Fidelity Shapes
 export const AERO_PATHS = {
     default: 'M21,16V14L13,9V3.5A1.5,1.5 0 0,0 11.5,2A1.5,1.5 0 0,0 10,3.5V9L2,14V16L10,13.5V19L8,20.5V22L11.5,21L15,22V20.5L13,19V13.5L21,16Z',
     heavy: 'M13.5,9L21.5,15V17L13.5,13.5V19.5L16.5,21.5V23L12,22L7.5,23V21.5L10.5,19.5V13.5L2.5,17V15L10.5,9V3.5C10.5,2 11.5,1 12,1C12.5,1 13.5,2 13.5,3.5Z',
@@ -392,6 +393,8 @@ export function getPlaneCanvasData(altitude, isSelected, onGround, isEmergency, 
 
     if (onGround || altitude === 'GROUND' || category === 16 || category === 17) {
         pathMap = AERO_PATHS.ground;
+        strokeWidth = isSelected ? 1 : 0;
+        planeColor = isSelected ? '#FFDC00' : baseColor; // Ground vehicles remain solid
     } else if (category === 2 || category === 3) {
         pathMap = AERO_PATHS.light;
     } else if (category === 5 || category === 6) {

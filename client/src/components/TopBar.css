@@ -45,13 +45,15 @@
 
 .brand-logo h2 {
     margin: 0;
-    font-size: 16px;
+    font-size: 18px;
+    /* Added 2px */
     font-weight: 800;
     letter-spacing: 1px;
 }
 
 .brand-version {
-    font-size: 10px;
+    font-size: 11px;
+    /* Added 1px */
     font-family: var(--font-mono);
     color: var(--color-accent-cyan);
     background: rgba(34, 211, 238, 0.1);
@@ -75,7 +77,8 @@
 }
 
 .ts-label {
-    font-size: 10px;
+    font-size: 11px;
+    /* Added 1px */
     color: var(--color-text-dim);
     text-transform: uppercase;
     font-weight: 700;
@@ -83,7 +86,8 @@
 }
 
 .ts-value {
-    font-size: 13px;
+    font-size: 15px;
+    /* Added 2px */
     font-weight: 700;
     color: var(--color-accent-cyan);
 }
@@ -98,7 +102,8 @@
     padding: 8px 16px;
     border-radius: 8px;
     font-family: var(--font-main);
-    font-size: 13px;
+    font-size: 14px;
+    /* Added 1px */
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
@@ -173,4 +178,52 @@
 
 .status-indicator.stat-ok .ts-value {
     color: #10b981;
+}
+
+/* ===== Responsive Design: Mobile & Tablet ===== */
+@media (max-width: 850px) {
+    .top-bar-center {
+        display: none;
+        /* Hide search bar on very small screens to save space, or move into a popup */
+    }
+}
+
+@media (max-width: 600px) {
+    .top-bar {
+        padding: 0 12px;
+    }
+
+    .brand-logo h2 {
+        font-size: 15px;
+    }
+
+    .brand-highlight {
+        display: none;
+        /* Hide 'RADAR' text */
+    }
+
+    .brand-version {
+        font-size: 10px;
+        padding: 1px 4px;
+        margin-left: 4px;
+    }
+
+    .ts-label {
+        display: none;
+        /* Hide STATS labels, just show icons/numbers */
+    }
+
+    .tb-btn span {
+        display: none;
+        /* Hide button text, only keep icons */
+    }
+
+    .tb-btn {
+        padding: 8px;
+    }
+
+    .top-stat-pill {
+        padding: 4px 8px;
+        gap: 4px;
+    }
 }

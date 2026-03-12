@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Plane, Layers, Palette, ChevronDown, ChevronUp } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import './FilterPanel.css';
 
@@ -85,10 +86,8 @@ export default function FilterPanel({ filters, onFilterChange, colorScheme, onCo
             <div className="stat-divider" style={{ margin: '15px 0' }} />
 
             {/* [v3.1] Airline Fleet Focus Mode */}
-            <div className="filter-title" style={{ fontSize: '11px', opacity: 0.8, marginBottom: '8px' }}>
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style={{ marginRight: '6px', transform: 'translateY(2px)' }}>
-                    <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" />
-                </svg>
+            <div className="filter-title" style={{ fontSize: '11px', opacity: 0.8, marginBottom: '8px', display: 'flex', alignItems: 'center' }}>
+                <Plane size={14} style={{ marginRight: '6px' }} />
                 FLEET FOCUS
             </div>
             <select
@@ -108,16 +107,14 @@ export default function FilterPanel({ filters, onFilterChange, colorScheme, onCo
             {/* [v2.9.0] Map Layer Switcher */}
             <div
                 className="filter-title collapsible-header"
-                style={{ fontSize: '11px', opacity: 0.8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between' }}
+                style={{ fontSize: '11px', opacity: 0.8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 onClick={() => setIsLayersExpanded(!isLayersExpanded)}
             >
-                <div>
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style={{ marginRight: '6px', transform: 'translateY(2px)' }}>
-                        <path d="M12 2L2 7l10 5 10-5-10-5zm0 7.5l-10-5v2.5l10 5 10-5V9.5l-10 5zm0 5l-10-5v2.5l10 5 10-5V14.5l-10 5z" />
-                    </svg>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <Layers size={14} style={{ marginRight: '6px' }} />
                     MAP LAYER
                 </div>
-                <span className={`toggle-icon ${isLayersExpanded ? 'open' : ''}`}>▼</span>
+                {isLayersExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </div>
             <div className={`theme-section ${isLayersExpanded ? 'expanded' : ''}`}>
                 <div className="layer-grid">
@@ -138,11 +135,14 @@ export default function FilterPanel({ filters, onFilterChange, colorScheme, onCo
 
             <div
                 className="filter-title collapsible-header"
-                style={{ fontSize: '11px', opacity: 0.8, cursor: 'pointer' }}
+                style={{ fontSize: '11px', opacity: 0.8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 onClick={() => setIsThemesExpanded(!isThemesExpanded)}
             >
-                {t('themeLabel')}
-                <span className={`toggle-icon ${isThemesExpanded ? 'open' : ''}`}>▼</span>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <Palette size={14} style={{ marginRight: '6px' }} />
+                    {t('themeLabel')}
+                </div>
+                {isThemesExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </div>
 
             <div className={`theme-section ${isThemesExpanded ? 'expanded' : ''}`}>

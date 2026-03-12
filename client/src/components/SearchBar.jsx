@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
+import { Search } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import './SearchBar.css';
 
@@ -65,6 +66,18 @@ export default function SearchBar({ planesDict, onSelectPlane }) {
 
     return (
         <div className="search-container" style={{ position: 'relative' }}>
+            <Search
+                size={16}
+                style={{
+                    position: 'absolute',
+                    left: '16px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: 'var(--color-text-dim)',
+                    pointerEvents: 'none',
+                    zIndex: 2
+                }}
+            />
             <input
                 ref={inputRef}
                 type="text"
@@ -75,6 +88,7 @@ export default function SearchBar({ planesDict, onSelectPlane }) {
                 onKeyDown={handleKeyDown}
                 onBlur={handleBlur}
                 autoComplete="off"
+                style={{ paddingLeft: '40px' }}
             />
             {results.length > 0 && (
                 <div className="search-dropdown">

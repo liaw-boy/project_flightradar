@@ -1462,7 +1462,7 @@ server.listen(PORT, () => {
     console.log('║   ✈️  AEROSTRAT Surveillance Server      ║');
     console.log(`║   🌐 http://localhost:${PORT}               ║`);
     console.log(`║   📁 Serving: ./public-react             ║`);
-    console.log(`║   🔐 Version: v2.9.0                     ║`);
+    console.log(`║   🔐 Version: v3.6.0                     ║`);
     console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
     console.log('╚══════════════════════════════════════════╝');
     console.log('');
