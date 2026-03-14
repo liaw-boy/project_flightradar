@@ -1,6 +1,4 @@
-// ==========================================
-// Flight Utility Functions
-// ==========================================
+import { dataManager } from '../services/dataManager';
 
 const EARTH_RADIUS = 6371000;
 
@@ -18,20 +16,10 @@ export function normalizeLongitude(lng) {
 // ==========================================
 export const AIRPORTS = [];
 
-// ==========================================
-// 國際機場 IATA 與城市對照表 (從伺服器 API 載入)
-// ==========================================
+// ─── [DEP] 國際機場 IATA 與城市對照表 (現在已由 DataManager 統一管理) ────────
 export const getAirportDisplayData = async (code) => {
-    if (!code) return null;
-    try {
-        const response = await fetch(`/api/airport/${code}`);
-        if (response.ok) {
-            return await response.json();
-        }
-    } catch (e) {
-        console.warn(`[AIRPORT] Failed to fetch data for ${code}:`, e.message);
-    }
-    return null;
+    // 為了向下相容保留此函數，但邏輯轉發給 dataManager
+    return dataManager.getAirport(code);
 };
 
 // ==========================================
@@ -75,7 +63,7 @@ const AIRLINE_DB = {
     // Cargo
     'FDX': 'FedEx Express', 'UPS': 'UPS Airlines', 'GTI': 'Atlas Air',
     'CLX': 'Cargolux', 'CKS': 'Kalitta Air', 'ABW': 'AirBridgeCargo',
-    'AHK': 'Air Hong Kong', 'CAO': 'Air China Cargo',
+    'AHK': 'Air Hong Kong', 'CAO': 'Air China Cargo', 'APZ': 'Air Premia',
 };
 
 // ==========================================
@@ -153,8 +141,13 @@ const COUNTRY_FLAGS = {
  */
 export function getAirlineName(callsign) {
     if (!callsign || callsign === 'UNKNOWN') return '';
-    const prefix = callsign.substring(0, 3);
-    return AIRLINE_DB[prefix] || '';
+
+    // [Phase 10] 使用 Regex 提取前三個字母 (ICAO)
+    const match = callsign.match(/^[A-Z]{3}/);
+    if (!match) return '';
+
+    const prefix = match[0];
+    return AIRLINE_DB[prefix] || `Airline (${prefix})`;
 }
 
 /**
@@ -543,19 +536,16 @@ export function splitPathAtIDL(points) {
 }
 
 /**
- * 產生大圓航線 (Great Circle) 插補點，用於繪製弧線
- * @param {Array} p1 [lat, lng]
- * @param {Array} p2 [lat, lng]
- * @param {number} numPoints 插補點數量
- * @returns {Array} [[lat, lng], ...]
+ * 產生大圓航線 (Great Circle) 插補點，用於繪製兩點之間的弧線
  */
 export function getGreatCirclePath(p1, p2, numPoints = 60) {
+    if (!p1 || !p2) return [];
     let lat1 = p1[0] * Math.PI / 180;
     let lon1 = p1[1] * Math.PI / 180;
     let lat2 = p2[0] * Math.PI / 180;
     let lon2 = p2[1] * Math.PI / 180;
 
-    // 經度正規化處理，確保 lonDiff 在 -PI 到 PI 之間
+    // 經度正規化處理
     let lonDiff = lon2 - lon1;
     if (lonDiff > Math.PI) lon2 -= 2 * Math.PI;
     if (lonDiff < -Math.PI) lon2 += 2 * Math.PI;
@@ -565,7 +555,7 @@ export function getGreatCirclePath(p1, p2, numPoints = 60) {
         Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lon1 - lon2) / 2), 2)
     ));
 
-    if (d === 0) return [p1, p2];
+    if (isNaN(d) || d === 0) return [p1, p2];
 
     const path = [];
     for (let i = 0; i <= numPoints; i++) {
@@ -577,11 +567,24 @@ export function getGreatCirclePath(p1, p2, numPoints = 60) {
         const z = A * Math.sin(lat1) + B * Math.sin(lat2);
         const lat3 = Math.atan2(z, Math.sqrt(Math.pow(x, 2) + Math.pow(y, 2)));
         const lon3 = Math.atan2(y, x);
-
-        // 將座標轉回 180 到 -180
         path.push([lat3 * 180 / Math.PI, normalizeLongitude(lon3 * 180 / Math.PI)]);
     }
     return path;
+}
+
+/**
+ * [Phase 8] 根據當前位移向量產生大圓軌跡 (Trajectory Prediction)
+ * 用於繪製飛機未來的預測路徑
+ */
+export function getGreatCircleTrajectory(lat, lng, velocity, heading, duration = 120, step = 10) {
+    if (isNaN(lat) || isNaN(lng) || isNaN(velocity) || isNaN(heading)) return [];
+
+    const points = [];
+    for (let t = 0; t <= duration; t += step) {
+        const p = predictPosition(lat, lng, velocity, heading, t);
+        points.push([p.lat, p.lng]);
+    }
+    return points;
 }
 
 /**
@@ -610,13 +613,23 @@ export function getAirlineLogoUrl(callsign) {
  * 轉換經緯度為當前縮放層級下的全域像素座標
  */
 export function latLngToGlobalPixels(lat, lng, zoom, outPoint) {
+    if (isNaN(lat) || isNaN(lng)) return { x: 0, y: 0 };
     const worldSize = 256 * Math.pow(2, zoom);
     const scaleX = worldSize / 360;
     const scaleY = worldSize / (2 * Math.PI);
     const halfWorld = worldSize / 2;
     const radConst = Math.PI / 360;
 
-    outPoint.x = (normalizeLongitude(lng) + 180) * scaleX;
-    outPoint.y = halfWorld - Math.log(Math.tan(Math.PI / 4 + lat * radConst)) * scaleY;
-    return outPoint;
+    const lngNorm = normalizeLongitude(lng);
+    const latClamped = Math.max(-85, Math.min(85, lat));
+
+    const x = (lngNorm + 180) * scaleX;
+    const y = halfWorld - Math.log(Math.tan(Math.PI / 4 + latClamped * radConst)) * scaleY;
+
+    if (outPoint) {
+        outPoint.x = x;
+        outPoint.y = y;
+        return outPoint;
+    }
+    return { x, y };
 }

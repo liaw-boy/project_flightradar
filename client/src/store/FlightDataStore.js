@@ -1,11 +1,18 @@
 /**
  * FlightDataStore.js - 高效能 Zero-GC 低層資料倉儲
- * 
- * 核心設計：
- * 1. 使用單一 Float32Array 實作 10,000 架飛機的環形緩衝區 (Ring Buffer)。
- * 2. 投影快取 (Projection Caching)：預先存儲 [Lat, Lng, X, Y]，減少每幀座標轉換開銷。
- * 3. 循序指標運算：手動管理 Offset 與 Write Head，達成絕對核心零分配。
  */
+
+// ─── [Internal] Haversine Distance Helper ────────────────────────────────────
+function haversineDist(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
 
 export class FlightDataStore {
     /**
@@ -58,23 +65,40 @@ export class FlightDataStore {
      */
     addTrackPoint(icao24, lat, lng, x, y) {
         const slot = this._getSlotIdx(icao24);
-        const cursor = this.cursors[slot];
-
-        // 計算一維陣列中的絕對偏移量
-        // Offset = (槽位索引 * 每機點數 + 寫入指標) * 每個點佔用的 Float 數
-        const baseIdx = (slot * this.pointsPerPlane + cursor) * this.floatsPerPoint;
-
+        const count = this.counts[slot];
         const buffer = this.trackBuffer;
+        const FPP = this.floatsPerPoint;
+        const PPP = this.pointsPerPlane;
+
+        // [Phase 8/10] 空間防護邏輯
+        if (count > 0) {
+            const cursor = this.cursors[slot];
+            const lastIdx = (slot * PPP + ((cursor - 1 + PPP) % PPP)) * FPP;
+            const dist = haversineDist(buffer[lastIdx], buffer[lastIdx + 1], lat, lng);
+
+            // 規則 1: 去重 (距離 < 50m 則拋棄)
+            if (dist < 50) return;
+
+            // 規則 2: 斷點 (跳變 > 500km 則重置軌跡，防止異常連線)
+            if (dist > 500000) {
+                this.clearTrack(icao24);
+                return;
+            }
+        }
+
+        const cursor = this.cursors[slot];
+        const baseIdx = (slot * PPP + cursor) * FPP;
+
         buffer[baseIdx] = lat;
         buffer[baseIdx + 1] = lng;
         buffer[baseIdx + 2] = x;
         buffer[baseIdx + 3] = y;
 
         // 環形指標遞增邏輯
-        this.cursors[slot] = (cursor + 1) % this.pointsPerPlane;
+        this.cursors[slot] = (cursor + 1) % PPP;
 
-        // 記錄有效點數，最多到 pointsPerPlane (即 100)
-        if (this.counts[slot] < this.pointsPerPlane) {
+        // 記錄有效點數
+        if (this.counts[slot] < PPP) {
             this.counts[slot]++;
         }
     }

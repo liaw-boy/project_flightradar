@@ -7,6 +7,7 @@ import {
 } from '../utils/flightUtils';
 import { useI18n } from '../hooks/useI18n';
 import { logToServer } from '../utils/logger';
+import { dataManager } from '../services/dataManager';
 import TimePlayer from './TimePlayer';
 import './Sidebar.css';
 
@@ -136,12 +137,12 @@ export default function Sidebar({
     });
 
     useEffect(() => {
-        if (depCode && depCode !== 'N/A') getAirportDisplayData(depCode).then(setDepInfo);
+        if (depCode && depCode !== 'N/A') dataManager.getAirport(depCode).then(setDepInfo);
         else setDepInfo(null);
     }, [depCode]);
 
     useEffect(() => {
-        if (arrCode && arrCode !== 'N/A') getAirportDisplayData(arrCode).then(setArrInfo);
+        if (arrCode && arrCode !== 'N/A') dataManager.getAirport(arrCode).then(setArrInfo);
         else setArrInfo(null);
     }, [arrCode]);
 
@@ -149,21 +150,7 @@ export default function Sidebar({
         let isMounted = true;
         setPhotos([]);
         const fetchPhotos = async () => {
-            const results = [];
-            if (icao24) {
-                try {
-                    const res = await fetch(`https://api.planespotters.net/pub/photos/hex/${icao24}`);
-                    const data = await res.json();
-                    if (data.photos) results.push(...data.photos);
-                } catch (e) { }
-            }
-            if (registration && registration !== 'N/A' && results.length === 0) {
-                try {
-                    const res = await fetch(`https://api.planespotters.net/pub/photos/reg/${registration}`);
-                    const data = await res.json();
-                    if (data.photos) results.push(...data.photos);
-                } catch (e) { }
-            }
+            const results = await dataManager.getPhotos(icao24, registration);
             if (isMounted) setPhotos(results);
         };
         fetchPhotos();

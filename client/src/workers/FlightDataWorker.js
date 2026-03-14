@@ -103,6 +103,10 @@ function handleDecodedMessage(msg) {
             totalCount: planesState.size
         });
     }
+
+    if (msg.type === 'telemetry') {
+        notifyMain('TELEMETRY_UPDATED', msg);
+    }
 }
 
 // Listen for messages from the main thread

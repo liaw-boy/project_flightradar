@@ -147,6 +147,32 @@ function broadcastPlanes(states, timestamp) {
 }
 
 /**
+ * Broadcast Backend Telemetry (API Hits, Quota, Countdown)
+ * @param {Object} stats stats from apiStats
+ * @param {number} nextFetchIn seconds until next fetch
+ */
+function broadcastTelemetry(stats, nextFetchIn) {
+    if (!wss || wss.clients.size === 0) return;
+
+    const payload = msgpack.encode({
+        type: 'telemetry',
+        totalApiHits: stats.totalCalls,
+        nextFetchIn: nextFetchIn,
+        accounts: stats.accounts.map(acc => ({
+            user: acc.user,
+            remaining: acc.remainingCredits,
+            limited: acc.unlockTime && new Date(acc.unlockTime).getTime() > Date.now()
+        }))
+    });
+
+    wss.clients.forEach(client => {
+        if (client.readyState === 1 /* WebSocket.OPEN */) {
+            client.send(payload);
+        }
+    });
+}
+
+/**
  * Get all active viewports from connected clients
  */
 function getActiveViewports() {
@@ -163,5 +189,6 @@ function getActiveViewports() {
 module.exports = {
     initWebSocketServer,
     broadcastPlanes,
+    broadcastTelemetry,
     getActiveViewports
 };

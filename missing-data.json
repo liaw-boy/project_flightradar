@@ -134,5 +134,21 @@
     ],
     "firstSeen": "2026-03-06T14:48:48.912Z",
     "lastAttempt": "2026-03-06T14:48:48.912Z"
+  },
+  "885b45": {
+    "icao24": "885b45",
+    "missing": [
+      "metadata"
+    ],
+    "firstSeen": "2026-03-14T16:15:02.336Z",
+    "lastAttempt": "2026-03-14T16:15:02.336Z"
+  },
+  "76cc83": {
+    "icao24": "76cc83",
+    "missing": [
+      "metadata"
+    ],
+    "firstSeen": "2026-03-14T18:03:43.932Z",
+    "lastAttempt": "2026-03-14T18:03:43.932Z"
   }
 }

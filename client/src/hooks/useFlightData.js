@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { parseOpenSkyData, latLngToGlobalPixels } from '../utils/flightUtils';
 import { trackStore } from '../store/FlightDataStore';
+import { dataManager } from '../services/dataManager';
 
 /**
  * 飛行資料管理 Hook
@@ -290,16 +291,12 @@ export function useFlightData(mapRef) {
         const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
             Math.cos(φ1) * Math.cos(φ2) *
             Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
     };
 
     const fetchTrack = useCallback(async (icao24, lastContact) => {
         try {
-            const timeParam = lastContact ? `&time=${lastContact}` : '';
-            const res = await fetch(`/api/tracks?icao24=${icao24}${timeParam}`);
-            if (!res.ok) throw new Error('API Error');
-            const data = await res.json();
+            const data = await dataManager.getTrack(icao24, lastContact);
 
             if (data.path && data.path.length > 0) {
                 // 如果沒有傳入 lastContact，才 fallback 到當前時間
@@ -471,11 +468,22 @@ export function useFlightData(mapRef) {
 
                 removed.forEach(id => {
                     delete planesDictRef.current[id];
+                    trackStore.clearTrack(id); // [v4.1.2] Synchronous GC: Kill the ghost track immediately
                 });
 
                 // 2. [AERO-SYNC] 智能節流 React State 更新
                 // 必須穩定觸發 setPlanesDict，確保 MapView 拿到最新的字典參照
                 setPlanesDict({ ...planesDictRef.current });
+            } else if (type === 'TELEMETRY_UPDATED') {
+                const { totalApiHits, nextFetchIn, accounts } = payload;
+                setApiStats(prev => ({
+                    ...prev,
+                    totalCalls: totalApiHits,
+                    accounts: accounts || []
+                }));
+                if (nextFetchIn !== undefined) {
+                    setThrottleSeconds(nextFetchIn);
+                }
             }
         };
 
@@ -504,6 +512,7 @@ export function useFlightData(mapRef) {
         fetchPlanes,
         fetchTrack,
         syncViewport,
+        deleteFromStore: (id) => trackStore.clearTrack(id), // Expose for manual cleaning
         flightHistoryRef,
     };
 }

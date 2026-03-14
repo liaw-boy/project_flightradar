@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath, splitPathAtIDL, normalizeLongitude, predictPosition, getPlaneCanvasData, latLngToGlobalPixels } from '../utils/flightUtils';
+import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath, getGreatCircleTrajectory, splitPathAtIDL, normalizeLongitude, predictPosition, getPlaneCanvasData, latLngToGlobalPixels } from '../utils/flightUtils';
 import { trackStore } from '../store/FlightDataStore';
+import { dataManager } from '../services/dataManager';
 
 /**
  * Custom Leaflet Canvas Layer for High-Performance Rendering
@@ -86,8 +87,6 @@ export default function MapView({
     const mapRef = useRef(null);
     const canvasLayerRef = useRef(null);
     const cachedPathsRef = useRef(new Map()); // Cache Path2D objects
-    const trackLineRef = useRef(null);
-    const trackLineFutureRef = useRef(null); // [v3.1] For future/predicted path during playback
     const routeLineRef = useRef(null);
     const predictiveLineRef = useRef(null);
     const animFrameRef = useRef(null);
@@ -96,7 +95,6 @@ export default function MapView({
     const airportMarkersLoadedRef = useRef(false);
     const airportMarkersMapRef = useRef(new Map());
     const tileLayerRef = useRef(null);     // [v2.9.0] current tile layer
-    const speedVectorLayerRef = useRef(null); // [v2.9.0] speed vector arrows
     const trackModeRef = useRef(trackMode);  // [v3.0] ref for animation loop
     const playbackTimeRef = useRef(playbackTime); // [v3.1] ref for animation loop
     const trackPointsRef = useRef(trackPoints);   // [v3.1] ref for animation loop
@@ -146,8 +144,7 @@ export default function MapView({
     // ===== 機場圖層初始化 =====
     const renderMetarPopup = async (ap, map, popup) => {
         try {
-            const res = await fetch(`/api/metar?icao=${ap.icao}`);
-            const data = await res.json();
+            const data = await dataManager.getMetar(ap.icao);
 
             if (data.error) {
                 const noDataMsg = t('weatherData');
@@ -229,8 +226,6 @@ export default function MapView({
             maxZoom: 19,
             attribution: '',
         }).addTo(map);
-
-        speedVectorLayerRef.current = L.layerGroup().addTo(map);
 
         // 初始 bounds
         setBounds(map.getBounds());
@@ -375,37 +370,12 @@ export default function MapView({
 
         onMapReady?.(map);
 
-        // [OPT 6.2] Airport list: use sessionStorage cache to avoid redundant fetches
-        const AIRPORT_CACHE_KEY = 'fr24_airports_v1';
-        const AIRPORT_CACHE_TTL = 3600000; // 1 hour
-        let cachedAirports = null;
-        try {
-            const raw = sessionStorage.getItem(AIRPORT_CACHE_KEY);
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                if (Date.now() - (parsed.ts || 0) < AIRPORT_CACHE_TTL) {
-                    cachedAirports = parsed.data;
-                }
-            }
-        } catch (e) { /* ignore */ }
-
-        if (cachedAirports) {
-            console.log(`📦 [MAP] Loaded ${cachedAirports.length} airports from sessionStorage`);
-            airportsRef.current = cachedAirports;
-            setAirports(cachedAirports);
-        } else {
-            fetch('/api/airports/list')
-                .then(res => res.json())
-                .then(data => {
-                    console.log(`🌍 [MAP] Loaded ${data.length} airports from backend`);
-                    airportsRef.current = data;
-                    setAirports(data);
-                    try {
-                        sessionStorage.setItem(AIRPORT_CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
-                    } catch (e) { /* storage quota exceeded, ignore */ }
-                })
-                .catch(err => console.error('Failed to load airports:', err));
-        }
+        // [Project AERO-SYNC] L3 Persistent Airport Loading
+        dataManager.getAirports().then(data => {
+            console.log(`🌍 [DataManager] Loaded ${data.length} airports`);
+            airportsRef.current = data;
+            setAirports(data);
+        }).catch(err => console.error('Failed to load airports:', err));
 
         airportLayerRef.current = L.layerGroup();
         updateAirportVisibility(map);
@@ -535,45 +505,6 @@ export default function MapView({
         trackModeRef.current = trackMode;
     }, [trackMode]);
 
-    // [v2.9.0] Speed vector arrows: 120-second prediction lines for airborne planes
-    useEffect(() => {
-        const map = mapRef.current;
-        if (!map || !speedVectorLayerRef.current) return;
-
-        speedVectorLayerRef.current.clearLayers();
-
-        const DEG_TO_RAD = Math.PI / 180;
-        const R = 6371000;
-        const TIME_HORIZON = 120; // seconds
-
-        for (const id in planesDict) {
-            const p = planesDict[id];
-            if (p.onGround || !p.velocity || p.velocity < 10 || !p.lat || !p.lng || !p.heading) continue;
-
-            const dist = p.velocity * TIME_HORIZON; // meters
-            const headingRad = p.heading * DEG_TO_RAD;
-            const latRad = p.lat * DEG_TO_RAD;
-
-            const endLat = Math.asin(
-                Math.sin(latRad) * Math.cos(dist / R) +
-                Math.cos(latRad) * Math.sin(dist / R) * Math.cos(headingRad)
-            ) / DEG_TO_RAD;
-            const endLng = p.lng + Math.atan2(
-                Math.sin(headingRad) * Math.sin(dist / R) * Math.cos(latRad),
-                Math.cos(dist / R) - Math.sin(latRad) * Math.sin(endLat * DEG_TO_RAD)
-            ) / DEG_TO_RAD;
-
-            const isSelected = id === selectedIcao24;
-            L.polyline([[p.lat, p.lng], [endLat, endLng]], {
-                color: isSelected ? '#f59e0b' : 'rgba(255,255,255,0.25)',
-                weight: isSelected ? 2 : 1,
-                dashArray: isSelected ? null : '4 4',
-                interactive: false,
-            }).addTo(speedVectorLayerRef.current);
-        }
-    }, [planesDict, selectedIcao24]);
-
-
 
     // [Project AERO-SYNC] Zero-GC Pure Math Projector (Global Space Version)
     const updateAllProjectionCaches = useCallback((map) => {
@@ -700,91 +631,9 @@ export default function MapView({
     const shouldShowPlaneRef = useRef(shouldShowPlane);
     useEffect(() => { shouldShowPlaneRef.current = shouldShowPlane; }, [shouldShowPlane]);
 
-    // Track Mode overrides
+    // [v4.1.2] Unified Selection & Camera Focus Effect
     useEffect(() => {
         if (selectedIcao24) {
-            userInteractingRef.current = false;
-            if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
-        }
-    }, [selectedIcao24]);
-
-    // ===== 軌跡與航線繪製 (v2.3.3 IDL Fix) =====
-    useEffect(() => {
-        const map = mapRef.current;
-        if (!map) return;
-
-        if (trackLineRef.current) map.removeLayer(trackLineRef.current);
-        if (trackLineFutureRef.current) map.removeLayer(trackLineFutureRef.current);
-        if (routeLineRef.current) map.removeLayer(routeLineRef.current);
-        trackLineRef.current = null;
-        trackLineFutureRef.current = null;
-        routeLineRef.current = null;
-
-        if (selectedRoute && selectedRoute.depCoord && selectedRoute.arrCoord) {
-            const pathPoints = getGreatCirclePath([selectedRoute.depCoord.lat, selectedRoute.depCoord.lng], [selectedRoute.arrCoord.lat, selectedRoute.arrCoord.lng]);
-            const routeSegments = splitPathAtIDL(pathPoints);
-            routeLineRef.current = L.polyline(routeSegments, { color: '#94a3b8', weight: 2, opacity: 0.5, dashArray: '5, 5', interactive: false }).addTo(map);
-        }
-
-        if (trackPoints && trackPoints.length > 1) {
-            // [v3.1 Fix] Separate Past and Future segments if playback is active
-            const pbTime = playbackTime;
-            let pastPointsRaw = [];
-            let futurePointsRaw = [];
-
-            if (pbTime !== null) {
-                pastPointsRaw = trackPoints.filter(p => p[0] <= pbTime);
-                futurePointsRaw = trackPoints.filter(p => p[0] > pbTime);
-                // Add the boundary point to both to ensure they connect
-                const lastPast = pastPointsRaw[pastPointsRaw.length - 1];
-                if (lastPast && futurePointsRaw[0]) futurePointsRaw.unshift(lastPast);
-            } else {
-                pastPointsRaw = trackPoints;
-            }
-
-            const pastCoords = pastPointsRaw.map(p => [p[1], p[2]]);
-            if (pbTime === null && selectedIcao24 && planesDictRef.current[selectedIcao24]) {
-                const livePlane = planesDictRef.current[selectedIcao24];
-                pastCoords.push([livePlane.lat, livePlane.lng]);
-            }
-
-            const pastSegments = splitPathAtIDL(pastCoords);
-            trackLineRef.current = L.polyline(pastSegments, { color: '#22d3ee', weight: 4, opacity: 1, lineCap: 'round' }).addTo(map);
-
-            if (futurePointsRaw.length > 0) {
-                const futureCoords = futurePointsRaw.map(p => [p[1], p[2]]);
-                // Always add live position to the end of future segment if in playback
-                if (selectedIcao24 && planesDictRef.current[selectedIcao24]) {
-                    futureCoords.push([planesDictRef.current[selectedIcao24].lat, planesDictRef.current[selectedIcao24].lng]);
-                }
-                const futureSegments = splitPathAtIDL(futureCoords);
-                trackLineFutureRef.current = L.polyline(futureSegments, {
-                    color: '#22d3ee', weight: 3, opacity: 0.4, dashArray: '8, 8', lineCap: 'round'
-                }).addTo(map);
-            }
-
-            if (routeLineRef.current) { map.removeLayer(routeLineRef.current); routeLineRef.current = null; }
-            if (trackLineRef.current) trackLineRef.current.bringToFront();
-            if (trackLineFutureRef.current) trackLineFutureRef.current.bringToBack();
-        } else if (selectedIcao24 && flightHistoryRef?.current?.[selectedIcao24]) {
-            const history = flightHistoryRef.current[selectedIcao24];
-            if (history.length > 1) {
-                const points = history.map(p => [p[1], p[2]]);
-                if (planesDictRef.current[selectedIcao24]) points.push([planesDictRef.current[selectedIcao24].lat, planesDictRef.current[selectedIcao24].lng]);
-                const trackSegments = splitPathAtIDL(points);
-                trackLineRef.current = L.polyline(trackSegments, { color: '#f59e0b', weight: 3, opacity: 0.8, dashArray: '10, 5', lineCap: 'round' }).addTo(map);
-            }
-        }
-        // CRITICAL BUGFIX: Removed `planesDict` from dependencies.
-        // `planesDict` updates hundreds of times per second with WebSocket. 
-        // We only want to rebuild the main track line when `trackPoints` or `selectedIcao24` actually changes.
-    }, [trackPoints, selectedIcao24, selectedRoute, playbackTime]);
-
-    // ===== 選中飛機時移動視角 (v2.8.0: Follow current marker position, not just API data) =====
-    useEffect(() => {
-        if (selectedIcao24) {
-            // [v3.1] Force resume tracking on explicit selection (ignoring 10s cooldown)
-            // [v3.4 Fix] Split this logic out so it only runs when `selectedIcao24` specifically changes, not on `planesDict` updates!
             userInteractingRef.current = false;
             if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
         }
@@ -870,65 +719,42 @@ export default function MapView({
             const dt = Math.min(rawDt, 100) / 1000; // in seconds
             lastDrawTimeRef.current = nowMs;
 
-            // Update Positions
+            // Update Positions with Interpolation (Phase 8)
             Object.keys(currentPlanes).forEach(id => {
                 const plane = currentPlanes[id];
                 const currentLat = plane.renderLat || plane.lat;
                 const currentLng = plane.renderLng || plane.lng;
 
+                // 基礎插值速度 (Lerp): 0.5 秒內滑向目標，確保 60 FPS 平滑度
+                const lerpFactor = 0.5;
+
                 if (plane.onGround || plane.velocity <= 0 || plane.altitude === 'GROUND') {
                     if (plane.targetLat && plane.targetLng) {
-                        const lerpSpeed = 0.05;
-                        plane.renderLat = currentLat + (plane.targetLat - currentLat) * lerpSpeed;
-                        plane.renderLng = currentLng + (plane.targetLng - currentLng) * lerpSpeed;
+                        plane.renderLat = currentLat + (plane.targetLat - currentLat) * lerpFactor;
+                        plane.renderLng = currentLng + (plane.targetLng - currentLng) * lerpFactor;
                     }
                 } else if (plane.targetLat && plane.targetLng) {
-                    // Update the simulated tracking time, rather than jumping based on wall clock
+                    // Micro-Dead Reckoning + Lerp
                     if (!plane.simTime) {
                         plane.simTime = plane.lastContact || (plane.targetUpdatedAt ? plane.targetUpdatedAt / 1000 : Date.now() / 1000);
                     }
-                    // Advance simulated time by bounded dt
                     plane.simTime += dt;
 
                     const anchorSec = plane.lastContact || (plane.targetUpdatedAt ? plane.targetUpdatedAt / 1000 : Date.now() / 1000);
-                    // Prevent simulating too far ahead (max 120s)
                     const elapsedSec = Math.min(plane.simTime - anchorSec, 120);
 
                     const predictedPos = predictPosition(plane.targetLat, plane.targetLng, plane.velocity, plane.heading, Math.max(0, elapsedSec));
-                    const lerpFactor = 0.5;
+
+                    // 平滑追趕 (Phase 8: Smooth Glide)
                     plane.renderLat = currentLat + (predictedPos.lat - currentLat) * lerpFactor;
                     plane.renderLng = currentLng + (predictedPos.lng - currentLng) * lerpFactor;
 
-                    // Sync simTime back to real time if it receives a fresh target update
                     if (plane.targetUpdatedAt && dt === 0.1) {
                         plane.simTime = plane.targetUpdatedAt / 1000;
                     }
                 } else {
                     plane.renderLat = plane.lat;
                     plane.renderLng = plane.lng;
-                }
-
-                // 軌跡追加
-                if (pbTime === null && id === currentSelected && trackLineRef.current && !plane.onGround && plane.velocity > 0) {
-                    const latLngs = trackLineRef.current.getLatLngs();
-                    if (latLngs.length > 0) {
-                        const currentL = L.latLng(plane.renderLat, normalizeLongitude(plane.renderLng));
-                        const isMulti = Array.isArray(latLngs[0]) || (latLngs[0] instanceof L.LatLng === false && Array.isArray(latLngs[0]));
-
-                        // Get the truly last segment
-                        const lastSegment = isMulti ? latLngs[latLngs.length - 1] : latLngs;
-                        const lastPt = lastSegment[lastSegment.length - 1];
-
-                        if (lastPt && currentL.distanceTo(L.latLng(lastPt.lat, normalizeLongitude(lastPt.lng))) > 50) {
-                            if (isMulti) {
-                                // Important: Mutation of Leaflet internal array needs care
-                                lastSegment.push({ lat: plane.renderLat, lng: plane.renderLng });
-                                trackLineRef.current.setLatLngs(latLngs);
-                            } else {
-                                trackLineRef.current.addLatLng({ lat: plane.renderLat, lng: plane.renderLng });
-                            }
-                        }
-                    }
                 }
             });
 
@@ -978,43 +804,57 @@ export default function MapView({
                 const ox = pixelBounds.min.x;
                 const oy = pixelBounds.min.y;
 
-                // --- [AERO-SYNC] Batch Track Rendering Phase (Zero-GC / Space Decoupled) ---
+                // --- [Phase 8] Batch Track Rendering Phase (Spline Version) ---
                 if (zoom >= 6) {
                     ctx.save();
-                    ctx.lineWidth = 2;
+                    ctx.lineWidth = 2.5;
                     ctx.lineCap = 'round';
                     ctx.lineJoin = 'round';
 
                     trackStore.forEachTrack((icao24, getPoints) => {
-                        // [v4.1.0] 渲染防護 (Render Guard)
-                        // 如果飛機已經不在目前的數據流中 (currentPlanes)，則不繪製軌跡
-                        // 這是修復「幽靈軌跡」的核心邏輯之一
-                        if (icao24 !== selectedIcao24Ref.current || !currentPlanes[icao24]) return;
+                        const plane = currentPlanes[icao24];
+                        if (icao24 !== selectedIcao24Ref.current || !plane) return;
 
                         ctx.beginPath();
-                        ctx.strokeStyle = '#22d3ee'; // 選中飛機的高導電青色
+                        ctx.strokeStyle = '#22d3ee'; // Tactician Cyan
 
-                        let first = true;
-                        let lastX = 0;
-
+                        let points = [];
                         getPoints((lat, lng, gx, gy) => {
-                            // 將 Global Pixels 轉換為 Screen Pixels (極速減法)
-                            const x = gx - ox;
-                            const y = gy - oy;
-
-                            if (first) {
-                                ctx.moveTo(x, y);
-                                first = false;
-                            } else {
-                                if (Math.abs(x - lastX) > canvas.width / 2) {
-                                    ctx.moveTo(x, y);
-                                } else {
-                                    ctx.lineTo(x, y);
-                                }
-                            }
-                            lastX = x;
+                            points.push({ x: gx - ox, y: gy - oy });
                         });
+
+                        if (points.length < 2) return;
+
+                        // [Phase 8] Quadratic Bezier Spline 繪製
+                        // 使用中點作為控制點，達成 C1 連續性 (滑順轉彎)
+                        ctx.moveTo(points[0].x, points[0].y);
+
+                        let i;
+                        for (i = 1; i < points.length - 1; i++) {
+                            // 檢查是否跨越經度線 (Antimeridian protection)
+                            if (Math.abs(points[i].x - points[i - 1].x) > canvas.width / 2) {
+                                ctx.stroke();
+                                ctx.beginPath();
+                                ctx.moveTo(points[i].x, points[i].y);
+                                continue;
+                            }
+
+                            const xc = (points[i].x + points[i + 1].x) / 2;
+                            const yc = (points[i].y + points[i + 1].y) / 2;
+                            ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+                        }
+                        // 畫最後一條線段到飛機當前預估位置 (renderLat/Lng)
+                        const lastP = points[points.length - 1]; // [Fix 8.1] 確保抓到最後一點
+                        const planePt = latLngToGlobalPixels(plane.renderLat, plane.renderLng, zoom);
+                        const px = planePt.x - ox;
+                        const py = planePt.y - oy;
+
+                        if (Math.abs(px - lastP.x) < canvas.width / 2) {
+                            ctx.lineTo(px, py);
+                        }
+
                         ctx.stroke();
+
                     });
                     ctx.restore();
                 }
@@ -1067,6 +907,45 @@ export default function MapView({
                     if (dataAge > 60) opacity = 0.4;
                     else if (dataAge > 30) opacity = 0.7;
 
+                    // [Phase 11 Hotfix - 修復版] 釘死於地圖的大圓航線預測 (Anchored Projected Path)
+                    if (plane.velocity >= 10 && !plane.onGround && zoom >= 5) {
+                        const DEG_TO_RAD = Math.PI / 180;
+                        const R = 6371000;
+                        const TIME_HORIZON = 120; // 繪製未來 120 秒的預測長度
+
+                        // 🔑 關鍵修正：將起點「錨定」在最後一次收到真實訊號的靜態座標，而不是跟著滑動的 renderLat
+                        const startLat = plane.lat;
+                        const startLng = plane.lng;
+
+                        const dist = plane.velocity * TIME_HORIZON;
+                        const headingRad = plane.heading * DEG_TO_RAD;
+                        const latRad = startLat * DEG_TO_RAD;
+
+                        // 以靜態起點推算 120 秒後的靜態終點
+                        const endLat = Math.asin(
+                            Math.sin(latRad) * Math.cos(dist / R) +
+                            Math.cos(latRad) * Math.sin(dist / R) * Math.cos(headingRad)
+                        ) / DEG_TO_RAD;
+                        const endLng = startLng + Math.atan2(
+                            Math.sin(headingRad) * Math.sin(dist / R) * Math.cos(latRad),
+                            Math.cos(dist / R) - Math.sin(latRad) * Math.sin(endLat * DEG_TO_RAD)
+                        ) / DEG_TO_RAD;
+
+                        // 將經緯度轉換為螢幕上的絕對像素位置
+                        const startPt = map.latLngToContainerPoint([startLat, normalizeLongitude(startLng)]);
+                        const endPt = map.latLngToContainerPoint([endLat, normalizeLongitude(endLng)]);
+
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.moveTo(startPt.x, startPt.y); // 起點釘死在地圖上
+                        ctx.lineTo(endPt.x, endPt.y);     // 終點也釘死在地圖上
+                        ctx.strokeStyle = isSelected ? '#f59e0b' : 'rgba(245, 158, 11, 0.3)';
+                        ctx.lineWidth = isSelected ? 2 : 1.5;
+                        ctx.setLineDash(isSelected ? [6, 4] : [3, 4]);
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+
                     ctx.save();
                     ctx.globalAlpha = opacity;
                     ctx.translate(ptX, ptY);
@@ -1091,28 +970,41 @@ export default function MapView({
 
                     if (shouldShowLabel) {
                         ctx.save();
-                        ctx.translate(ptX + 20, ptY);
+                        // 1. 將原點平移至飛機中心
+                        ctx.translate(ptX, ptY);
 
                         const logoImg = getLogoImage(plane.callsign);
                         const hasLogo = logoImg && logoImg.complete && logoImg.naturalWidth > 0;
-                        const labelText = plane.callsign || plane.icao24?.slice(0, 6) || '';
+                        const labelText = plane.callsign || plane.icao24?.slice(0, 6) || 'UNKNOWN';
 
-                        // Fast width estimation based on char count (avoid expensive ctx.measureText)
-                        const estWidth = labelText.length * 7 + (hasLogo ? 38 : 0);
+                        // 2. 重新校準字體與排版比例 (放大 Logo 與間距)
+                        ctx.font = 'bold 13px "JetBrains Mono", "Roboto Mono", Inter, sans-serif';
+                        const textWidth = ctx.measureText(labelText).width;
 
-                        // [v3.9 Fix] Restoring Original FR24 Speech-Bubble Aesthetic
-                        const bubbleWidth = estWidth + 16;
-                        const bubbleHeight = 24;
-                        const radius = 4;
-                        const tailWidth = 6;
-                        const tailHeight = 8;
-                        const yOffset = -12;
-                        const boxX = tailWidth;
-                        const boxY = yOffset;
+                        const logoWidth = hasLogo ? 40 : 0; // 放大 Logo 空間防失真
+                        const logoHeight = 14;
+                        const paddingX = 10;
+                        const gap = hasLogo ? 8 : 0;
 
-                        // [v4.0.1] Synchronized Glassmorphism Styling
-                        ctx.globalAlpha = opacity; // Sync with icon's signal quality
-                        ctx.fillStyle = isSelected ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.8)';
+                        const bubbleWidth = paddingX + logoWidth + gap + textWidth + paddingX;
+                        const bubbleHeight = 28; // 增加高度讓視覺有呼吸空間
+                        const radius = 6;
+
+                        // 🔑 關鍵修復：將標籤大幅往右推，絕對不允許遮擋飛機圖示！
+                        const boxX = 26;
+                        const boxY = -bubbleHeight / 2;
+                        const tailWidth = 8;
+                        const tailHeight = 10;
+
+                        ctx.globalAlpha = opacity;
+
+                        // 3. 戰術陰影
+                        ctx.shadowColor = isSelected ? 'rgba(34, 211, 238, 0.6)' : 'rgba(0, 0, 0, 0.6)';
+                        ctx.shadowBlur = isSelected ? 10 : 5;
+                        ctx.shadowOffsetY = 2;
+
+                        // 4. 深色背景面板
+                        ctx.fillStyle = isSelected ? 'rgba(15, 23, 42, 0.95)' : 'rgba(30, 41, 59, 0.9)';
                         ctx.beginPath();
                         ctx.moveTo(boxX + radius, boxY);
                         ctx.lineTo(boxX + bubbleWidth - radius, boxY);
@@ -1122,9 +1014,9 @@ export default function MapView({
                         ctx.lineTo(boxX + radius, boxY + bubbleHeight);
                         ctx.arcTo(boxX, boxY + bubbleHeight, boxX, boxY + bubbleHeight - radius, radius);
 
-                        // Tail pointing left to the plane center
+                        // 指向飛機的指針
                         ctx.lineTo(boxX, tailHeight / 2);
-                        ctx.lineTo(0, 0); // The tip of the bubble tail
+                        ctx.lineTo(boxX - tailWidth, 0);
                         ctx.lineTo(boxX, -tailHeight / 2);
 
                         ctx.lineTo(boxX, boxY + radius);
@@ -1132,17 +1024,48 @@ export default function MapView({
                         ctx.closePath();
                         ctx.fill();
 
-                        // Reset shadow for content
-                        ctx.shadowColor = 'transparent';
+                        // 5. 邊框
+                        ctx.lineWidth = 1.5;
+                        ctx.strokeStyle = isSelected ? '#22d3ee' : (plane.isEmergency ? '#ef4444' : 'rgba(148, 163, 184, 0.4)');
+                        ctx.stroke();
+
                         ctx.shadowBlur = 0;
+                        ctx.shadowOffsetY = 0;
+
+                        // 6. 內容繪製
+                        let currentX = boxX + paddingX;
 
                         if (hasLogo) {
-                            ctx.drawImage(logoImg, boxX + 8, -6, 30, 12);
+                            // 🔑 關鍵修復：使用帶有圓角的優雅白底墊著 Logo，去除死板的補丁感
+                            const logoBgMargin = 3;
+                            ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+                            ctx.beginPath();
+                            if (ctx.roundRect) {
+                                ctx.roundRect(currentX - logoBgMargin, boxY + (bubbleHeight - logoHeight) / 2 - logoBgMargin, logoWidth + logoBgMargin * 2, logoHeight + logoBgMargin * 2, 3);
+                            } else {
+                                // Fallback for environments without roundRect
+                                ctx.rect(currentX - logoBgMargin, boxY + (bubbleHeight - logoHeight) / 2 - logoBgMargin, logoWidth + logoBgMargin * 2, logoHeight + logoBgMargin * 2);
+                            }
+                            ctx.fill();
+
+                            ctx.drawImage(logoImg, currentX, boxY + (bubbleHeight - logoHeight) / 2, logoWidth, logoHeight);
+                            currentX += logoWidth + gap / 2;
+
+                            // 分隔線
+                            ctx.beginPath();
+                            ctx.moveTo(currentX, boxY + 6);
+                            ctx.lineTo(currentX, boxY + bubbleHeight - 6);
+                            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+
+                            currentX += gap / 2;
                         }
 
-                        ctx.fillStyle = '#1e293b';
-                        ctx.font = 'bold 12px Inter, sans-serif';
-                        ctx.fillText(labelText, boxX + (hasLogo ? 44 : 8), 4);
+                        // 7. 航班號
+                        ctx.fillStyle = isSelected ? '#ffffff' : (plane.isEmergency ? '#fca5a5' : '#e2e8f0');
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(labelText, currentX, 1);
 
                         ctx.restore();
                     }

@@ -11,6 +11,7 @@ import PerformanceMonitor from './components/PerformanceMonitor';
 import { useFlightData } from './hooks/useFlightData';
 import { useI18n } from './hooks/useI18n';
 import { logToServer } from './utils/logger';
+import { dataManager } from './services/dataManager';
 import './App.css';
 
 // URL Parsing Utility
@@ -36,7 +37,7 @@ export default function App() {
         showEmergency: true,
         showLow: true,
         showAirports: true,
-        fleetFocus: '', // [v4.1.1] Airline ICAO filter (e.g. 'EVA', 'CAL')
+        fleetFocus: '', // [v4.2.0] Airline ICAO filter (e.g. 'EVA', 'CAL')
     });
 
     const [zoom, setZoom] = useState(10);
@@ -60,14 +61,14 @@ export default function App() {
         localStorage.setItem('radar_map_layer', layerId);
     }, []);
 
-    // [v4.1.1] Anomaly alerts from server SSE
+    // [v4.2.0] Anomaly alerts from server SSE
     const [anomalyAlerts, setAnomalyAlerts] = useState([]);
 
-    // [v4.1.1] Track mode — map auto-pans to follow selected plane
+    // [v4.2.0] Track mode — map auto-pans to follow selected plane
     const [trackMode, setTrackMode] = useState(false);
     const handleToggleTrackMode = useCallback(() => setTrackMode(p => !p), []);
 
-    // [v4.1.1] TimePlayer playback state — null means live, unix timestamp means historical
+    // [v4.2.0] TimePlayer playback state — null means live, unix timestamp means historical
     const [playbackTime, setPlaybackTime] = useState(null);
     const handlePlaybackChange = useCallback((unixTime) => {
         setPlaybackTime(unixTime);
@@ -184,22 +185,15 @@ export default function App() {
             setTrackPoints(points);
 
             // 背景取得 metadata + route (不阻塞 UI)
-            fetch(`/api/metadata/${icao24}`)
-                .then(r => r.json())
-                .then(data => {
-                    if (!data.noData) setSelectedMetadata(data);
-                    else logToServer(`Metadata missing for ${icao24}`, 'warn');
-                })
-                .catch(e => { logToServer(`Metadata fetch error for ${icao24}: ${e.message}`, 'error'); });
+            dataManager.getMetadata(icao24).then(data => {
+                if (!data.noData) setSelectedMetadata(data);
+                else logToServer(`Metadata missing for ${icao24}`, 'warn');
+            }).catch(e => { logToServer(`Metadata fetch error for ${icao24}: ${e.message}`, 'error'); });
 
-            const callsignQuery = plane.callsign ? `?callsign=${plane.callsign.trim()}` : '';
-            fetch(`/api/route/${icao24}${callsignQuery}`)
-                .then(r => r.json())
-                .then(data => {
-                    if (data.noData) logToServer(`Route missing for ${plane.callsign || icao24}`, 'warn');
-                    setSelectedRoute(data);
-                })
-                .catch(e => { logToServer(`Route fetch error for ${plane.callsign || icao24}: ${e.message}`, 'error'); });
+            dataManager.getRoute(icao24).then(data => {
+                if (data.noData) logToServer(`Route missing for ${plane.callsign || icao24}`, 'warn');
+                setSelectedRoute(data);
+            }).catch(e => { logToServer(`Route fetch error for ${plane.callsign || icao24}: ${e.message}`, 'error'); });
 
             // Update URL
             const url = new URL(window.location);
