@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath, splitPathAtIDL, normalizeLongitude, predictPosition, getPlaneCanvasData } from '../utils/flightUtils';
+import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath, splitPathAtIDL, normalizeLongitude, predictPosition, getPlaneCanvasData, latLngToGlobalPixels } from '../utils/flightUtils';
+import { trackStore } from '../store/FlightDataStore';
 
 /**
  * Custom Leaflet Canvas Layer for High-Performance Rendering
@@ -79,6 +80,7 @@ export default function MapView({
     playbackTime = null,      // [v3.1] UNIX timestamp for historical playback (null = live)
     t,
     translateMetar,
+    syncViewport,
 }) {
     const mapContainerRef = useRef(null);
     const mapRef = useRef(null);
@@ -98,6 +100,13 @@ export default function MapView({
     const trackModeRef = useRef(trackMode);  // [v3.0] ref for animation loop
     const playbackTimeRef = useRef(playbackTime); // [v3.1] ref for animation loop
     const trackPointsRef = useRef(trackPoints);   // [v3.1] ref for animation loop
+    const onUsageUpdateRef = useRef(onUsageUpdate);
+    const colorSchemeRef = useRef(colorScheme);
+    const filtersRef = useRef(filters);
+
+    // [Project AERO-SYNC] Zero-GC Projection Pre-allocation
+    const sharedLatLngRef = useRef(new L.LatLng(0, 0));
+    const sharedPointRef = useRef(new L.Point(0, 0));
 
     // [v3.0] Smart Tracking Interaction Refs
     const userInteractingRef = useRef(false);
@@ -113,10 +122,12 @@ export default function MapView({
 
     useEffect(() => { playbackTimeRef.current = playbackTime; }, [playbackTime]);
     useEffect(() => { trackPointsRef.current = trackPoints; }, [trackPoints]);
+    useEffect(() => { onUsageUpdateRef.current = onUsageUpdate; }, [onUsageUpdate]);
+    useEffect(() => { colorSchemeRef.current = colorScheme; }, [colorScheme]);
+    useEffect(() => { filtersRef.current = filters; }, [filters]);
 
     const [airports, setAirports] = useState([]);
     const airportsRef = useRef([]);
-    const filtersRef = useRef(filters);
     const [bounds, setBounds] = useState(null);
 
     // ===== 機場圖標 SVG =====
@@ -203,8 +214,13 @@ export default function MapView({
         const map = L.map(mapContainerRef.current, {
             zoomControl: false,
             minZoom: 3,
-            worldCopyJump: true // IMPORTANT: Makes markers wrap cleanly around infinite horizontal scrolls
+            worldCopyJump: true, // IMPORTANT: Makes markers wrap cleanly around infinite horizontal scrolls
+            dragging: true,
+            tap: false,
         }).setView([25.17, 121.44], 10);
+
+        // [AERO-SYNC] 專業級游標：強制還原為 default，不使用 Leaflet 預設的 grab
+        map.getContainer().style.cursor = 'default';
 
         // 加入右下角的縮放按鈕
         L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -224,31 +240,39 @@ export default function MapView({
         map.addLayer(cLayer);
         canvasLayerRef.current = cLayer;
 
-        // 點擊地圖偵測是否點擊到飛機
+        // [AERO-SYNC] 權重化命中偵測 (Weighted Hit Detection)
         map.on('click', (e) => {
             const clickPt = e.containerPoint;
-            let closestPlane = null;
-            let closestDist = 25; // 命中判定半徑
+            let candidates = [];
 
             const currentPlanes = planesDictRef.current || {};
+            const currentSelected = selectedIcao24Ref.current;
+
             for (const id in currentPlanes) {
                 const p = currentPlanes[id];
                 if (!p.renderLat || !p.renderLng) continue;
-
-                // 檢查是否符合過濾條件
                 if (!shouldShowPlaneRef.current(p, 1.0)) continue;
 
                 const pt = map.latLngToContainerPoint([p.renderLat, normalizeLongitude(p.renderLng)]);
                 const dist = Math.hypot(pt.x - clickPt.x, pt.y - clickPt.y);
-                if (dist < closestDist) {
-                    closestDist = dist;
-                    closestPlane = { id, plane: p };
+
+                if (dist < 25) {
+                    // 計算命中權重 (Weight)
+                    // 基礎權重為距離反比，加上顯著的業務權重
+                    let weight = (25 - dist);
+                    if (id === currentSelected) weight += 50;  // 已選中者優先
+                    if (p.isEmergency) weight += 100;         // 緊急狀態最高優先
+                    if (p.category === 5 || p.category === 6) weight += 20; // 大型機優先
+
+                    candidates.push({ id, plane: p, weight });
                 }
             }
 
-            if (closestPlane) {
+            if (candidates.length > 0) {
+                // 排序並選擇權重最高者
+                candidates.sort((a, b) => b.weight - a.weight);
                 L.DomEvent.stopPropagation(e.originalEvent);
-                onSelectPlane(closestPlane.id, closestPlane.plane);
+                onSelectPlane(candidates[0].id, candidates[0].plane);
             } else {
                 onDeselectPlane();
             }
@@ -282,10 +306,56 @@ export default function MapView({
 
         // 地圖移動結束
         map.on('moveend', () => {
-            setBounds(map.getBounds());
-            updateAirportVisibility(map); // <--- Add this to refresh virtualized airports
+            const currentBounds = map.getBounds();
+            setBounds(currentBounds);
+            updateAirportVisibility(map);
             onMapMove?.();
+
+            // [Project AERO-SYNC] Viewport-Driven Sync
+            syncViewport?.({
+                lamin: currentBounds.getSouth(),
+                lomin: currentBounds.getWest(),
+                lamax: currentBounds.getNorth(),
+                lomax: currentBounds.getEast()
+            });
         });
+
+        // [AERO-SYNC] 僅在縮放結束時更新全局投影快取
+        map.on('zoomend', () => {
+            updateAllProjectionCaches(map);
+            updateAirportVisibility(map);
+
+            const currentBounds = map.getBounds();
+            syncViewport?.({
+                lamin: currentBounds.getSouth(),
+                lomin: currentBounds.getWest(),
+                lamax: currentBounds.getNorth(),
+                lomax: currentBounds.getEast()
+            });
+        });
+
+        // [AERO-SYNC] 動態懸停游標 (Dynamic Hover Pointer)
+        map.on('mousemove', (e) => {
+            const currentPlanes = planesDictRef.current || {};
+            const mousePt = e.containerPoint;
+            let found = false;
+
+            for (const id in currentPlanes) {
+                const p = currentPlanes[id];
+                if (!p.renderLat || !p.renderLng) continue;
+                if (!shouldShowPlaneRef.current(p, 1.0)) continue;
+
+                const pt = map.latLngToContainerPoint([p.renderLat, normalizeLongitude(p.renderLng)]);
+                const dist = Math.hypot(pt.x - mousePt.x, pt.y - mousePt.y);
+                if (dist < 20) {
+                    found = true;
+                    break;
+                }
+            }
+            map.getContainer().style.cursor = found ? 'pointer' : 'default';
+        });
+
+        // 移除原有的 'zoom move' 即時監聽，實現 $O(1)$ 拖曳效能
 
         // 機場圖層 zoom 控制
         map.on('zoomend', () => {
@@ -293,6 +363,16 @@ export default function MapView({
         });
 
         mapRef.current = map;
+
+        // [AERO-SYNC] 確保初始化即校正 (Initial Warmup)
+        // 解決啟動時因為 zoom 不匹配導致的白畫面
+        setTimeout(() => {
+            if (mapRef.current) {
+                updateAllProjectionCaches(mapRef.current);
+                updateAirportVisibility(mapRef.current);
+            }
+        }, 100);
+
         onMapReady?.(map);
 
         // [OPT 6.2] Airport list: use sessionStorage cache to avoid redundant fetches
@@ -495,23 +575,77 @@ export default function MapView({
 
 
 
-    // ===== 過濾器：判斷是否顯示飛機 (v2.3.6 Dynamic Density) =====
+    // [Project AERO-SYNC] Zero-GC Pure Math Projector (Global Space Version)
+    const updateAllProjectionCaches = useCallback((map) => {
+        if (!map) return;
+
+        const zoom = map.getZoom();
+        const worldSize = 256 * Math.pow(2, zoom);
+
+        // --- 預先計算投影常數 ---
+        const scaleX = worldSize / 360;
+        const scaleY = worldSize / (2 * Math.PI);
+        const halfWorld = worldSize / 2;
+        const radConst = Math.PI / 360;
+
+        const outPoint = sharedPointRef.current;
+
+        /**
+         * 淨化後的投影函式：只產生「全域像素座標 (Global Pixels)」
+         * 不再減去 origin，確保拖曳時不需要更新快取
+         */
+        const pureMathProjector = (lat, lng) => {
+            // X 軸投影 (簡單線性)
+            const xGlobal = (normalizeLongitude(lng) + 180) * scaleX;
+
+            // Y 軸投影 (Web Mercator 弧度轉換)
+            // latRad = lat * Math.PI / 180;
+            // y = halfWorld - Math.log(Math.tan(Math.PI / 4 + latRad / 2)) * scaleY;
+            const yGlobal = halfWorld - Math.log(Math.tan(Math.PI / 4 + lat * radConst)) * scaleY;
+
+            // 轉換為 Container 像素座標 (減去當前地圖物理原點)
+            outPoint.x = xGlobal;
+            outPoint.y = yGlobal;
+            return outPoint;
+        };
+
+        trackStore.updateProjectionCache(pureMathProjector);
+
+        // [Project AERO-SYNC] 同步更新所有即時飛機的全域座標 (In-place)
+        const currentPlanes = planesDictRef.current;
+        for (const id in currentPlanes) {
+            const p = currentPlanes[id];
+            if (p.renderLat && p.renderLng) {
+                const pt = pureMathProjector(p.renderLat, p.renderLng);
+                p.globalX = pt.x;
+                p.globalY = pt.y;
+            }
+        }
+    }, [sharedPointRef]);
     const shouldShowPlane = useCallback(
         (plane, dynamicThrottle = 1.0) => {
             if (!filters.showGround && plane.onGround) return false;
             if (!filters.showEmergency && plane.isEmergency) return false;
             const alt = parseFloat(plane.altitude);
-            if (!filters.showLow && !isNaN(alt) && alt < 1500) return false;
+            // Low-altitude filter is handled by density LOD, not a hard cutoff
 
             // [v3.1] Airline Fleet Focus Mode
             if (filters.fleetFocus && (!plane.callsign || !plane.callsign.startsWith(filters.fleetFocus))) return false;
 
-            // Local Bounds Check
-            if (bounds) {
-                const lat = parseFloat(plane.lat);
-                const lng = parseFloat(plane.lng);
-                if (lat < bounds.getSouth() || lat > bounds.getNorth() || lng < bounds.getWest() || lng > bounds.getEast()) {
-                    return false;
+            // [v4.0] Use live map bounds - never stale
+            const liveMap = mapRef.current;
+            if (liveMap) {
+                const liveBounds = liveMap.getBounds();
+                if (liveBounds) {
+                    const lat = parseFloat(plane.lat);
+                    const lng = parseFloat(plane.lng);
+                    // Add extra 20% padding to avoid clipping planes near edges
+                    const latPad = (liveBounds.getNorth() - liveBounds.getSouth()) * 0.2;
+                    const lngPad = (liveBounds.getEast() - liveBounds.getWest()) * 0.2;
+                    if (lat < liveBounds.getSouth() - latPad || lat > liveBounds.getNorth() + latPad ||
+                        lng < liveBounds.getWest() - lngPad || lng > liveBounds.getEast() + lngPad) {
+                        return false;
+                    }
                 }
             }
 
@@ -779,16 +913,19 @@ export default function MapView({
                     const latLngs = trackLineRef.current.getLatLngs();
                     if (latLngs.length > 0) {
                         const currentL = L.latLng(plane.renderLat, normalizeLongitude(plane.renderLng));
-                        const isMulti = Array.isArray(latLngs[0]);
+                        const isMulti = Array.isArray(latLngs[0]) || (latLngs[0] instanceof L.LatLng === false && Array.isArray(latLngs[0]));
+
+                        // Get the truly last segment
                         const lastSegment = isMulti ? latLngs[latLngs.length - 1] : latLngs;
                         const lastPt = lastSegment[lastSegment.length - 1];
+
                         if (lastPt && currentL.distanceTo(L.latLng(lastPt.lat, normalizeLongitude(lastPt.lng))) > 50) {
                             if (isMulti) {
-                                const newLatLngs = [...latLngs];
-                                newLatLngs[newLatLngs.length - 1] = [...lastSegment, { lat: plane.renderLat, lng: currentLng }];
-                                trackLineRef.current.setLatLngs(newLatLngs);
+                                // Important: Mutation of Leaflet internal array needs care
+                                lastSegment.push({ lat: plane.renderLat, lng: plane.renderLng });
+                                trackLineRef.current.setLatLngs(latLngs);
                             } else {
-                                trackLineRef.current.addLatLng({ lat: plane.renderLat, lng: currentLng });
+                                trackLineRef.current.addLatLng({ lat: plane.renderLat, lng: plane.renderLng });
                             }
                         }
                     }
@@ -834,13 +971,61 @@ export default function MapView({
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
                 const zoom = map.getZoom();
+
+                // [v4.0] 獲取當前即時相機邊界原點 (Dynamic Camera Tracking)
+                // 使用 getPixelBounds().min 取代 getPixelOrigin()，解決拖曳時的殘影與位移
+                const pixelBounds = map.getPixelBounds();
+                const ox = pixelBounds.min.x;
+                const oy = pixelBounds.min.y;
+
+                // --- [AERO-SYNC] Batch Track Rendering Phase (Zero-GC / Space Decoupled) ---
+                if (zoom >= 6) {
+                    ctx.save();
+                    ctx.lineWidth = 2;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+
+                    trackStore.forEachTrack((icao24, getPoints) => {
+                        // [v4.1.0] 渲染防護 (Render Guard)
+                        // 如果飛機已經不在目前的數據流中 (currentPlanes)，則不繪製軌跡
+                        // 這是修復「幽靈軌跡」的核心邏輯之一
+                        if (icao24 !== selectedIcao24Ref.current || !currentPlanes[icao24]) return;
+
+                        ctx.beginPath();
+                        ctx.strokeStyle = '#22d3ee'; // 選中飛機的高導電青色
+
+                        let first = true;
+                        let lastX = 0;
+
+                        getPoints((lat, lng, gx, gy) => {
+                            // 將 Global Pixels 轉換為 Screen Pixels (極速減法)
+                            const x = gx - ox;
+                            const y = gy - oy;
+
+                            if (first) {
+                                ctx.moveTo(x, y);
+                                first = false;
+                            } else {
+                                if (Math.abs(x - lastX) > canvas.width / 2) {
+                                    ctx.moveTo(x, y);
+                                } else {
+                                    ctx.lineTo(x, y);
+                                }
+                            }
+                            lastX = x;
+                        });
+                        ctx.stroke();
+                    });
+                    ctx.restore();
+                }
+
                 const showLabels = zoom >= 6;
                 const maxDraw = zoom <= 4 ? 300 : zoom <= 5 ? 800 : zoom <= 6 ? 1500 : zoom <= 7 ? 3500 : zoom <= 8 ? 6000 : 10000;
                 let drawnCount = 0;
 
                 ctx.textBaseline = 'middle';
 
-                // Array for sorting visible planes
+                // Render plane queue
                 const renderQueue = [];
                 for (const id in currentPlanes) {
                     const plane = currentPlanes[id];
@@ -862,17 +1047,29 @@ export default function MapView({
                 // Render loop
                 for (let i = 0; i < Math.min(maxDraw, renderQueue.length); i++) {
                     const plane = renderQueue[i];
-                    const pt = map.latLngToContainerPoint([plane.renderLat, normalizeLongitude(plane.renderLng)]);
 
-                    // Frustum culling margin (allow some margin for labels/rotation)
-                    if (pt.x < -100 || pt.x > canvas.width + 100 || pt.y < -100 || pt.y > canvas.height + 100) continue;
+                    // [v4.0] Use robust Leaflet projection - always correct regardless of zoom history
+                    const pt = map.latLngToContainerPoint([plane.renderLat, normalizeLongitude(plane.renderLng)]);
+                    const ptX = pt.x;
+                    const ptY = pt.y;
+
+                    // Frustum culling margin
+                    if (ptX < -100 || ptX > canvas.width + 100 || ptY < -100 || ptY > canvas.height + 100) continue;
 
                     drawnCount++;
                     const isSelected = plane.icao24 === currentSelected;
-                    const cData = getPlaneCanvasData(plane.altitude, isSelected, plane.onGround, plane.isEmergency, plane.category, colorScheme);
+                    const cData = getPlaneCanvasData(plane.altitude, isSelected, plane.onGround, plane.isEmergency, plane.category, colorSchemeRef.current);
+
+                    // [AERO-SYNC] 視覺訊號質量 (Signal Quality)
+                    // 對於資料較舊的飛機，降低透明度，讓使用者直覺分辨實時性
+                    const dataAge = (nowMs / 1000) - (plane.lastContact || (nowMs / 1000));
+                    let opacity = 1.0;
+                    if (dataAge > 60) opacity = 0.4;
+                    else if (dataAge > 30) opacity = 0.7;
 
                     ctx.save();
-                    ctx.translate(pt.x, pt.y);
+                    ctx.globalAlpha = opacity;
+                    ctx.translate(ptX, ptY);
 
                     // Draw glow (Original aesthetic applies subtle glow to ALL planes)
                     ctx.shadowColor = cData.planeColor;
@@ -888,11 +1085,13 @@ export default function MapView({
 
                     ctx.restore();
 
-                    // Draw labels
-                    // [v3.6] Hide unselected labels as per user request
-                    if (isSelected) {
+                    // [v4.0.1] Label Strategy: Only show on explicit selection (User request)
+                    // Added isEmergency as a safety fallback at high zoom levels
+                    const shouldShowLabel = isSelected || (zoom >= 10 && plane.isEmergency);
+
+                    if (shouldShowLabel) {
                         ctx.save();
-                        ctx.translate(pt.x + 20, pt.y);
+                        ctx.translate(ptX + 20, ptY);
 
                         const logoImg = getLogoImage(plane.callsign);
                         const hasLogo = logoImg && logoImg.complete && logoImg.naturalWidth > 0;
@@ -911,14 +1110,9 @@ export default function MapView({
                         const boxX = tailWidth;
                         const boxY = yOffset;
 
-                        // Draw Drop Shadow
-                        ctx.shadowColor = 'rgba(0,0,0,0.3)';
-                        ctx.shadowBlur = 4;
-                        ctx.shadowOffsetX = 1;
-                        ctx.shadowOffsetY = 1;
-
-                        // Draw Bubble Path
-                        ctx.fillStyle = '#ffffff';
+                        // [v4.0.1] Synchronized Glassmorphism Styling
+                        ctx.globalAlpha = opacity; // Sync with icon's signal quality
+                        ctx.fillStyle = isSelected ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.8)';
                         ctx.beginPath();
                         ctx.moveTo(boxX + radius, boxY);
                         ctx.lineTo(boxX + bubbleWidth - radius, boxY);
@@ -954,8 +1148,8 @@ export default function MapView({
                     }
                 }
 
-                if (onUsageUpdate) {
-                    onUsageUpdate({ visibleCount: drawnCount, totalInView: renderQueue.length, renderLimit: maxDraw, throttleFactor: 1.0 });
+                if (onUsageUpdateRef.current) {
+                    onUsageUpdateRef.current({ visibleCount: drawnCount, totalInView: renderQueue.length, renderLimit: maxDraw, throttleFactor: 1.0 });
                 }
             }
 
@@ -964,7 +1158,7 @@ export default function MapView({
 
         animFrameRef.current = requestAnimationFrame(animate);
         return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
-    }, [colorScheme, onUsageUpdate]); // Persistent loop!
+    }, []); // 永動機解耦 (Decoupled Loop Architecture)
 
     return <div ref={mapContainerRef} className="map-container" />;
 }

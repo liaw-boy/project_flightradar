@@ -13,9 +13,25 @@ function initWebSocketServer(server) {
     wss.on('connection', (ws) => {
         console.log(`🔌 [WS] Client connected. Total: ${wss.clients.size}`);
 
+        // Default BBox: Global (very inclusive)
+        ws.bbox = null;
+
         // Send an initial full state marker to force the client to wait for the first full broadcast
         const initMsg = msgpack.encode({ type: 'init' });
         ws.send(initMsg);
+
+        ws.on('message', (data) => {
+            try {
+                const msg = msgpack.decode(new Uint8Array(data));
+                if (msg.type === 'SET_VIEWPORT') {
+                    // payload: { lamin, lomin, lamax, lomax }
+                    ws.bbox = msg.payload;
+                    console.log(`🎯 [WS] Client viewport updated: ${JSON.stringify(ws.bbox)}`);
+                }
+            } catch (err) {
+                console.error(`❌ [WS] Message handling error: ${err.message}`);
+            }
+        });
 
         ws.on('close', () => {
             console.log(`🔌 [WS] Client disconnected. Total: ${wss.clients.size}`);
@@ -29,19 +45,21 @@ function initWebSocketServer(server) {
 }
 
 /**
- * Broadcast Delta Encoded Planes
+ * Broadcast Delta Encoded Planes (with Spatial Filtering)
  * @param {Array} states array of plane objects from parser
  * @param {number} timestamp
  */
 function broadcastPlanes(states, timestamp) {
     if (!wss || wss.clients.size === 0) return;
 
+    // 1. Pre-calculate deltas for all changed planes
+    const updatesMap = new Map(); // icao24 -> update array
     const currentIds = new Set();
-    const updates = [];     // Planes that have changed or are new
-    const removed = [];     // Planes that disappeared
+    const removed = [];
 
-    states.forEach(plane => {
-        const { icao24, lat, lng, heading, altitude, velocity, onGround, category, isEmergency, callsign, vRate, squawk, lastContact } = plane;
+    for (let i = 0; i < states.length; i++) {
+        const plane = states[i];
+        const icao24 = plane.icao24;
         currentIds.add(icao24);
 
         const prev = prevStates.get(icao24);
@@ -49,35 +67,40 @@ function broadcastPlanes(states, timestamp) {
 
         if (!prev) {
             changed = true;
-        } else {
-            // Delta Checks:
-            // Lat/Lng > 0.0001 diff
-            // Heading > 1 deg diff
-            // Any other critical state change
-            if (
-                Math.abs(lat - prev.lat) > 0.0001 ||
-                Math.abs(lng - prev.lng) > 0.0001 ||
-                Math.abs(heading - prev.heading) > 1 ||
-                prev.altitude !== altitude ||
-                prev.velocity !== velocity ||
-                prev.onGround !== onGround ||
-                prev.lastContact !== lastContact
-            ) {
-                changed = true;
-            }
+            prevStates.set(icao24, {
+                lat: plane.lat, lng: plane.lng, heading: plane.heading,
+                altitude: plane.altitude, velocity: plane.velocity,
+                onGround: plane.onGround, lastContact: plane.lastContact
+            });
+        } else if (
+            Math.abs(plane.lat - prev.lat) > 0.0001 ||
+            Math.abs(plane.lng - prev.lng) > 0.0001 ||
+            Math.abs(plane.heading - prev.heading) > 1 ||
+            prev.altitude !== plane.altitude ||
+            prev.velocity !== plane.velocity ||
+            prev.onGround !== plane.onGround ||
+            prev.lastContact !== plane.lastContact
+        ) {
+            changed = true;
+            prev.lat = plane.lat;
+            prev.lng = plane.lng;
+            prev.heading = plane.heading;
+            prev.altitude = plane.altitude;
+            prev.velocity = plane.velocity;
+            prev.onGround = plane.onGround;
+            prev.lastContact = plane.lastContact;
         }
 
         if (changed) {
-            // Store compressed version in updates array
-            // Optimization: use array format instead of object to save bytes
-            // Format: [icao24, lat, lng, heading, altitude, velocity, onGround, category, isEmergency, callsign, vRate, squawk, lastContact]
-            updates.push([icao24, lat, lng, heading, altitude, velocity, onGround, category, isEmergency, callsign, vRate, squawk, lastContact]);
-
-            prevStates.set(icao24, { lat, lng, heading, altitude, velocity, onGround, lastContact });
+            updatesMap.set(icao24, [
+                icao24, plane.lat, plane.lng, plane.heading, plane.altitude,
+                plane.velocity, plane.onGround, plane.category, plane.isEmergency,
+                plane.callsign, plane.vRate, plane.squawk, plane.lastContact
+            ]);
         }
-    });
+    }
 
-    // Detect removed planes
+    // 2. Detect removed planes
     for (const [icao24] of prevStates) {
         if (!currentIds.has(icao24)) {
             removed.push(icao24);
@@ -85,24 +108,60 @@ function broadcastPlanes(states, timestamp) {
         }
     }
 
-    if (updates.length > 0 || removed.length > 0) {
-        const payload = msgpack.encode({
-            type: 'delta',
-            time: timestamp,
-            updates,
-            removed
+    // 3. Targeted Broadcast (Spatial Filtering)
+    wss.clients.forEach(client => {
+        if (client.readyState !== 1 /* WebSocket.OPEN */) return;
+
+        const clientUpdates = [];
+        const clientRemoved = [];
+
+        // Check if aircraft is in client's BBox
+        for (const [icao24, update] of updatesMap) {
+            const lat = update[1];
+            const lng = update[2];
+            if (!client.bbox || (
+                lat >= client.bbox.lamin && lat <= client.bbox.lamax &&
+                lng >= client.bbox.lomin && lng <= client.bbox.lomax
+            )) {
+                clientUpdates.push(update);
+            }
+        }
+
+        // Removed planes: simple check (or can skip filtering for simplicity if small list)
+        removed.forEach(id => {
+            // We should ideally check if the plane WAS in the client's bbox before,
+            // but for simplicity and safety, we send all removed signals.
+            clientRemoved.push(id);
         });
 
-        // Broadcast to all clients
-        wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(payload);
-            }
-        });
-    }
+        if (clientUpdates.length > 0 || clientRemoved.length > 0) {
+            const payload = msgpack.encode({
+                type: 'delta',
+                time: timestamp,
+                updates: clientUpdates,
+                removed: clientRemoved
+            });
+            client.send(payload);
+        }
+    });
+}
+
+/**
+ * Get all active viewports from connected clients
+ */
+function getActiveViewports() {
+    const viewports = [];
+    if (!wss) return viewports;
+    wss.clients.forEach(client => {
+        if (client.readyState === 1 && client.bbox) {
+            viewports.push(client.bbox);
+        }
+    });
+    return viewports;
 }
 
 module.exports = {
     initWebSocketServer,
-    broadcastPlanes
+    broadcastPlanes,
+    getActiveViewports
 };

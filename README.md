@@ -1,4 +1,4 @@
-# ✈️ AEROSTRAT 全球航空雷達系統 (Global Surveillance Radar) - v3.5.0 "AERO-SYNC"
+# ✈️ AEROSTRAT 全球航空雷達系統 (Global Surveillance Radar) - v4.0.0 "Trinity Edition"
 
 這是一款專門為「極端數據吞吐量」與「60fps電影級流暢視覺」而生的專業級全球航空監控系統。基於 **React (Vite)**、**Node.js (Worker Threads)** 與 **Leaflet Canvas 渲染引擎**，本系統獨家研發了 **AERO-SYNC 毫米級預測架構**，徹底顛覆傳統 Web 地圖渲染效能極限。
 

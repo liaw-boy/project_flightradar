@@ -36,7 +36,7 @@ export default function App() {
         showEmergency: true,
         showLow: true,
         showAirports: true,
-        fleetFocus: '', // [v3.1] Airline ICAO filter (e.g. 'EVA', 'CAL')
+        fleetFocus: '', // [v4.1.1] Airline ICAO filter (e.g. 'EVA', 'CAL')
     });
 
     const [zoom, setZoom] = useState(10);
@@ -60,14 +60,14 @@ export default function App() {
         localStorage.setItem('radar_map_layer', layerId);
     }, []);
 
-    // [v3.0] Anomaly alerts from server SSE
+    // [v4.1.1] Anomaly alerts from server SSE
     const [anomalyAlerts, setAnomalyAlerts] = useState([]);
 
-    // [v3.0] Track mode — map auto-pans to follow selected plane
+    // [v4.1.1] Track mode — map auto-pans to follow selected plane
     const [trackMode, setTrackMode] = useState(false);
     const handleToggleTrackMode = useCallback(() => setTrackMode(p => !p), []);
 
-    // [v3.1] TimePlayer playback state — null means live, unix timestamp means historical
+    // [v4.1.1] TimePlayer playback state — null means live, unix timestamp means historical
     const [playbackTime, setPlaybackTime] = useState(null);
     const handlePlaybackChange = useCallback((unixTime) => {
         setPlaybackTime(unixTime);
@@ -95,6 +95,7 @@ export default function App() {
         throttleSeconds,
         fetchPlanes,
         fetchTrack,
+        syncViewport,
         flightHistoryRef,
     } = useFlightData(mapInstanceRef);
 
@@ -241,15 +242,13 @@ export default function App() {
     const selectedPlane = selectedIcao24 ? planesDict[selectedIcao24] : null;
 
     // Check URL for ICAO auto-select once planesDict is populated
+    // [v4.1.0] Auto-Deselection Guard: 如果選中的飛機消失在數據流中，自動取消選取
     useEffect(() => {
-        if (!initializedUrlRef.current && Object.keys(planesDict).length > 0) {
-            initializedUrlRef.current = true;
-            const urlParams = parseUrlParams();
-            if (urlParams.icao && planesDict[urlParams.icao]) {
-                handleSelectPlane(urlParams.icao, planesDict[urlParams.icao]);
-            }
+        if (selectedIcao24 && !planesDict[selectedIcao24]) {
+            console.log(`🧹 [AUTO-DESELECT] Plane ${selectedIcao24} vanished. Clearing state.`);
+            handleDeselectPlane();
         }
-    }, [planesDict, handleSelectPlane]);
+    }, [planesDict, selectedIcao24, handleDeselectPlane]);
 
     return (
         <div className="app">
@@ -271,6 +270,7 @@ export default function App() {
                 mapLayer={mapLayer}
                 trackMode={trackMode}
                 playbackTime={playbackTime}
+                syncViewport={syncViewport}
                 t={t}
                 translateMetar={translateMetar}
             />

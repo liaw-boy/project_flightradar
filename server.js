@@ -8,7 +8,7 @@ const path = require('path');
 const cron = require('node-cron');
 const { Worker } = require('worker_threads');
 const http = require('http');
-const { initWebSocketServer, broadcastPlanes } = require('./socketEngine');
+const { initWebSocketServer, broadcastPlanes, getActiveViewports } = require('./socketEngine');
 require('dotenv').config();
 
 // ==========================================
@@ -553,134 +553,101 @@ function findNearestAirport(lat, lng, maxDist = 8) {
     return nearestAp;
 }
 
-// 背景持續輪詢 OpenSky 取得全球資料
+// [Project AERO-SYNC] Viewport-Driven Adaptive Fetcher
+const bboxActiveRequests = new Map();
+const bboxFetchHistory = new Map();
+
+/**
+ * 核心：向 OpenSky 發起請求的新型通用函數
+ */
+async function fetchOpenSky(params = {}) {
+    const headers = await getAuthHeaders();
+    let url = 'https://opensky-network.org/api/states/all';
+
+    // 構建 BBox 語法
+    if (params.lamin !== undefined) {
+        url += `?lamin=${params.lamin}&lomin=${params.lomin}&lamax=${params.lamax}&lomax=${params.lomax}`;
+    }
+
+    const response = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(30000)
+    });
+
+    syncAccountQuota(currentAccountIndex, response);
+
+    if (!response.ok) {
+        if (response.status === 429) rotateAccount();
+        throw new Error(`OpenSky API Error: ${response.status}`);
+    }
+
+    const rawJsonText = await response.text();
+    return new Promise((resolve, reject) => {
+        const worker = new Worker(path.join(__dirname, 'workers', 'parser.js'));
+        worker.postMessage(rawJsonText);
+        worker.on('message', (msg) => {
+            worker.terminate();
+            if (msg.success) resolve({ states: msg.planes, time: msg.time });
+            else reject(new Error(msg.error));
+        });
+        worker.on('error', (err) => {
+            worker.terminate();
+            reject(err);
+        });
+    });
+}
+
+/**
+ * [V3.0] 視角驅動自適應抓取迴圈
+ */
+async function runAdaptiveViewportPolling() {
+    const viewports = getActiveViewports();
+    if (viewports.length === 0) return;
+
+    for (const v of viewports) {
+        // 1. 生成聚合 Key (四捨五入至小數點後 1 位，增加命中率)
+        const key = `${v.lamin.toFixed(1)}_${v.lomin.toFixed(1)}_${v.lamax.toFixed(1)}_${v.lomax.toFixed(1)}`;
+
+        // 2. 決定採樣頻率 (面積小於 10 單位視為「區域」，給予 10s 更新)
+        const area = Math.abs(v.lamax - v.lamin) * Math.abs(v.lomax - v.lomin);
+        const interval = area < 20 ? 10000 : 60000;
+
+        const lastFetch = bboxFetchHistory.get(key) || 0;
+        if (Date.now() - lastFetch < interval) continue;
+        if (bboxActiveRequests.has(key)) continue;
+
+        // 3. 請求聚合
+        const p = (async () => {
+            try {
+                const data = await fetchOpenSky(v);
+                bboxFetchHistory.set(key, Date.now());
+                broadcastPlanes(data.states, data.time); // 立即推播 delta
+                console.log(`🎯 [ADAPTIVE] Portions for ${key} updated. Area: ${area.toFixed(2)}`);
+            } catch (e) {
+                // console.warn(`[ADAPTIVE] Skip ${key}: ${e.message}`);
+            } finally {
+                bboxActiveRequests.delete(key);
+            }
+        })();
+        bboxActiveRequests.set(key, p);
+    }
+}
+
+// 保持每 5 秒檢查一次是否有視角需要更新 (實際抓取受分段計時器控制)
+setInterval(runAdaptiveViewportPolling, 5000);
+
+// 改寫原本的 fetchGlobalPlanes 為 fetchOpenSky 的封裝
 async function fetchGlobalPlanes() {
     if (isFetchingGlobal) return;
-    if (Date.now() < globalRateLimitCooldown) {
-        console.log(`⏳ [GLOBAL COOLDOWN] Skipping fetch. Resting for ${Math.round((globalRateLimitCooldown - Date.now()) / 1000)}s...`);
-        return;
-    }
-
     isFetchingGlobal = true;
-    let retries = ACCOUNTS.length;
-
-    while (retries > 0) {
-        try {
-            const headers = await getAuthHeaders();
-
-            // 重要：在確定最終選用的帳號後再進行 Log，避免誤導
-            console.log(`🌐 [GLOBAL FETCH] Requesting /states/all ... (Account: ${ACCOUNTS[currentAccountIndex].user})`);
-            apiStats.totalCalls++;
-            apiStats.stateCalls++;
-            const response = await fetch('https://opensky-network.org/api/states/all', {
-                headers,
-                signal: AbortSignal.timeout(18000)
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-
-                // 同步 Quota (即使失敗也可能有 Header)
-                syncAccountQuota(currentAccountIndex, response);
-
-                if (response.status === 429) {
-                    console.warn(`⚠️ [RATE LIMIT] Account ${ACCOUNTS[currentAccountIndex].user} limited. Rotating...`);
-
-                    if (retries > 1 && rotateAccount()) {
-                        retries--;
-                        continue;
-                    } else {
-                        const retryStr = response.headers.get('x-rate-limit-retry-after-seconds');
-                        const penaltySeconds = retryStr ? parseInt(retryStr, 10) : 5 * 60;
-                        globalRateLimitCooldown = Date.now() + (penaltySeconds * 1000);
-                        throw new Error(`All accounts exhausted. Resumes in ${penaltySeconds}s`);
-                    }
-                }
-                throw new Error(`OpenSky API error: ${response.status} ${errorText.substring(0, 50)}`);
-            }
-
-            // 更新 Quota
-            syncAccountQuota(currentAccountIndex, response);
-
-            const remaining = apiStats.accounts[currentAccountIndex].remainingCredits;
-            if (remaining !== null && remaining <= SAFE_RESERVE_CAP && retries > 1) {
-                console.log(`🛡️ [RESERVE] Post-call check: Account ${ACCOUNTS[currentAccountIndex].user} metric low. Rotating...`);
-                rotateAccount();
-            }
-
-            // [V2.0.0] 將龐大的 JSON.stringify 文字交給 Worker Thread 處理
-            const rawJsonText = await response.text();
-
-            const worker = new Worker(path.join(__dirname, 'workers', 'parser.js'));
-            worker.postMessage(rawJsonText);
-
-            worker.on('message', (msg) => {
-                if (msg.success) {
-                    const newStates = msg.planes;
-                    const timestamp = msg.time;
-
-                    // --- [學習系統] 偵測起飛與降落 ---
-                    newStates.forEach(curr => {
-                        const prev = lastGlobalStatesMap.get(curr.icao24);
-                        if (!prev || !curr.callsign) return;
-
-                        // 偵測起飛 (之前在地面，現在升空)
-                        if (prev.onGround && !curr.onGround) {
-                            const ap = findNearestAirport(curr.lat, curr.lng);
-                            if (ap) {
-                                console.log(`🛫 [LEARN] ${curr.callsign} took off from ${ap.icao} (${ap.name})`);
-                                if (!routesDatabase[curr.callsign]) routesDatabase[curr.callsign] = {};
-                                routesDatabase[curr.callsign].dep = ap.icao;
-                                saveRoutesDatabase();
-                            }
-                        }
-                        // 偵測降落 (之前在空中，現在著地)
-                        else if (!prev.onGround && curr.onGround) {
-                            const ap = findNearestAirport(curr.lat, curr.lng);
-                            if (ap) {
-                                console.log(`🛬 [LEARN] ${curr.callsign} landed at ${ap.icao} (${ap.name})`);
-                                if (!routesDatabase[curr.callsign]) routesDatabase[curr.callsign] = {};
-                                routesDatabase[curr.callsign].arr = ap.icao;
-                                saveRoutesDatabase();
-                            }
-                        }
-                    });
-
-                    // 更新歷史地圖
-                    lastGlobalStatesMap.clear();
-                    newStates.forEach(p => lastGlobalStatesMap.set(p.icao24, p));
-
-                    globalPlanesCache = { states: newStates, time: timestamp };
-                    console.log(`📦 [WORKER] Parse complete. Parsed ${newStates.length} planes in ${msg.parseTimeMs}ms.`);
-                    apiStats.lastSuccessTime = new Date().toISOString();
-
-                    // [v2.9.0] SSE
-                    broadcastSSE({ type: 'planes-updated', time: timestamp, count: newStates.length });
-
-                    // [Project AERO-SYNC] WebSocket / Binary Delta Push
-                    broadcastPlanes(newStates, timestamp);
-
-                    // [v3.0] 飛行異常偵測
-                    detectAnomalies(newStates);
-                } else {
-                    console.error(`❌ [WORKER ERROR] ${msg.error}`);
-                }
-                worker.terminate();
-            });
-
-            worker.on('error', (err) => {
-                console.error(`❌ [WORKER FATAL] ${err.message}`);
-            });
-
-            break; // 成功取得並派發給 Worker 後跳出重試迴圈
-
-        } catch (error) {
-            console.error(`❌ [FETCH ERROR] ${error.message}`);
-            if (error.message.includes('All accounts') || !error.message.includes('Rate limited')) break;
-            retries--;
-        }
+    try {
+        const data = await fetchOpenSky();
+        globalPlanesCache = { states: data.states, time: data.time };
+        broadcastPlanes(data.states, data.time);
+        console.log(`🌏 [GLOBAL] Global snapshot updated: ${data.states.length} planes.`);
+    } catch (e) {
+        console.error(`❌ [GLOBAL] Error: ${e.message}`);
     }
-
     isFetchingGlobal = false;
 }
 
@@ -1462,7 +1429,7 @@ server.listen(PORT, () => {
     console.log('║   ✈️  AEROSTRAT Surveillance Server      ║');
     console.log(`║   🌐 http://localhost:${PORT}               ║`);
     console.log(`║   📁 Serving: ./public-react             ║`);
-    console.log(`║   🔐 Version: v3.6.0                     ║`);
+    console.log(`║   🔐 Version: v4.1.1                     ║`);
     console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
     console.log('╚══════════════════════════════════════════╝');
     console.log('');

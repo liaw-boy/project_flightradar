@@ -384,9 +384,9 @@ export function getPlaneCanvasData(altitude, isSelected, onGround, isEmergency, 
     const size = onGround ? 24 : Math.min(36, 24 + (altitude !== 'N/A' && altitude !== 'GROUND' ? altitude / 500 : 0));
 
     // Restore original colors: selected is YELLOW fill with WHITE stroke. Normal has NO stroke.
-    const planeColor = isSelected ? '#FFDC00' : color;
+    let planeColor = isSelected ? '#FFDC00' : color;
     const strokeColor = isSelected ? '#ffffff' : 'none';
-    const strokeWidth = isSelected ? 0.5 : 0;
+    let strokeWidth = isSelected ? 0.5 : 0;
 
     let pathMap = AERO_PATHS.default;
     let scale = 1.0;
@@ -394,7 +394,7 @@ export function getPlaneCanvasData(altitude, isSelected, onGround, isEmergency, 
     if (onGround || altitude === 'GROUND' || category === 16 || category === 17) {
         pathMap = AERO_PATHS.ground;
         strokeWidth = isSelected ? 1 : 0;
-        planeColor = isSelected ? '#FFDC00' : baseColor; // Ground vehicles remain solid
+        planeColor = isSelected ? '#FFDC00' : color; // Ground vehicles remain solid
     } else if (category === 2 || category === 3) {
         pathMap = AERO_PATHS.light;
     } else if (category === 5 || category === 6) {
@@ -604,4 +604,19 @@ export function getAirlineLogoUrl(callsign) {
     const iata = ICAO_TO_IATA[prefix];
     if (!iata) return '';
     return `https://pics.avs.io/200/80/${iata}.png`;
+}
+/**
+ * [Project AERO-SYNC] 絕無分配的純數學投影 (Global Space)
+ * 轉換經緯度為當前縮放層級下的全域像素座標
+ */
+export function latLngToGlobalPixels(lat, lng, zoom, outPoint) {
+    const worldSize = 256 * Math.pow(2, zoom);
+    const scaleX = worldSize / 360;
+    const scaleY = worldSize / (2 * Math.PI);
+    const halfWorld = worldSize / 2;
+    const radConst = Math.PI / 360;
+
+    outPoint.x = (normalizeLongitude(lng) + 180) * scaleX;
+    outPoint.y = halfWorld - Math.log(Math.tan(Math.PI / 4 + lat * radConst)) * scaleY;
+    return outPoint;
 }

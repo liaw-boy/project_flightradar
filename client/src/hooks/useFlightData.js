@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { parseOpenSkyData } from '../utils/flightUtils';
+import { parseOpenSkyData, latLngToGlobalPixels } from '../utils/flightUtils';
+import { trackStore } from '../store/FlightDataStore';
 
 /**
  * 飛行資料管理 Hook
@@ -26,9 +27,12 @@ export function useFlightData(mapRef) {
     const planesDictRef = useRef({});
     const apiStatusRef = useRef('INIT');
     const globalLastUpdateRef = useRef(0);
-    const nextScheduledFetchRef = useRef(Date.now() + 60000); // 追蹤下一次預約自動更新的時間
+    const nextScheduledFetchRef = useRef(Date.now() + 60000);
     const workerRef = useRef(null);
-    const usesWebSocketRef = useRef(false); // [Project AERO-SYNC]
+    const usesWebSocketRef = useRef(false);
+
+    // [Project AERO-SYNC] Zero-GC Projection Helper
+    const sharedPointRef = useRef({ x: 0, y: 0 });
 
     // 保持 ref 和 state 同步
     useEffect(() => {
@@ -183,14 +187,29 @@ export function useFlightData(mapRef) {
             const next = { ...prev };
 
             planes.forEach(({ icao24, data: pData }) => {
-                if (!history[icao24]) history[icao24] = [];
-                const nowUnix = Math.floor(Date.now() / 1000);
-                // [v3.1 Fix] Include altitude and heading so Sidebar Chart works
-                history[icao24].push([nowUnix, pData.lat, pData.lng, pData.onGround, pData.altitude, pData.heading]);
-                if (history[icao24].length > 500) history[icao24].shift();
+                // [Project AERO-SYNC] 將歷史資料存入 Zero-GC DataStore
+                if (mapRef && mapRef.current) {
+                    const zoom = mapRef.current.getZoom();
+                    const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
+                    trackStore.addTrackPoint(icao24, pData.lat, pData.lng, globalPt.x, globalPt.y);
+                }
 
                 if (!next[icao24]) {
-                    next[icao24] = { ...pData, isDirty: true, lastCallsign: '', targetLat: pData.lat, targetLng: pData.lng, targetUpdatedAt: Date.now() };
+                    const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
+                    const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
+
+                    next[icao24] = {
+                        ...pData,
+                        isDirty: true,
+                        lastCallsign: '',
+                        renderLat: pData.lat,
+                        renderLng: pData.lng,
+                        targetLat: pData.lat,
+                        targetLng: pData.lng,
+                        targetUpdatedAt: Date.now(),
+                        globalX: globalPt.x,
+                        globalY: globalPt.y
+                    };
                 } else {
                     const existing = next[icao24];
                     const isDirty =
@@ -200,13 +219,19 @@ export function useFlightData(mapRef) {
                         existing.onGround !== pData.onGround ||
                         existing.isEmergency !== pData.isEmergency;
 
+                    // [Project AERO-SYNC] 計算飛機目前位置的全域座標
+                    const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
+                    const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
+
                     next[icao24] = {
                         ...existing,
                         ...pData,
                         isDirty,
                         targetLat: pData.lat,
                         targetLng: pData.lng,
-                        targetUpdatedAt: Date.now(), // [v2.8.4] LERP 校正起始時間戳
+                        targetUpdatedAt: Date.now(),
+                        globalX: globalPt.x, // [v3.0] Space Decoupling
+                        globalY: globalPt.y
                     };
                 }
             });
@@ -282,38 +307,37 @@ export function useFlightData(mapRef) {
 
                 // path 格式: [time, lat, lng, altitude, heading, onGround]
                 // 只保留時間戳 <= 飛機目前最後更新時間 的歷史點 (排除未來預測點)
-                const validPoints = data.path.filter((p) => p[1] && p[2] && p[0] <= limitTime);
+                // [BUGFIX] Sort FIRST by time ascending so all index calculations are correct
+                const validPoints = data.path
+                    .filter((p) => p[1] && p[2] && p[0] <= limitTime)
+                    .sort((a, b) => a[0] - b[0]);
+
+                if (validPoints.length === 0) return [];
 
                 // 找出最新的飛行航段：
-                // 1. 絕對切斷：時間間隔大於 15 分鐘 (900 秒)，代表上一趟飛完停著沒關機
-                // 2. 條件切斷：如果現在飛機「正在地面 (目前點)」，我們把每一秒在地上滑行的都當作新的起點，不畫出長長的地面滑行線
+                // 1. 絕對切斷：時間間隔大於 30 分鐘 (1800s) 且兩端有地面點，代表是前一趟航班
+                // 2. 條件切斷：飛機目前在地面，遇到地面點就切斷避免畫出滑行線
+                // 3. 速度異常切斷：超過音速 400 m/s 的跳躍一定是資料雜訊
                 let latestSegmentStartIdx = 0;
                 const isCurrentlyOnGround = validPoints[validPoints.length - 1][5] === true;
 
                 for (let i = 1; i < validPoints.length; i++) {
                     const timeDiff = validPoints[i][0] - validPoints[i - 1][0];
-                    const isOnGround = validPoints[i][5] === true; // path[5] 是 onGround
+                    const isOnGround = validPoints[i][5] === true;
 
                     if (timeDiff > 1800 && (validPoints[i - 1][5] === true || isOnGround)) {
-                        // 飛機在地面上且超過 30 分鐘沒更新，代表前一次是舊的航班
                         latestSegmentStartIdx = i;
                     } else if (isOnGround && isCurrentlyOnGround) {
-                        // 如果飛機最終狀態停在地上，那我們遇到地面的點就切斷，避免畫出機場亂轉的線
                         latestSegmentStartIdx = i;
                     } else if (timeDiff > 0) {
-                        // 檢查是否為不合理的神仙跳躍 (超過音速 400m/s，且時間間隔 > 30秒)
-                        // 有時候 OpenSky 會把昨日的軌跡跟今日的接在一起，導致超大直線
                         const dist = getDistance(validPoints[i - 1][1], validPoints[i - 1][2], validPoints[i][1], validPoints[i][2]);
                         if (timeDiff > 30 && (dist / timeDiff) > 400) {
-                            latestSegmentStartIdx = i; // Impossible speed, sever the track
+                            latestSegmentStartIdx = i;
                         }
                     }
                 }
 
                 // [v3.1] Return full data tuple [time, lat, lng, altitude, heading, velocity] for TimePlayer
-                // [v3.1] Ensure strictly sorted by time (UNIX)
-                validPoints.sort((a, b) => a[0] - b[0]);
-
                 return validPoints.slice(latestSegmentStartIdx).map((p) => [
                     p[0],  // time (UNIX)
                     p[1],  // lat
@@ -371,6 +395,12 @@ export function useFlightData(mapRef) {
         return () => clearInterval(uiTimer);
     }, [fetchPlanes]);
 
+    const syncViewport = useCallback((bbox) => {
+        if (workerRef.current) {
+            workerRef.current.postMessage({ type: 'SET_VIEWPORT', payload: bbox });
+        }
+    }, []);
+
     // [Project AERO-SYNC] Initialize WebWorker for WebSocket Binary Stream
     useEffect(() => {
         const worker = new Worker(new URL('../workers/FlightDataWorker.js', import.meta.url), { type: 'module' });
@@ -389,26 +419,63 @@ export function useFlightData(mapRef) {
                 setApiStatusClass('stat-warning');
                 fetchPlanes(false); // Trigger immediate fallback fetch
             } else if (type === 'PLANES_UPDATED') {
-                const { planesDict: newDict, globalTime } = payload;
+                const { updates = [], removed = [], globalTime } = payload;
                 globalLastUpdateRef.current = globalTime;
                 setLastUpdateTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
 
-                const history = flightHistoryRef.current;
-                const nowUnix = Math.floor(Date.now() / 1000);
+                const map = mapRef.current;
+                const zoom = map ? map.getZoom() : 5;
+                const now = Date.now();
 
-                // Inject metadata needed by the Map renderer
-                Object.keys(newDict).forEach(id => {
-                    const pData = newDict[id];
-                    if (!history[id]) history[id] = [];
-                    history[id].push([nowUnix, pData.lat, pData.lng, pData.onGround, pData.altitude, pData.heading]);
-                    if (history[id].length > 500) history[id].shift();
+                // 1. [AERO-SYNC] 更新可變的即時參照 (Mutable Reference)
+                // 這是渲染循環的資料源，完全繞過 React State Diffing
+                updates.forEach(u => {
+                    const id = u[0];
+                    // Format: [icao24, lat, lng, heading, altitude, velocity, onGround, category, isEmergency, callsign, vRate, squawk, lastContact]
+                    const lat = u[1];
+                    const lng = u[2];
 
-                    pData.targetLat = pData.lat;
-                    pData.targetLng = pData.lng;
-                    pData.targetUpdatedAt = Date.now();
+                    // 投影校正並存入 Zero-GC Store
+                    const globalPt = latLngToGlobalPixels(lat, lng, zoom, sharedPointRef.current);
+                    trackStore.addTrackPoint(id, lat, lng, globalPt.x, globalPt.y);
+
+                    // 更新即時狀態 (Mutable Ref)
+                    let p = planesDictRef.current[id];
+                    if (!p) {
+                        p = { icao24: id };
+                        planesDictRef.current[id] = p; // 動態加入新飛機
+                    }
+
+                    p.lat = lat;
+                    p.lng = lng;
+                    p.heading = u[3];
+                    p.altitude = u[4];
+                    p.velocity = u[5];
+                    p.onGround = u[6];
+                    p.category = u[7];
+                    p.isEmergency = u[8];
+                    p.callsign = u[9];
+                    p.vRate = u[10];
+                    p.squawk = u[11];
+                    p.lastContact = u[12];
+
+                    // 渲染座標初始化/更新
+                    p.renderLat = lat;
+                    p.renderLng = lng;
+                    p.targetLat = lat;
+                    p.targetLng = lng;
+                    p.targetUpdatedAt = now;
+                    p.globalX = globalPt.x;
+                    p.globalY = globalPt.y;
                 });
 
-                setPlanesDict(newDict);
+                removed.forEach(id => {
+                    delete planesDictRef.current[id];
+                });
+
+                // 2. [AERO-SYNC] 智能節流 React State 更新
+                // 必須穩定觸發 setPlanesDict，確保 MapView 拿到最新的字典參照
+                setPlanesDict({ ...planesDictRef.current });
             }
         };
 
@@ -436,6 +503,7 @@ export function useFlightData(mapRef) {
         apiStats,
         fetchPlanes,
         fetchTrack,
+        syncViewport,
         flightHistoryRef,
     };
 }

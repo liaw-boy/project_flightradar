@@ -1,4 +1,13 @@
+// [AERO-SYNC] Browser-friendly msgpack handling
 import * as msgpack from 'msgpack-lite';
+
+// Buffer polyfill for workers (msgpack-lite dependency)
+if (typeof self !== 'undefined' && typeof self.Buffer === 'undefined') {
+    self.Buffer = {
+        isBuffer: () => false,
+        from: (data) => new Uint8Array(data)
+    };
+}
 
 let ws = null;
 let reconnectTimer = null;
@@ -74,40 +83,22 @@ function handleDecodedMessage(msg) {
     if (msg.type === 'delta') {
         const { time, updates = [], removed = [] } = msg;
 
-        // Apply removed
+        // Apply local state maintenance (Optional but good for fallback)
         removed.forEach(icao24 => {
             planesState.delete(icao24);
         });
 
         // Apply updates
-        // Format: [icao24, lat, lng, heading, altitude, velocity, onGround, category, isEmergency, callsign, vRate, squawk, lastContact]
         updates.forEach(u => {
             const icao24 = u[0];
-            planesState.set(icao24, {
-                icao24: u[0],
-                lat: u[1],
-                lng: u[2],
-                heading: u[3],
-                altitude: u[4],
-                velocity: u[5],
-                onGround: u[6],
-                category: u[7],
-                isEmergency: u[8],
-                callsign: u[9],
-                vRate: u[10],
-                squawk: u[11],
-                lastContact: u[12]
-            });
+            planesState.set(icao24, u); // Minimal storage
         });
 
-        // Convert Map back to dictionary format for Main Thread
-        const planesDict = {};
-        for (const [key, value] of planesState.entries()) {
-            planesDict[key] = value;
-        }
-
+        // [AERO-SYNC] 絕不重建 10,000 個物件。直接轉發 Delta 給主執行緒。
+        // This avoids $O(N)$ CPU on worker and Structured Clone bloom in postMessage.
         notifyMain('PLANES_UPDATED', {
-            planesDict,
+            updates,
+            removed,
             globalTime: time,
             totalCount: planesState.size
         });
@@ -121,6 +112,16 @@ self.onmessage = (event) => {
     switch (type) {
         case 'INIT':
             connectWebSocket(payload.baseUrl);
+            break;
+        case 'SET_VIEWPORT':
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                // Use msgpack to encode the viewport message
+                const encoded = msgpack.encode({
+                    type: 'SET_VIEWPORT',
+                    payload: payload // { lamin, lomin, lamax, lomax }
+                });
+                ws.send(encoded);
+            }
             break;
         case 'DISCONNECT':
             if (ws) {
