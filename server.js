@@ -10,6 +10,15 @@ const { Worker } = require('worker_threads');
 const http = require('http');
 const { initWebSocketServer, broadcastPlanes, broadcastTelemetry, getActiveViewports } = require('./socketEngine');
 require('dotenv').config();
+const mongoose = require('mongoose'); // [Phase 15] Database Persistence
+const Route = require('./models/Route'); // [Phase 15] Route Schema
+
+// ==========================================
+// [Phase 15] MongoDB Connection
+// ==========================================
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat')
+    .then(() => console.log('🍃 [DATABASE] Connected to MongoDB (Aerostrat DB)'))
+    .catch(err => console.error('❌ [DATABASE] Connection error:', err));
 
 // ==========================================
 // [OPT] Debounce utility — 合併高頻磁碟寫入
@@ -1187,10 +1196,27 @@ app.get('/api/route/external', async (req, res) => {
     const callsign = (req.query.callsign || '').toUpperCase().trim();
     if (!callsign) return res.status(400).json({ error: 'Callsign is required' });
 
-    console.log(`🌐 [EXT-ROUTE] Fetching external data for ${callsign}...`);
+    console.log(`🌐 [EXT-ROUTE] Processing request for ${callsign}...`);
 
     try {
-        // --- Layer 1: AirLabs API Proxy ---
+        // --- Layer 1: MongoDB Cache (DB HIT) ---
+        const dbRoute = await Route.findOne({ callsign });
+        if (dbRoute) {
+            console.log(`🎯 [DB HIT] Found persistent route for ${callsign}: ${dbRoute.departureAirport} -> ${dbRoute.arrivalAirport}`);
+            return res.json({
+                callsign,
+                departureAirport: dbRoute.departureAirport,
+                arrivalAirport: dbRoute.arrivalAirport,
+                source: 'mongodb_cache',
+                lastUpdated: dbRoute.lastUpdated
+            });
+        }
+
+        console.log(`⚡ [DB MISS] No data in MongoDB for ${callsign}. Escalating to API/Mock...`);
+
+        let externalData = null;
+
+        // --- Layer 2: AirLabs API Proxy ---
         const AIRLABS_KEY = process.env.AIRLABS_API_KEY;
         if (AIRLABS_KEY) {
             const response = await fetch(`https://airlabs.co/api/v9/flights?flight_icao=${callsign}&api_key=${AIRLABS_KEY}`);
@@ -1198,39 +1224,57 @@ app.get('/api/route/external', async (req, res) => {
                 const data = await response.json();
                 if (data.response && data.response.length > 0) {
                     const flight = data.response[0];
-                    return res.json({
-                        callsign,
-                        departureAirport: flight.dep_icao || flight.dep_iata,
-                        arrivalAirport: flight.arr_icao || flight.arr_iata,
+                    externalData = {
+                        dep: flight.dep_icao || flight.dep_iata,
+                        arr: flight.arr_icao || flight.arr_iata,
                         source: 'airlabs_api'
-                    });
+                    };
                 }
             }
         }
 
-        // --- Layer 2: Smart Mock Fallback (針對常見呼號的前綴進行智慧推測) ---
-        // 當無 API Key 或查無資料時，回傳基於大數據的常見航點
-        const MOCK_DB = {
-            'JAL33': { dep: 'RJTT', arr: 'VTBS' }, // 羽田 -> 曼谷
-            'JAL727': { dep: 'RJAA', arr: 'RPLL' }, // 成田 -> 馬尼拉
-            'APZ622': { dep: 'RKSI', arr: 'VTBS' }, // 首爾 -> 曼谷
-            'CPA880': { dep: 'VHHH', arr: 'KLAX' }, // 香港 -> 洛杉磯
-            'JJA2104': { dep: 'RKSI', arr: 'RCTP' }, // 首爾 -> 桃園
-            'TTW603': { dep: 'RCTP', arr: 'ROAH' }, // 桃園 -> 那霸
-            'TGW875': { dep: 'RCTP', arr: 'WSSS' }, // 桃園 -> 新加坡
-            'CAL6871': { dep: 'RCTP', arr: 'VHHH' }, // 桃園 -> 香港 (Cargo)
-            'AAR756': { dep: 'RPLL', arr: 'RKSI' }, // 馬尼拉 -> 首爾
-            'CES739': { dep: 'ZSPD', arr: 'VTBS' }, // 浦東 -> 曼谷
-            'HKE623': { dep: 'VHHH', arr: 'RCTP' }, // 香港 -> 桃園
-        };
+        // --- Layer 3: Smart Mock Fallback ---
+        if (!externalData) {
+            const MOCK_DB = {
+                'JAL33': { dep: 'RJTT', arr: 'VTBS' },
+                'JAL727': { dep: 'RJAA', arr: 'RPLL' },
+                'APZ622': { dep: 'RKSI', arr: 'VTBS' },
+                'CPA880': { dep: 'VHHH', arr: 'KLAX' },
+                'JJA2104': { dep: 'RKSI', arr: 'RCTP' },
+                'TTW603': { dep: 'RCTP', arr: 'ROAH' },
+                'TGW875': { dep: 'RCTP', arr: 'WSSS' },
+                'CAL6871': { dep: 'RCTP', arr: 'VHHH' },
+                'AAR756': { dep: 'RPLL', arr: 'RKSI' },
+                'CES739': { dep: 'ZSPD', arr: 'VTBS' },
+                'HKE623': { dep: 'VHHH', arr: 'RCTP' },
+            };
+            if (MOCK_DB[callsign]) {
+                externalData = {
+                    dep: MOCK_DB[callsign].dep,
+                    arr: MOCK_DB[callsign].arr,
+                    source: 'smart_mock'
+                };
+            }
+        }
 
-        if (MOCK_DB[callsign]) {
-            console.log(`✨ [EXT-ROUTE] Smart Mock Hit: ${callsign}`);
+        if (externalData) {
+            // --- Layer 4: Persistence (SAVE TO DB) ---
+            console.log(`💾 [DB SAVE] Persisting new route for ${callsign} to MongoDB...`);
+            await Route.findOneAndUpdate(
+                { callsign },
+                {
+                    departureAirport: externalData.dep,
+                    arrivalAirport: externalData.arr,
+                    lastUpdated: new Date()
+                },
+                { upsert: true, new: true }
+            );
+
             return res.json({
                 callsign,
-                departureAirport: MOCK_DB[callsign].dep,
-                arrivalAirport: MOCK_DB[callsign].arr,
-                source: 'smart_mock'
+                departureAirport: externalData.dep,
+                arrivalAirport: externalData.arr,
+                source: externalData.source
             });
         }
 
@@ -1238,7 +1282,7 @@ app.get('/api/route/external', async (req, res) => {
         return res.json({ callsign, noData: true, source: 'none' });
 
     } catch (err) {
-        console.error('[EXT-ROUTE] Proxy Error:', err);
+        console.error('❌ [EXT-ROUTE] Cache Loop Error:', err);
         res.json({ callsign, noData: true, error: err.message });
     }
 });
