@@ -531,6 +531,7 @@ let globalPlanesCache = { states: [], time: 0 };
 let lastGlobalStatesMap = new Map(); // icao24 -> state (用於偵測起飛/降落)
 let isFetchingGlobal = false;
 let globalRateLimitCooldown = 0; // The timestamp when we are allowed to ping OpenSky again
+let lastGlobalFetchTime = 0;
 
 // ==========================================
 // [v2.8.4] Spatial Grid Index (空間格狀索引)
@@ -703,7 +704,8 @@ async function runAdaptiveViewportPolling() {
     }
 
     // [v4.3.5] Broadcast adaptive telemetry estimate
-    broadcastTelemetry(apiStats, 0);
+    const nextIn = Math.max(0, Math.ceil((lastGlobalFetchTime + 60000 - Date.now()) / 1000));
+    broadcastTelemetry(apiStats, nextIn);
 }
 
 // 保持每 5 秒檢查一次是否有視角需要更新 (實際抓取受分段計時器控制)
@@ -717,11 +719,13 @@ async function fetchGlobalPlanes() {
         const data = await fetchOpenSky();
         globalPlanesCache = { states: data.states, time: data.time };
         broadcastPlanes(data.states, data.time);
+        lastGlobalFetchTime = Date.now();
         console.log(`🌏 [GLOBAL] Global snapshot updated: ${data.states.length} planes.`);
     } catch (e) {
         console.error(`❌ [GLOBAL] Error: ${e.message}`);
+    } finally {
+        isFetchingGlobal = false;
     }
-    isFetchingGlobal = false;
 
     // [v4.3.5] Broadcast precise global telemetry
     broadcastTelemetry(apiStats, 60);
