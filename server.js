@@ -12,13 +12,30 @@ const { initWebSocketServer, broadcastPlanes, broadcastTelemetry, getActiveViewp
 require('dotenv').config();
 const mongoose = require('mongoose'); // [Phase 15] Database Persistence
 const Route = require('./models/Route'); // [Phase 15] Route Schema
+const TrackPoint = require('./models/TrackPoint'); // [Time Series] Historical Tracks
 
 // ==========================================
 // [Phase 15] MongoDB Connection
 // ==========================================
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat')
-    .then(() => console.log('🍃 [DATABASE] Connected to MongoDB (Aerostrat DB)'))
-    .catch(err => console.error('❌ [DATABASE] Connection error:', err));
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat';
+
+mongoose.connect(MONGODB_URI, {
+    serverSelectionTimeoutMS: 5000,
+    connectTimeoutMS: 10000,
+}).then(() => console.log('🍃 [DATABASE] Connected to MongoDB (Aerostrat DB)'))
+  .catch(err => console.error('❌ [DATABASE] Initial connection error:', err));
+
+mongoose.connection.on('error', err => {
+    console.error('❌ [DATABASE] Runtime connection error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+    console.warn('⚠️ [DATABASE] MongoDB disconnected.');
+});
+
+mongoose.connection.on('reconnected', () => {
+    console.log('✅ [DATABASE] MongoDB reconnected.');
+});
 
 // ==========================================
 // [OPT] Debounce utility — 合併高頻磁碟寫入
@@ -608,6 +625,44 @@ async function fetchOpenSky(params = {}) {
 }
 
 /**
+ * [Time Series] Helper to ingest raw plane data into MongoDB
+ * Standardizes format, lowercases ICAO24, and filters out corrupted coordinates.
+ */
+async function ingestTrackPoints(states, timeUnix) {
+    if (!states || states.length === 0) return;
+
+    // [HOTFIX] 連線狀態守衛：確保 MongoDB 已連線 (readyState === 1) 才允許寫入
+    if (mongoose.connection.readyState !== 1) {
+        console.warn('⚠️ [DATABASE] Skip ingestion: MongoDB is not connected yet.');
+        return;
+    }
+
+    const timestamp = new Date(timeUnix * 1000);
+    const trackPoints = states
+        .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number') // Second-layer safety
+        .map(p => ({
+            icao24: p.icao24.toLowerCase(), // Force casing consistency
+            timestamp,
+            lat: p.lat,
+            lng: p.lng,
+            altitude: (typeof p.altitude === 'number') ? p.altitude : 0,
+            velocity: p.velocity || 0,
+            heading: p.heading || 0
+        }));
+
+    if (trackPoints.length === 0) return;
+
+    try {
+        await TrackPoint.insertMany(trackPoints, { ordered: false });
+    } catch (err) {
+        // Bulk write errors are expected (e.g. duplicate keys in same snapshot time)
+        if (err.name !== 'MongoBulkWriteError' && err.name !== 'MongoServerError') {
+            console.error('❌ [DATABASE] Ingestion error:', err.message);
+        }
+    }
+}
+
+/**
  * [V3.0] 視角驅動自適應抓取迴圈
  */
 async function runAdaptiveViewportPolling() {
@@ -632,6 +687,7 @@ async function runAdaptiveViewportPolling() {
                 const data = await fetchOpenSky(v);
                 bboxFetchHistory.set(key, Date.now());
                 broadcastPlanes(data.states, data.time); // 立即推播 delta
+                ingestTrackPoints(data.states, data.time); // [Audit Fix] Ingest high-res adaptive data
                 console.log(`🎯 [ADAPTIVE] Portions for ${key} updated. Area: ${area.toFixed(2)}`);
             } catch (e) {
                 // console.warn(`[ADAPTIVE] Skip ${key}: ${e.message}`);
@@ -665,6 +721,9 @@ async function fetchGlobalPlanes() {
 
     // [v4.3.5] Broadcast precise global telemetry
     broadcastTelemetry(apiStats, 60);
+
+    // [Audit Fix] Use centralized ingestion helper
+    ingestTrackPoints(globalPlanesCache.states, globalPlanesCache.time);
 }
 
 // 啟動 60 秒全球資料輪詢機制 (配合 CACHE_TTL=60s)
@@ -1297,18 +1356,28 @@ const TRACK_CACHE_TTL = 30000; // 30 秒快取
  * [OPT 1.3] 內部 track 取得函式，不透過 HTTP 迴環
  * 供 /api/route 的空間推測直接呼叫
  */
-async function fetchTracksInternal(icao24, time = 0) {
+async function fetchTracksInternal(icao24) {
+    if (mongoose.connection.readyState !== 1) {
+        return { icao24, path: [], error: 'Database not connected' };
+    }
     const cached = trackCache.get(icao24);
     if (cached && (Date.now() - cached.timestamp < TRACK_CACHE_TTL)) {
         return cached.data;
     }
     try {
-        const headers = await getAuthHeaders();
-        const url = `https://opensky-network.org/api/tracks/all?icao24=${icao24}&time=${time}`;
-        const response = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
-        if (!response.ok) return { icao24, path: [], noData: true };
-        const data = await response.json();
-        const path = data.path || [];
+        const points = await TrackPoint.find({ icao24 })
+            .sort({ timestamp: 1 })
+            .lean();
+
+        const path = points.map(pt => [
+            Math.floor(pt.timestamp.getTime() / 1000),
+            pt.lat,
+            pt.lng,
+            pt.altitude,
+            pt.heading,
+            pt.velocity
+        ]);
+
         const result = { icao24, path };
         trackCache.set(icao24, { data: result, timestamp: Date.now() });
         return result;
@@ -1319,97 +1388,34 @@ async function fetchTracksInternal(icao24, time = 0) {
 
 app.get('/api/tracks', async (req, res) => {
     const icao24 = req.query.icao24;
-    const time = req.query.time || 0;
     if (!icao24) return res.status(400).json({ error: 'Missing icao24' });
 
-    // 檢查快取
-    const cached = trackCache.get(icao24);
-    if (cached && (Date.now() - cached.timestamp < TRACK_CACHE_TTL)) {
-        return res.json(cached.data);
+    // [HOTFIX] 連線狀態守衛：避免在未連線時觸發 Mongoose Buffering 導致 10s 延遲
+    if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({ error: 'Database not connected', retryAfter: 30 });
     }
 
     try {
-        console.log(`🗺️ [TRACKS] Fetching track history for ${icao24} at t=${time}...`);
-        const headers = await getAuthHeaders();
-        const url = `https://opensky-network.org/api/tracks/all?icao24=${icao24}&time=${time}`;
+        // Query local MongoDB Time Series instead of OpenSky
+        const points = await TrackPoint.find({ icao24 })
+            .sort({ timestamp: 1 })
+            .lean();
 
-        const response = await fetch(url, {
-            headers,
-            signal: AbortSignal.timeout(15000)
-        });
+        // Convert to frontend expected format: [[time, lat, lng, altitude, heading, velocity], ...]
+        const path = points.map(pt => [
+            Math.floor(pt.timestamp.getTime() / 1000),
+            pt.lat,
+            pt.lng,
+            pt.altitude,
+            pt.heading,
+            pt.velocity
+        ]);
 
-        if (!response.ok) {
-            let msg = response.statusText;
-            if (response.status === 429) msg = 'Rate Limited (429)';
-            if (response.status === 404) {
-                msg = 'Flight not currently tracked (404)';
-                // Cache the 404 so we don't spam OpenSky for dead flights
-                trackCache.set(icao24, { data: { icao24, path: [], noData: true, error: msg }, timestamp: Date.now() });
-            }
-            console.warn(`⚠️ [TRACKS ERROR] ${icao24} failed: ${response.status} ${msg}`);
-            return res.json({ icao24, path: [], noData: true, error: msg });
-        }
-
-        const data = await response.json();
-        const path = data.path || [];
-
-        if (path.length > 0) {
-            resolveMissingData(icao24, 'track');
-        } else {
-            logMissingData(icao24, 'track');
-        }
-
-        // [v2.5.0] 預防長直線：由下而上（從最新點往回查）偵測時間巨大斷層
-        // 如果兩個點之間隔了 > 20 分鐘 (1200s) 或發生了極速移動，代表是不同航段
-        let filteredPath = [];
-        if (path.length > 1) {
-            let splitIndex = 0;
-            // From the latest point going backwards, find where there's a true flight segment break
-            for (let i = path.length - 1; i > 0; i--) {
-                const timeDiff = path[i][0] - path[i - 1][0];
-                if (timeDiff > 1200) {
-                    splitIndex = i;
-                    break;
-                }
-            }
-            const segment = path.slice(splitIndex);
-
-            // [v3.8 Fix] Geometry Sanitization: Remove duplicate/corrupted points causing zigzag polygons
-            for (let i = 0; i < segment.length; i++) {
-                const pt = segment[i];
-                if (i === 0) {
-                    filteredPath.push(pt);
-                    continue;
-                }
-                const prev = filteredPath[filteredPath.length - 1];
-
-                // Ensure time moves strictly forward (prevents temporal loops in tracks)
-                if (pt[0] <= prev[0]) continue;
-
-                // Ensure coordinate actually moved a reasonable distance to avoid micro-jitter polygons
-                const latDiff = Math.abs(pt[1] - prev[1]);
-                const lngDiff = Math.abs(pt[2] - prev[2]);
-
-                // If it moved less than 0.005 degrees (~500m) but more than 0, it might be jitter. 
-                // Mostly we just want to strictly kill duplicate exact coordinates.
-                if (latDiff < 0.0001 && lngDiff < 0.0001) continue;
-
-                filteredPath.push(pt);
-            }
-        } else {
-            filteredPath = path;
-        }
-
-        const result = { icao24, path: filteredPath };
-
-        // 存入快取
-        trackCache.set(icao24, { data: result, timestamp: Date.now() });
-        console.log(`✅ [TRACKS] Fetched ${result.path.length} waypoints for ${icao24}`);
-
-        res.json(result);
+        res.json({ icao24, path });
+        console.log(`✅ [TRACKS] Served ${path.length} points from MongoDB for ${icao24}`);
     } catch (error) {
-        console.error(`❌ [TRACKS ERROR] ${icao24}: ${error.message}`);
-        res.json({ icao24, path: [], noData: true, error: error.message });
+        console.error(`❌ [TRACKS DB ERROR] ${icao24}: ${error.message}`);
+        res.status(500).json({ error: 'Database query failed' });
     }
 });
 
@@ -1543,7 +1549,7 @@ server.listen(PORT, () => {
     console.log('║   ✈️  AEROSTRAT Surveillance Server      ║');
     console.log(`║   🌐 http://localhost:${PORT}               ║`);
     console.log(`║   📁 Serving: ./public-react             ║`);
-    console.log(`║   🔐 Version: v4.1.1                     ║`);
+    console.log(`║   🔐 Version: v4.2.0                     ║`);
     console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
     console.log('╚══════════════════════════════════════════╝');
     console.log('');
