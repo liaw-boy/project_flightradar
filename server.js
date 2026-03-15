@@ -13,6 +13,8 @@ require('dotenv').config();
 const mongoose = require('mongoose'); // [Phase 15] Database Persistence
 const Route = require('./models/Route'); // [Phase 15] Route Schema
 const TrackPoint = require('./models/TrackPoint'); // [Time Series] Historical Tracks
+const Aircraft = require('./models/Aircraft'); // [Cache Migration]
+const Metar = require('./models/Metar'); // [Cache Migration]
 
 // ==========================================
 // [Phase 15] MongoDB Connection
@@ -827,48 +829,42 @@ app.get('/api/planes/bbox', (req, res) => {
 // ==========================================
 // 飛機 Metadata（機型/製造商/註冊號）— 永久快取與靜態字典
 // ==========================================
-const METADATA_CACHE_FILE = path.join(__dirname, 'aircraft-cache.json');
 const AIRCRAFT_STATIC_FILE = path.join(__dirname, 'data', 'aircraft_static.json');
-let aircraftMetadataCache = {};
 let aircraftStaticDB = {};
 
-// 啟動時載入快取檔案
+// 啟動時載入靜態字典
 try {
-    if (fs.existsSync(METADATA_CACHE_FILE)) {
-        aircraftMetadataCache = JSON.parse(fs.readFileSync(METADATA_CACHE_FILE, 'utf8'));
-        console.log(`📂 [METADATA] Loaded ${Object.keys(aircraftMetadataCache).length} cached aircraft`);
-    }
     if (fs.existsSync(AIRCRAFT_STATIC_FILE)) {
         aircraftStaticDB = JSON.parse(fs.readFileSync(AIRCRAFT_STATIC_FILE, 'utf8'));
         console.log(`📂 [METADATA STATIC] Loaded ${Object.keys(aircraftStaticDB).length} aircraft from static DB`);
     }
 } catch (e) {
-    console.warn('⚠️ Failed to load metadata files:', e.message);
+    console.warn('⚠️ Failed to load static metadata:', e.message);
 }
 
-// [OPT] 防抖寫入：5秒內的多次觸發合併為一次磁碟寫入，避免阻塞 Event Loop
-const _saveMetadataCacheNow = () => {
-    fs.writeFile(METADATA_CACHE_FILE, JSON.stringify(aircraftMetadataCache), 'utf8', (e) => {
-        if (e) console.warn('⚠️ Failed to save metadata cache:', e.message);
-    });
-};
-const saveMetadataCache = debounce(_saveMetadataCacheNow, 5000);
+// [REMOVED] saveMetadataCache is no longer needed with MongoDB
 
 app.get('/api/metadata/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
 
     // 1. 優先檢查靜態字典 (Static First)
     if (aircraftStaticDB[icao24]) {
-        console.log(`📦 [METADATA STATIC HIT] ${icao24}`);
         return res.json({ ...aircraftStaticDB[icao24], fromStatic: true });
     }
 
-    // 2. 檢查永久快取
-    if (aircraftMetadataCache[icao24]) {
-        return res.json(aircraftMetadataCache[icao24]);
+    // [HOTFIX] 連線狀態守衛
+    if (mongoose.connection.readyState !== 1) {
+        return res.json({ icao24, noData: true, error: 'Database not connected' });
     }
 
     try {
+        // 2. 檢查 MongoDB 永久快取
+        const dbAircraft = await Aircraft.findOne({ icao24 }).lean();
+        if (dbAircraft) {
+            return res.json(dbAircraft);
+        }
+
+        // 3. 抓取外部 API
         const url = `https://opensky-network.org/api/metadata/aircraft/icao/${icao24}`;
         console.log(`🌐 [METADATA] Fetching metadata for ${icao24}...`);
         const headers = await getAuthHeaders();
@@ -879,11 +875,14 @@ app.get('/api/metadata/:icao24', async (req, res) => {
 
         if (!response.ok) {
             syncAccountQuota(currentAccountIndex, response);
-            // 記錄為「無資料」避免重複查詢
-            aircraftMetadataCache[icao24] = { icao24, noData: true };
-            saveMetadataCache();
-            logMissingData(icao24, 'metadata'); // [v2.5.2]
-            return res.json(aircraftMetadataCache[icao24]);
+            // 記錄為「無資料」存入 DB 避免重複查詢
+            await Aircraft.findOneAndUpdate(
+                { icao24 },
+                { icao24, noData: true, lastUpdated: new Date() },
+                { upsert: true }
+            );
+            logMissingData(icao24, 'metadata');
+            return res.json({ icao24, noData: true });
         }
 
         syncAccountQuota(currentAccountIndex, response);
@@ -896,15 +895,16 @@ app.get('/api/metadata/:icao24', async (req, res) => {
             model: data.model || '',
             typecode: data.typecode || '',
             owner: data.owner || '',
-            operator: data.operatorCallsign || '',
+            operatorCallsign: data.operatorCallsign || '',
             built: data.built || '',
-            categoryDescription: data.categoryDescription || ''
+            categoryDescription: data.categoryDescription || '',
+            lastUpdated: new Date()
         };
 
-        aircraftMetadataCache[icao24] = metadata;
-        saveMetadataCache();
-        resolveMissingData(icao24, 'metadata'); // [v2.5.2]
-        console.log(`📦 [METADATA] Cached: ${icao24} = ${metadata.typecode} ${metadata.model}`);
+        // 存入 MongoDB
+        await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true });
+        resolveMissingData(icao24, 'metadata');
+        console.log(`📦 [METADATA] Cached to DB: ${icao24} = ${metadata.typecode} ${metadata.model}`);
 
         res.json(metadata);
     } catch (error) {
@@ -917,97 +917,102 @@ app.get('/api/metadata/:icao24', async (req, res) => {
 // 批次 Metadata 預取（背景自動擷取所有可見飛機的資料）
 // ==========================================
 app.post('/api/metadata/batch', async function (req, res) {
-    var icao24List = req.body.icao24s || [];
+    const icao24List = req.body.icao24s || [];
 
-    // 過濾已快取的
-    var uncached = icao24List.filter(function (id) {
-        const key = id.toLowerCase();
-        return !aircraftMetadataCache[key] && !aircraftStaticDB[key];
-    });
-
-    if (uncached.length === 0) {
-        return res.json({ fetched: 0, total: Object.keys(aircraftMetadataCache).length });
+    // [HOTFIX] 連線狀態守衛
+    if (mongoose.connection.readyState !== 1) {
+        return res.json({ fetched: 0, error: 'Database not connected' });
     }
 
-    // [OPT 5.1] 如果當前帳號 quota 已低於安全線，跳過本次批次
-    const currentAcc = apiStats.accounts[currentAccountIndex];
-    if (currentAcc.remainingCredits !== null && currentAcc.remainingCredits <= SAFE_RESERVE_CAP) {
-        console.warn(`⚠️ [BATCH] Skipping metadata batch — quota low (${currentAcc.remainingCredits} remaining).`);
-        return res.json({ fetched: 0, skipped: uncached.length, reason: 'quota_low' });
-    }
+    // 過濾靜態字典中已有的
+    const filteredIcaos = icao24List.filter(id => !aircraftStaticDB[id.toLowerCase()]);
+    if (filteredIcaos.length === 0) return res.json({ fetched: 0 });
 
-    // 最多同時查詢 10 架，避免限流
-    var toFetch = uncached.slice(0, 10);
-    var fetched = 0;
+    try {
+        // 從 MongoDB 找出已有的
+        const existingInDb = await Aircraft.find({ icao24: { $in: filteredIcaos.map(id => id.toLowerCase()) } }).lean();
+        const existingIcaos = new Set(existingInDb.map(a => a.icao24));
 
-    for (var i = 0; i < toFetch.length; i++) {
-        var icao24 = toFetch[i].toLowerCase();
-        try {
-            var headers = await getAuthHeaders();
-            apiStats.totalCalls++;
-            apiStats.metadataCalls++;
-            var response = await fetch(
-                'https://opensky-network.org/api/metadata/aircraft/icao/' + icao24,
-                { headers, signal: AbortSignal.timeout(8000) }
-            );
+        const uncached = filteredIcaos.filter(id => !existingIcaos.has(id.toLowerCase()));
 
-            if (response.status === 429) {
+        if (uncached.length === 0) {
+            return res.json({ fetched: 0, reason: 'all_cached' });
+        }
+
+        // [OPT 5.1] 如果當前帳號 quota 已低於安全線，跳過本次批次
+        const currentAcc = apiStats.accounts[currentAccountIndex];
+        if (currentAcc.remainingCredits !== null && currentAcc.remainingCredits <= SAFE_RESERVE_CAP) {
+            return res.json({ fetched: 0, skipped: uncached.length, reason: 'quota_low' });
+        }
+
+        // 最多同時查詢 10 架
+        const toFetch = uncached.slice(0, 10);
+        let fetched = 0;
+
+        for (let i = 0; i < toFetch.length; i++) {
+            const icao24 = toFetch[i].toLowerCase();
+            try {
+                const headers = await getAuthHeaders();
+                apiStats.totalCalls++;
+                apiStats.metadataCalls++;
+                const response = await fetch(
+                    'https://opensky-network.org/api/metadata/aircraft/icao/' + icao24,
+                    { headers, signal: AbortSignal.timeout(8000) }
+                );
+
+                if (response.status === 429) {
+                    syncAccountQuota(currentAccountIndex, response);
+                    break;
+                }
+
                 syncAccountQuota(currentAccountIndex, response);
-                apiStats.rateLimits++;
-                apiStats.lastError = '429 Rate Limited (metadata batch)';
-                apiStats.lastErrorTime = new Date().toISOString();
-                break; // 停止批次查詢
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const metadata = {
+                        icao24: icao24,
+                        registration: data.registration || '',
+                        manufacturerName: data.manufacturerName || '',
+                        model: data.model || '',
+                        typecode: data.typecode || '',
+                        owner: data.owner || '',
+                        operatorCallsign: data.operatorCallsign || '',
+                        built: data.built || '',
+                        categoryDescription: data.categoryDescription || '',
+                        lastUpdated: new Date()
+                    };
+                    await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true });
+                    resolveMissingData(icao24, 'metadata');
+                    fetched++;
+                } else {
+                    await Aircraft.findOneAndUpdate({ icao24 }, { icao24, noData: true, lastUpdated: new Date() }, { upsert: true });
+                    logMissingData(icao24, 'metadata');
+                }
+            } catch (e) {
+                apiStats.errors++;
             }
 
-            syncAccountQuota(currentAccountIndex, response);
-
-            if (response.ok) {
-                var data = await response.json();
-                aircraftMetadataCache[icao24] = {
-                    icao24: icao24,
-                    registration: data.registration || '',
-                    manufacturerName: data.manufacturerName || '',
-                    model: data.model || '',
-                    typecode: data.typecode || '',
-                    owner: data.owner || '',
-                    operator: data.operatorCallsign || '',
-                    built: data.built || '',
-                    categoryDescription: data.categoryDescription || ''
-                };
-                resolveMissingData(icao24, 'metadata'); // [v2.5.2]
-                fetched++;
-                apiStats.lastSuccessTime = new Date().toISOString();
-            } else {
-                aircraftMetadataCache[icao24] = { icao24: icao24, noData: true };
-                logMissingData(icao24, 'metadata'); // [v2.5.2]
+            if (i < toFetch.length - 1) {
+                await new Promise(r => setTimeout(r, 300));
             }
-        } catch (e) {
-            aircraftMetadataCache[icao24] = { icao24: icao24, noData: true };
-            apiStats.errors++;
         }
 
-        // 每查一架等 300ms，避免限流
-        if (i < toFetch.length - 1) {
-            await new Promise(function (r) { setTimeout(r, 300); });
-        }
+        console.log(`📦 [BATCH] Fetched ${fetched}/${toFetch.length} metadata to MongoDB`);
+        res.json({ fetched: fetched, requested: toFetch.length });
+    } catch (err) {
+        console.error('❌ [BATCH ERROR]', err.message);
+        res.status(500).json({ fetched: 0, error: err.message });
     }
-
-    saveMetadataCache();
-    console.log(`📦 [BATCH] Fetched ${fetched}/${toFetch.length} metadata | Cache: ${Object.keys(aircraftMetadataCache).length}`);
-
-    res.json({
-        fetched: fetched,
-        requested: toFetch.length,
-        remaining: uncached.length - toFetch.length,
-        total: Object.keys(aircraftMetadataCache).length
-    });
 });
 
 // ==========================================
 // 航班來源/目的地 API (flights/aircraft & routes)
 // 實作: 固定航班航線字典 (Flight Route Database)
 // ==========================================
-const ROUTES_CACHE_FILE = path.join(__dirname, 'routes-cache.json');
+// ==========================================
+// 航班來源/目的地 API (flights/aircraft & routes)
+// 實作: 固定航班航線字典 (Flight Route Database)
+// ==========================================
 const LOCAL_ROUTES_FILE = path.join(__dirname, 'data', 'local_routes.json');
 const SCHEDULES_STATIC_FILE = path.join(__dirname, 'data', 'schedules_static.json');
 const GLOBAL_AIRPORTS_FILE = path.join(__dirname, 'data', 'processed', 'airports_global.json');
@@ -1071,10 +1076,6 @@ function resolveAirlineAlias(callsign) {
 }
 
 try {
-    if (fs.existsSync(ROUTES_CACHE_FILE)) {
-        routesDatabase = JSON.parse(fs.readFileSync(ROUTES_CACHE_FILE, 'utf8'));
-        console.log(`🗺️ [ROUTE DB] Loaded ${Object.keys(routesDatabase).length} routes from cache`);
-    }
     if (fs.existsSync(LOCAL_ROUTES_FILE)) {
         localRoutesDB = JSON.parse(fs.readFileSync(LOCAL_ROUTES_FILE, 'utf8'));
         console.log(`🗺️ [LOCAL ROUTES] Loaded ${Object.keys(localRoutesDB).length} routes from static dictionary`);
@@ -1087,13 +1088,7 @@ try {
     console.error('❌ [ROUTE DB] Failed to load route JSONs:', e.message);
 }
 
-// [OPT] 防抖寫入：5秒內的多次觸發合併為一次磁碟寫入
-const _saveRoutesDatabaseNow = () => {
-    fs.writeFile(ROUTES_CACHE_FILE, JSON.stringify(routesDatabase, null, 2), (e) => {
-        if (e) console.error('❌ Error saving routes-cache.json:', e.message);
-    });
-};
-const saveRoutesDatabase = debounce(_saveRoutesDatabaseNow, 5000);
+// [REMOVED] routesDatabase is migrated to MongoDB
 
 const routeCache = new Map(); // icao24 -> { data, timestamp } (動態航線快取)
 const ROUTE_CACHE_TTL = 1800000; // 30 分鐘
@@ -1111,7 +1106,7 @@ app.get('/api/airports/list', (req, res) => {
     res.json(_cachedAirportList);
 });
 
-app.get('/api/airport/:code', (req, res) => {
+app.get('/api/airport/:code', async (req, res) => {
     const code = req.params.code.toUpperCase();
 
     // Check Global Database first
@@ -1119,9 +1114,9 @@ app.get('/api/airport/:code', (req, res) => {
         return res.json(globalAirportsDB[code]);
     }
 
-    // Check METAR cache (Fallback)
-    if (metarCache.data) {
-        const metarAirport = metarCache.data.find(m => m.icaoId === code || m.iataId === code);
+    // Check METAR collection (Fallback) [Phase 15 Migration]
+    try {
+        const metarAirport = await Metar.findOne({ $or: [{ icaoId: code }, { iataId: code }] }).lean();
         if (metarAirport) {
             return res.json({
                 icao: metarAirport.icaoId,
@@ -1131,10 +1126,10 @@ app.get('/api/airport/:code', (req, res) => {
                 country: metarAirport.country,
                 lat: metarAirport.lat,
                 lon: metarAirport.lon,
-                source: 'metar_cache'
+                source: 'metar_db'
             });
         }
-    }
+    } catch (e) { /* ignore fallback errors */ }
 
     return res.status(404).json({ error: 'Airport not found' });
 });
@@ -1168,6 +1163,11 @@ app.get('/api/route/:icao24', async (req, res) => {
     let route = null;
     let matchSource = '';
 
+    // [HOTFIX] 連線狀態守衛
+    if (mongoose.connection.readyState !== 1) {
+        return res.json({ icao24, noData: true, error: 'Database not connected' });
+    }
+
     for (const cs of searchCallsigns) {
         if (!cs) continue;
         if (schedulesStaticDB[cs]) {
@@ -1180,9 +1180,12 @@ app.get('/api/route/:icao24', async (req, res) => {
             matchSource = 'local_dict';
             break;
         }
-        if (routesDatabase[cs]) {
-            route = routesDatabase[cs];
-            matchSource = 'cache';
+        
+        // 從 MongoDB 檢查快取
+        const dbRoute = await Route.findOne({ callsign: cs }).lean();
+        if (dbRoute) {
+            route = { dep: dbRoute.departureAirport, arr: dbRoute.arrivalAirport };
+            matchSource = 'mongodb_cache';
             break;
         }
     }
@@ -1422,17 +1425,7 @@ app.get('/api/tracks', async (req, res) => {
 // ==========================================
 // METAR 機場天氣 API (每小時更新)
 // ==========================================
-const METAR_CACHE_FILE = path.join(__dirname, 'metar-cache.json');
 const METAR_TTL = 3600000; // 1 小時
-let metarCache = { timestamp: 0, data: [] };
-
-// 啟動時讀取快取
-try {
-    if (fs.existsSync(METAR_CACHE_FILE)) {
-        metarCache = JSON.parse(fs.readFileSync(METAR_CACHE_FILE, 'utf8'));
-        console.log(`📡 [METAR] Loaded ${metarCache.data.length} airport weather records from cache`);
-    }
-} catch (e) { /* ignore */ }
 
 // 所有需要抓 METAR 的機場 ICAO 碼
 const METAR_AIRPORTS = [
@@ -1448,6 +1441,8 @@ const METAR_AIRPORTS = [
 ];
 
 async function fetchMetarData() {
+    if (mongoose.connection.readyState !== 1) return;
+
     try {
         const ids = METAR_AIRPORTS.join(',');
         const url = `https://aviationweather.gov/api/data/metar?ids=${ids}&format=json`;
@@ -1457,34 +1452,49 @@ async function fetchMetarData() {
         if (!response.ok) throw new Error(`METAR API error: ${response.status}`);
 
         const data = await response.json();
-        metarCache = { timestamp: Date.now(), data };
+        
+        // 批次更新 MongoDB
+        const operations = data.map(info => ({
+            updateOne: {
+                filter: { icaoId: info.icaoId.toUpperCase() },
+                update: { $set: { ...info, lastUpdated: new Date() } },
+                upsert: true
+            }
+        }));
 
-        // 寫入檔案快取
-        fs.writeFileSync(METAR_CACHE_FILE, JSON.stringify(metarCache, null, 2));
-        console.log(`📡 [METAR] Updated ${data.length} airport weather records`);
+        if (operations.length > 0) {
+            await Metar.bulkWrite(operations, { ordered: false });
+        }
+
+        console.log(`📡 [METAR] Updated ${data.length} airport weather records in MongoDB`);
     } catch (error) {
         console.error('❌ [METAR] Fetch error:', error.message);
     }
 }
 
-// 啟動時抓取 (如果快取過期)
-if (Date.now() - metarCache.timestamp > METAR_TTL) {
-    fetchMetarData();
-} else {
-    const cachedTime = new Date(metarCache.timestamp).toLocaleTimeString();
-    console.log(`📡 [METAR] System ready. Using cached weather data from ${cachedTime}.`);
-}
+// 啟動時啟動定時器
+fetchMetarData(); // 立即執行一次
 
 // 每小時定時更新
 setInterval(fetchMetarData, METAR_TTL);
 
-app.get('/api/metar', (req, res) => {
-    const icao = req.query.icao;
-    if (icao) {
-        const found = metarCache.data.find(m => m.icaoId === icao.toUpperCase());
-        return res.json(found || { error: 'Airport not found' });
+app.get('/api/metar', async (req, res) => {
+    // [HOTFIX] 連線狀態守衛
+    if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({ error: 'Database not connected' });
     }
-    res.json(metarCache.data);
+
+    try {
+        const icao = req.query.icao;
+        if (icao) {
+            const found = await Metar.findOne({ icaoId: icao.toUpperCase() }).lean();
+            return res.json(found || { error: 'Airport not found' });
+        }
+        const all = await Metar.find({}).lean();
+        res.json(all);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // [v2.5.2] SPA Fallback — 未匹配的路由指向 React 前端
