@@ -25,20 +25,31 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerost
 mongoose.connect(MONGODB_URI, {
     serverSelectionTimeoutMS: 5000,
     connectTimeoutMS: 10000,
-}).then(() => console.log('🍃 [DATABASE] Connected to Local MongoDB'))
-  .catch(err => console.error('❌ [DATABASE] Connection error:', err));
+}).then(() => console.log(`${getLogTime()} 🍃 [DATABASE] Connected to Local MongoDB`))
+  .catch(err => console.error(`${getLogTime()} ❌ [DATABASE] Connection error:`, err));
 
 mongoose.connection.on('error', err => {
-    console.error('❌ [DATABASE] Runtime connection error:', err);
+    console.error(`${getLogTime()} ❌ [DATABASE] Runtime connection error:`, err);
 });
 
 mongoose.connection.on('disconnected', () => {
-    console.warn('⚠️ [DATABASE] MongoDB disconnected.');
+    console.warn(`${getLogTime()} ⚠️ [DATABASE] MongoDB disconnected.`);
 });
 
 mongoose.connection.on('reconnected', () => {
-    console.log('✅ [DATABASE] MongoDB reconnected.');
+    console.log(`${getLogTime()} ✅ [DATABASE] MongoDB reconnected.`);
 });
+
+// ==========================================
+// [v4.4.1] Unified Log Timestamp Helper (\x1b[90m is gray)
+// ==========================================
+function getLogTime() {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2, '0');
+    const m = String(now.getMinutes()).padStart(2, '0');
+    const s = String(now.getSeconds()).padStart(2, '0');
+    return `\x1b[90m[${h}:${m}:${s}]\x1b[0m`;
+}
 
 // ==========================================
 // [OPT] Debounce utility — 合併高頻磁碟寫入
@@ -107,13 +118,13 @@ function loadMissingDataLog() {
         if (fs.existsSync(MISSING_DATA_FILE)) {
             missingDataLog = JSON.parse(fs.readFileSync(MISSING_DATA_FILE, 'utf8'));
         }
-    } catch (e) { console.error('❌ [MISSING LOG] Load error:', e.message); }
+    } catch (e) { console.error(`${getLogTime()} ❌ [MISSING LOG] Load error:`, e.message); }
 }
 
 // [OPT] 防抖寫入：5秒內的多次觸發合併為一次磁碟寫入
 const _saveMissingDataLogNow = () => {
     fs.writeFile(MISSING_DATA_FILE, JSON.stringify(missingDataLog, null, 2), (e) => {
-        if (e) console.error('❌ [MISSING LOG] Save error:', e.message);
+        if (e) console.error(`${getLogTime()} ❌ [MISSING LOG] Save error:`, e.message);
     });
 };
 const saveMissingDataLog = debounce(_saveMissingDataLogNow, 5000);
@@ -128,7 +139,7 @@ function logMissingData(icao24, type, callsign = null) {
         missingDataLog[key].missing.push(type);
         missingDataLog[key].lastAttempt = new Date().toISOString();
         saveMissingDataLog();
-        console.log(`📝 [MISSING LOG] Recorded ${type} for ${icao24}`);
+        console.log(`${getLogTime()} 📝 [MISSING LOG] Recorded ${type} for ${icao24}`);
     }
 }
 
@@ -138,7 +149,7 @@ function resolveMissingData(icao24, type) {
         missingDataLog[key].missing = missingDataLog[key].missing.filter(m => m !== type);
         if (missingDataLog[key].missing.length === 0) {
             delete missingDataLog[key];
-            console.log(`✅ [MISSING LOG] Resolved all for ${icao24}`);
+            console.log(`${getLogTime()} ✅ [MISSING LOG] Resolved all for ${icao24}`);
         }
         saveMissingDataLog();
     }
@@ -202,7 +213,7 @@ let currentAccountIndex = 0;
 function rotateAccount() {
     if (ACCOUNTS.length <= 1) return false;
     currentAccountIndex = (currentAccountIndex + 1) % ACCOUNTS.length;
-    console.log(`🔄 [AUTH] Rotating to account #${currentAccountIndex + 1} (${ACCOUNTS[currentAccountIndex].user})`);
+    console.log(`${getLogTime()} 🔄 [AUTH] Rotating to account #${currentAccountIndex + 1} (${ACCOUNTS[currentAccountIndex].user})`);
     return true;
 }
 
@@ -217,7 +228,7 @@ function saveQuotaCache() {
         };
         fs.writeFileSync(QUOTA_CACHE_FILE, JSON.stringify(payload, null, 2));
     } catch (e) {
-        console.error('❌ [QUOTA] Failed to save quota cache:', e.message);
+        console.error(`${getLogTime()} ❌ [QUOTA] Failed to save quota cache:`, e.message);
     }
 }
 
@@ -239,14 +250,14 @@ function loadQuotaCache() {
                         acc.rateLimits = found.rateLimits || 0;
                     }
                 });
-                console.log(`💾 [QUOTA] Loaded persistent stats for ${apiStats.accounts.length} accounts.`);
+                console.log(`${getLogTime()} 💾 [QUOTA] Loaded persistent stats for ${apiStats.accounts.length} accounts.`);
                 return savedDate === currentDate; // 回傳是否為當天
             } else {
-                console.log(`📅 [QUOTA] Cache is from ${savedDate}, current is ${currentDate}. Forcing reset.`);
+                console.log(`${getLogTime()} 📅 [QUOTA] Cache is from ${savedDate}, current is ${currentDate}. Forcing reset.`);
             }
         }
     } catch (e) {
-        console.error('❌ [QUOTA] Failed to load quota cache:', e.message);
+        console.error(`${getLogTime()} ❌ [QUOTA] Failed to load quota cache:`, e.message);
     }
     return false;
 }
@@ -294,7 +305,7 @@ async function getAuthHeaders(retryCount = 0) {
         // 否則如果還在 ACTIVE 但餘額不足，嘗試主動輪替
         const isCurrentlyLimited = currentStats.unlockTime && new Date(currentStats.unlockTime).getTime() > Date.now();
         if (!isCurrentlyLimited) {
-            console.log(`🛡️ [RESERVE] Account ${ACCOUNTS[currentAccountIndex].user} hit safe floor (${currentStats.remainingCredits}). Rotating preemptively...`);
+            console.log(`${getLogTime()} 🛡️ [RESERVE] Account ${ACCOUNTS[currentAccountIndex].user} hit safe floor (${currentStats.remainingCredits}). Rotating preemptively...`);
             if (rotateAccount()) {
                 return await getAuthHeaders(retryCount + 1);
             }
@@ -310,7 +321,7 @@ async function getAuthHeaders(retryCount = 0) {
     }
 
     try {
-        console.log(`🔑 [AUTH] Fetching token for account #${currentAccountIndex + 1} (${account.user})...`);
+        console.log(`${getLogTime()} 🔑 [AUTH] Fetching token for account #${currentAccountIndex + 1} (${account.user})...`);
         const params = new URLSearchParams();
         params.append('grant_type', 'client_credentials');
         params.append('client_id', account.user);
@@ -324,7 +335,7 @@ async function getAuthHeaders(retryCount = 0) {
 
         if (!response.ok) {
             const err = await response.text();
-            console.error(`❌ [AUTH ERROR] Failed to get token for ${account.user}: ${err}`);
+            console.error(`${getLogTime()} ❌ [AUTH ERROR] Failed to get token for ${account.user}: ${err}`);
             // 如果這個帳號認證失敗，嘗試切換下一個
             if (rotateAccount()) return await getAuthHeaders(retryCount + 1);
             return {};
@@ -334,10 +345,10 @@ async function getAuthHeaders(retryCount = 0) {
         state.token = data.access_token;
         state.expiresAt = Date.now() + (data.expires_in - 60) * 1000;
 
-        console.log(`✅ [AUTH] Token received for ${account.user}. Expires in ${data.expires_in}s.`);
+        console.log(`${getLogTime()} ✅ [AUTH] Token received for ${account.user}. Expires in ${data.expires_in}s.`);
         return { 'Authorization': `Bearer ${state.token}` };
     } catch (error) {
-        console.error(`❌ [AUTH ERROR] ${error.message}`);
+        console.error(`${getLogTime()} ❌ [AUTH ERROR] ${error.message}`);
         return {};
     }
 }
@@ -369,7 +380,7 @@ app.get('/api/events', (req, res) => {
 
     // 登錄這個客戶端
     sseClients.add(res);
-    console.log(`📡 [SSE] Client connected. Total: ${sseClients.size}`);
+    console.log(`${getLogTime()} 📡 [SSE] Client connected. Total: ${sseClients.size}`);
 
     // 立即發送当前資料快照
     res.write(`data: ${JSON.stringify({ type: 'connected', time: globalPlanesCache.time, count: globalPlanesCache.states.length })}\n\n`);
@@ -383,7 +394,7 @@ app.get('/api/events', (req, res) => {
     req.on('close', () => {
         sseClients.delete(res);
         clearInterval(heartbeat);
-        console.log(`📡 [SSE] Client disconnected. Total: ${sseClients.size}`);
+        console.log(`${getLogTime()} 📡 [SSE] Client disconnected. Total: ${sseClients.size}`);
     });
 });
 
@@ -401,17 +412,6 @@ function broadcastSSE(data) {
 // ==========================================
 const _prevStates = new Map(); // icao24 -> prev state for diff
 
-   // [AERO-SYNC v4.3.0] Active Viewports Registry
-const activeViewports = new Map(); // Store viewport heartbeats { sessionId -> { bbox, lastSeen } }
-const VIEWPORT_TTL = 60000; // 60s inactivity auto-clear
-
-function cleanExpiredViewports() {
-    const now = Date.now();
-    for (const [sid, vp] of activeViewports.entries()) {
-        if (now - vp.lastSeen > VIEWPORT_TTL) activeViewports.delete(sid);
-    }
-}
-setInterval(cleanExpiredViewports, 10000);
 
 // 機場快取
 const airportListCache = [];
@@ -567,7 +567,7 @@ function buildAirportGrid() {
         airportSpatialGrid.get(key).push(ap);
         count++;
     }
-    console.log(`🗺️ [GRID] Spatial index built: ${count} airports in ${airportSpatialGrid.size} cells.`);
+    console.log(`${getLogTime()} 🗺️ [GRID] Spatial index built: ${count} airports in ${airportSpatialGrid.size} cells.`);
 }
 
 /**
@@ -652,7 +652,7 @@ async function ingestTrackPoints(states, timeUnix) {
 
     // [HOTFIX] 連線狀態守衛：確保 MongoDB 已連線 (readyState === 1) 才允許寫入
     if (mongoose.connection.readyState !== 1) {
-        console.warn('⚠️ [DATABASE] Skip ingestion: MongoDB is not connected yet.');
+        console.warn(`${getLogTime()} ⚠️ [DATABASE] Skip ingestion: MongoDB is not connected yet.`);
         return;
     }
 
@@ -676,7 +676,7 @@ async function ingestTrackPoints(states, timeUnix) {
     } catch (err) {
         // Bulk write errors are expected (e.g. duplicate keys in same snapshot time)
         if (err.name !== 'MongoBulkWriteError' && err.name !== 'MongoServerError') {
-            console.error('❌ [DATABASE] Ingestion error:', err.message);
+            console.error(`${getLogTime()} ❌ [DATABASE] Ingestion error:`, err.message);
         }
     }
 }
@@ -685,7 +685,7 @@ async function ingestTrackPoints(states, timeUnix) {
  * [V3.0] 視角驅動自適應抓取迴圈
  */
 async function runAdaptiveViewportPolling() {
-    const viewports = Array.from(activeViewports.values()).map(v => v.bbox);
+    const viewports = getActiveViewports();
     if (viewports.length === 0) return;
 
     for (const v of viewports) {
@@ -707,7 +707,7 @@ async function runAdaptiveViewportPolling() {
                 bboxFetchHistory.set(key, Date.now());
                 broadcastPlanes(data.states, data.time); // 立即推播 delta
                 ingestTrackPoints(data.states, data.time); // [Audit Fix] Ingest high-res adaptive data
-                console.log(`🎯 [ADAPTIVE] Portions for ${key} updated. Area: ${area.toFixed(2)}`);
+                console.log(`${getLogTime()} 🎯 [ADAPTIVE] Portions for ${key} updated. Area: ${area.toFixed(2)}`);
             } catch (e) {
                 // console.warn(`[ADAPTIVE] Skip ${key}: ${e.message}`);
             } finally {
@@ -740,12 +740,14 @@ async function fetchGlobalPlanes() {
         broadcastPlanes(data.states, data.time);
         lastGlobalFetchTime = Date.now();
         
-        console.log(`\x1b[32m🌏 [GLOBAL] Baseline updated | Latency: ${latency}ms | Planes: ${data.states.length} | Acc: #${currentAccountIndex + 1} (${acc.user})\x1b[0m`);
+        console.log(`${getLogTime()} \x1b[32m🌏 [GLOBAL] Baseline updated | Latency: ${latency}ms | Planes: ${data.states.length} | Acc: #${currentAccountIndex + 1} (${acc.user})\x1b[0m`);
     } catch (e) {
-        if (e.message.includes('429') || e.message.includes('timeout')) {
-            console.warn(`\x1b[33m⚠️ [GLOBAL WARN] ${e.message}\x1b[0m`);
+        // [v4.3.5] Optimized silent error handling
+        const msg = e.message || 'Unknown error';
+        if (msg.includes('429') || msg.includes('timeout') || msg.includes('Error: 429')) {
+            console.warn(`${getLogTime()} \x1b[33m⚠️ [GLOBAL WARN] ${msg}\x1b[0m`);
         } else {
-            console.error(`\x1b[31m❌ [GLOBAL ERROR] ${e.message}\x1b[0m`);
+            console.error(`${getLogTime()} \x1b[31m❌ [GLOBAL ERROR] ${msg}\x1b[0m`);
         }
     } finally {
         isFetchingGlobal = false;
@@ -758,98 +760,9 @@ async function fetchGlobalPlanes() {
     ingestTrackPoints(globalPlanesCache.states, globalPlanesCache.time);
 }
 
-// [v4.3.0] ADSB.fi Engine B: Viewport Sniper
-async function fetchAdsbFiViewports() {
-    if (activeViewports.size === 0) return;
-
-    // 1. 去重並獲取所有不重複的視角中心點與半徑
-    const baselineIcaos = new Set(globalPlanesCache.states.map(s => s[0]));
-
-    for (const [sid, vp] of activeViewports.entries()) {
-        const start = performance.now();
-        let targetSource = 'adsb.fi';
-        let hiddenCount = 0;
-        let capturedCount = 0;
-
-        try {
-            const { lamin, lomin, lamax, lomax } = vp.bbox;
-            const centerLat = (lamin + lamax) / 2;
-            const centerLon = (lomin + lomax) / 2;
-            
-            const latDist = (lamax - lamin) * 30;
-            const lonDist = (lomax - lomin) * 30 * Math.cos(centerLat * Math.PI / 180);
-            const radius = Math.min(250, Math.ceil(Math.sqrt(latDist*latDist + lonDist*lonDist)));
-
-            const primaryUrl = `https://api.adsb.fi/v2/lat/${centerLat.toFixed(4)}/lon/${centerLon.toFixed(4)}/dist/${radius}`;
-            const fallbackUrl = `https://api.adsb.one/v2/lat/${centerLat.toFixed(4)}/lon/${centerLon.toFixed(4)}/dist/${radius}`;
-            const headers = { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AEROSTRAT/2.0',
-                'Accept': 'application/json'
-            };
-
-            let response;
-            try {
-                response = await fetch(primaryUrl, { headers, signal: AbortSignal.timeout(8000) });
-                if (!response.ok) throw new Error('Primary failed');
-            } catch (e) {
-                console.log('\x1b[33m⚠️ [SNIPER FALLBACK] Switch to adsb.one\x1b[0m');
-                targetSource = 'adsb.one';
-                try {
-                    response = await fetch(fallbackUrl, { headers, signal: AbortSignal.timeout(8000) });
-                    if (!response.ok) continue;
-                } catch (e2) {
-                    continue;
-                }
-            }
-
-            const data = await response.json();
-            if (!data.aircraft || !Array.isArray(data.aircraft)) continue;
-
-            capturedCount = data.aircraft.length;
-
-            data.aircraft.forEach(ac => {
-                if (!ac.hex) return;
-                const icao24 = ac.hex.toLowerCase();
-                
-                if (!baselineIcaos.has(icao24)) hiddenCount++;
-
-                const baroAltMeters = ac.alt_baro === 'ground' ? 0 : (ac.alt_baro ? ac.alt_baro * 0.3048 : null);
-                const geoAltMeters = ac.alt_geom ? ac.alt_geom * 0.3048 : null;
-                const velocityMs = ac.gs ? ac.gs * 0.514444 : null;
-                const vRateMs = ac.baro_rate ? ac.baro_rate * 0.00508 : null;
-
-                const osArray = [
-                    icao24, (ac.flight || '').trim() || null, 'ADSB.fi Sniper',
-                    Math.floor(Date.now() / 1000), ac.seen || Math.floor(Date.now()/1000),
-                    ac.lon, ac.lat, geoAltMeters, ac.alt_baro === 'ground',
-                    velocityMs, ac.track, vRateMs, null, baroAltMeters,
-                    ac.squawk || null, !!ac.spi, ac.type === 'adsb_icao' ? 0 : 2
-                ];
-
-                const existingIdx = globalPlanesCache.states.findIndex(s => s[0] === icao24);
-                if (existingIdx !== -1) {
-                    globalPlanesCache.states[existingIdx] = osArray;
-                } else {
-                    globalPlanesCache.states.push(osArray);
-                }
-            });
-
-            const latency = Math.round(performance.now() - start);
-            console.log(`\x1b[36m🎯 [SNIPER] Source: ${targetSource} | Latency: ${latency}ms | Captured: ${capturedCount} planes (+${hiddenCount} Hidden)\x1b[0m`);
-
-        } catch (err) {
-            // [v4.3.1] Silent failure
-        }
-    }
-
-    // 更新快取時間戳
-    globalPlanesCache.time = Math.floor(Date.now() / 1000);
-}
 
 // 啟動 30 秒全球資料輪詢機制 (配合 CACHE_TTL=30s)
 setInterval(fetchGlobalPlanes, 30000);
-// [v4.3.0] 啟動 10 秒視角精準狙擊
-setInterval(fetchAdsbFiViewports, 10000);
 // 啟動時讀取快取並初始化
 const isFreshQuota = loadQuotaCache();
 initializeAccountQuotas(isFreshQuota);
@@ -858,17 +771,17 @@ initializeAccountQuotas(isFreshQuota);
  * 啟動預熱：若帳號沒有額度紀錄，或跨日更新，先各戳一次 API 建立狀態
  */
 async function initializeAccountQuotas(isFreshQuota) {
-    console.log(`🌐 [QUOTA] Initializing quotas for ${ACCOUNTS.length} accounts...`);
+    console.log(`${getLogTime()} 🌐 [QUOTA] Initializing quotas for ${ACCOUNTS.length} accounts...`);
     for (let i = 0; i < ACCOUNTS.length; i++) {
         const acc = apiStats.accounts[i];
         // 如果本地已經有今日的額度紀錄，就不再額外請求
         if (isFreshQuota && acc.remainingCredits !== null) {
-            console.log(`✅ [QUOTA] Account ${acc.user} has fresh cached quota: ${acc.remainingCredits}`);
+            console.log(`${getLogTime()} ✅ [QUOTA] Account ${acc.user} has fresh cached quota: ${acc.remainingCredits}`);
             continue;
         }
 
         try {
-            console.log(`🌐 [QUOTA] Warming up account #${i + 1} (${acc.user})...`);
+            console.log(`${getLogTime()} 🌐 [QUOTA] Warming up account #${i + 1} (${acc.user})...`);
             // 切換暫時索引來發送請求
             const savedIndex = currentAccountIndex;
             currentAccountIndex = i;
@@ -886,7 +799,7 @@ async function initializeAccountQuotas(isFreshQuota) {
             // 每組間隔一下避免太密集
             await new Promise(r => setTimeout(r, 1000));
         } catch (e) {
-            console.error(`❌ [QUOTA] Warm-up failed for ${acc.user}: ${e.message}`);
+            console.error(`${getLogTime()} ❌ [QUOTA] Warm-up failed for ${acc.user}: ${e.message}`);
         }
     }
 
@@ -956,10 +869,10 @@ let aircraftStaticDB = {};
 try {
     if (fs.existsSync(AIRCRAFT_STATIC_FILE)) {
         aircraftStaticDB = JSON.parse(fs.readFileSync(AIRCRAFT_STATIC_FILE, 'utf8'));
-        console.log(`📂 [METADATA STATIC] Loaded ${Object.keys(aircraftStaticDB).length} aircraft from static DB`);
+        console.log(`${getLogTime()} 📂 [METADATA STATIC] Loaded ${Object.keys(aircraftStaticDB).length} aircraft from static DB`);
     }
 } catch (e) {
-    console.warn('⚠️ Failed to load static metadata:', e.message);
+    console.warn(`${getLogTime()} ⚠️ [WARN] Failed to load static metadata:`, e.message);
 }
 
 // [REMOVED] saveMetadataCache is no longer needed with MongoDB
@@ -986,7 +899,7 @@ app.get('/api/metadata/:icao24', async (req, res) => {
 
         // 3. 抓取外部 API
         const url = `https://opensky-network.org/api/metadata/aircraft/icao/${icao24}`;
-        console.log(`🌐 [METADATA] Fetching metadata for ${icao24}...`);
+        console.log(`${getLogTime()} 🌐 [METADATA] Fetching metadata for ${icao24}...`);
         const headers = await getAuthHeaders();
         const response = await fetch(url, {
             headers,
@@ -1024,11 +937,11 @@ app.get('/api/metadata/:icao24', async (req, res) => {
         // 存入 MongoDB
         await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true });
         resolveMissingData(icao24, 'metadata');
-        console.log(`📦 [METADATA] Cached to DB: ${icao24} = ${metadata.typecode} ${metadata.model}`);
+        console.log(`${getLogTime()} 📦 [METADATA] Cached to DB: ${icao24} = ${metadata.typecode} ${metadata.model}`);
 
         res.json(metadata);
     } catch (error) {
-        console.error(`❌ [METADATA ERROR] ${icao24}: ${error.message}`);
+        console.error(`${getLogTime()} ❌ [METADATA ERROR] ${icao24}: ${error.message}`);
         res.json({ icao24, noData: true, error: error.message });
     }
 });
@@ -1117,10 +1030,10 @@ app.post('/api/metadata/batch', async function (req, res) {
             }
         }
 
-        console.log(`📦 [BATCH] Fetched ${fetched}/${toFetch.length} metadata to MongoDB`);
+        console.log(`${getLogTime()} 📦 [BATCH] Fetched ${fetched}/${toFetch.length} metadata to MongoDB`);
         res.json({ fetched: fetched, requested: toFetch.length });
     } catch (err) {
-        console.error('❌ [BATCH ERROR]', err.message);
+        console.error(`${getLogTime()} ❌ [BATCH ERROR]`, err.message);
         res.status(500).json({ fetched: 0, error: err.message });
     }
 });
@@ -1148,14 +1061,14 @@ function loadGlobalData() {
     try {
         if (fs.existsSync(GLOBAL_AIRPORTS_FILE)) {
             globalAirportsDB = JSON.parse(fs.readFileSync(GLOBAL_AIRPORTS_FILE, 'utf8'));
-            console.log(`🌍 [GLOBAL] Loaded ${Object.keys(globalAirportsDB).length} airports.`);
+            console.log(`${getLogTime()} 🌍 [GLOBAL] Loaded ${Object.keys(globalAirportsDB).length} airports.`);
         }
         if (fs.existsSync(GLOBAL_AIRLINES_FILE)) {
             globalAirlinesDB = JSON.parse(fs.readFileSync(GLOBAL_AIRLINES_FILE, 'utf8'));
-            console.log(`✈️ [GLOBAL] Loaded ${Object.keys(globalAirlinesDB).length} airline aliases.`);
+            console.log(`${getLogTime()} ✈️ [GLOBAL] Loaded ${Object.keys(globalAirlinesDB).length} airline aliases.`);
         }
     } catch (e) {
-        console.error('❌ [GLOBAL DATA ERROR] Failed to load global JSON files:', e.message);
+        console.error(`${getLogTime()} ❌ [GLOBAL DATA ERROR] Failed to load global JSON files:`, e.message);
     }
 }
 
@@ -1171,7 +1084,7 @@ function buildAirportListCache() {
         })
         .map(([key, ap]) => ap);
     _cachedAirportListETag = `"${_cachedAirportList.length}-${Date.now()}"`;
-    console.log(`✅ [OPT] Airport list cache built: ${_cachedAirportList.length} airports.`);
+    console.log(`${getLogTime()} ✅ [OPT] Airport list cache built: ${_cachedAirportList.length} airports.`);
 }
 
 loadGlobalData();
@@ -1198,14 +1111,14 @@ function resolveAirlineAlias(callsign) {
 try {
     if (fs.existsSync(LOCAL_ROUTES_FILE)) {
         localRoutesDB = JSON.parse(fs.readFileSync(LOCAL_ROUTES_FILE, 'utf8'));
-        console.log(`🗺️ [LOCAL ROUTES] Loaded ${Object.keys(localRoutesDB).length} routes from static dictionary`);
+        console.log(`${getLogTime()} 🗺️ [LOCAL ROUTES] Loaded ${Object.keys(localRoutesDB).length} routes from static dictionary`);
     }
     if (fs.existsSync(SCHEDULES_STATIC_FILE)) {
         schedulesStaticDB = JSON.parse(fs.readFileSync(SCHEDULES_STATIC_FILE, 'utf8'));
-        console.log(`🗺️ [SCHEDULES STATIC] Loaded ${Object.keys(schedulesStaticDB).length} routes from static DB`);
+        console.log(`${getLogTime()} 🗺️ [SCHEDULES STATIC] Loaded ${Object.keys(schedulesStaticDB).length} routes from static DB`);
     }
 } catch (e) {
-    console.error('❌ [ROUTE DB] Failed to load route JSONs:', e.message);
+    console.error(`${getLogTime()} ❌ [ROUTE DB] Failed to load route JSONs:`, e.message);
 }
 
 // [REMOVED] routesDatabase is migrated to MongoDB
@@ -1332,7 +1245,7 @@ app.get('/api/route/:icao24', async (req, res) => {
 
     try {
         // --- Layer 3: Spatial Reverse-Geocoding (物理足跡推測) ---
-        console.log(`🔍 [SPATIAL] Attempting inference for ${cleanCallsign} (${icao24})...`);
+        console.log(`${getLogTime()} 🔍 [SPATIAL] Attempting inference for ${cleanCallsign} (${icao24})...`);
 
         // [OPT 1.3] 直接呼叫內部函式取得 track，不再透過 localhost HTTP 請求
         const trackData = await fetchTracksInternal(icao24);
@@ -1347,7 +1260,7 @@ app.get('/api/route/:icao24', async (req, res) => {
             const nearestAp = findNearestAirport(startLat, startLng, 10);
 
             if (nearestAp) {
-                console.log(`✅ [SPATIAL] Inferred Departure: ${nearestAp.icao} (${nearestAp.name}) for ${cleanCallsign}`);
+                console.log(`${getLogTime()} ✅ [SPATIAL] Inferred Departure: ${nearestAp.icao} (${nearestAp.name}) for ${cleanCallsign}`);
                 const inferredResult = {
                     icao24,
                     callsign: cleanCallsign,
@@ -1361,7 +1274,7 @@ app.get('/api/route/:icao24', async (req, res) => {
             }
         }
 
-        console.log(`⚠️ [ROUTE] ${cleanCallsign} not found in Local/Cache/Spatial. Returning noData.`);
+        console.log(`${getLogTime()} ⚠️ [ROUTE] ${cleanCallsign} not found in Local/Cache/Spatial. Returning noData.`);
         const noDataResult = { icao24, callsign: cleanCallsign, noData: true, source: 'none' };
         routeCache.set(icao24, { data: noDataResult, timestamp: Date.now() });
         return res.json(noDataResult);
@@ -1378,13 +1291,13 @@ app.get('/api/route/external', async (req, res) => {
     const callsign = (req.query.callsign || '').toUpperCase().trim();
     if (!callsign) return res.status(400).json({ error: 'Callsign is required' });
 
-    console.log(`🌐 [EXT-ROUTE] Processing request for ${callsign}...`);
+    console.log(`${getLogTime()} 🌐 [EXT-ROUTE] Processing request for ${callsign}...`);
 
     try {
         // --- Layer 1: MongoDB Cache (DB HIT) ---
         const dbRoute = await Route.findOne({ callsign });
         if (dbRoute) {
-            console.log(`🎯 [DB HIT] Found persistent route for ${callsign}: ${dbRoute.departureAirport} -> ${dbRoute.arrivalAirport}`);
+            console.log(`${getLogTime()} 🎯 [DB HIT] Found persistent route for ${callsign}: ${dbRoute.departureAirport} -> ${dbRoute.arrivalAirport}`);
             return res.json({
                 callsign,
                 departureAirport: dbRoute.departureAirport,
@@ -1394,7 +1307,7 @@ app.get('/api/route/external', async (req, res) => {
             });
         }
 
-        console.log(`⚡ [DB MISS] No data in MongoDB for ${callsign}. Escalating to API/Mock...`);
+        console.log(`${getLogTime()} ⚡ [DB MISS] No data in MongoDB for ${callsign}. Escalating to API/Mock...`);
 
         let externalData = null;
 
@@ -1441,7 +1354,7 @@ app.get('/api/route/external', async (req, res) => {
 
         if (externalData) {
             // --- Layer 4: Persistence (SAVE TO DB) ---
-            console.log(`💾 [DB SAVE] Persisting new route for ${callsign} to MongoDB...`);
+            console.log(`${getLogTime()} 💾 [DB SAVE] Persisting new route for ${callsign} to MongoDB...`);
             await Route.findOneAndUpdate(
                 { callsign },
                 {
@@ -1464,7 +1377,7 @@ app.get('/api/route/external', async (req, res) => {
         return res.json({ callsign, noData: true, source: 'none' });
 
     } catch (err) {
-        console.error('❌ [EXT-ROUTE] Cache Loop Error:', err);
+        console.error(`${getLogTime()} ❌ [EXT-ROUTE ERROR] Cache Loop Error:`, err);
         res.json({ callsign, noData: true, error: err.message });
     }
 });
@@ -1488,7 +1401,11 @@ async function fetchTracksInternal(icao24) {
         return cached.data;
     }
     try {
-        const points = await TrackPoint.find({ icao24 })
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const points = await TrackPoint.find({ 
+            icao24,
+            timestamp: { $gte: twentyFourHoursAgo }
+        })
             .sort({ timestamp: 1 })
             .lean();
 
@@ -1513,20 +1430,14 @@ app.get('/api/tracks', async (req, res) => {
     const icao24 = req.query.icao24;
     if (!icao24) return res.status(400).json({ error: 'Missing icao24' });
     const result = await fetchTracksInternal(icao24);
+    
+    // [v4.4.1] Auto-Backfill specific log
+    const count = result.path ? result.path.length : 0;
+    console.log(`${getLogTime()} 🕒 [TIME] [BACKFILL] Serving historical track for ${icao24} | ${count} points retrieved`);
+    
     res.json(result);
 });
 
-// [v4.3.0] Viewport Registration API
-app.post('/api/viewport', express.json(), (req, res) => {
-    const { lamin, lomin, lamax, lomax, sessionId = 'default' } = req.body;
-    if (lamin === undefined || lomin === undefined) return res.status(400).json({ error: 'Invalid bbox' });
-
-    activeViewports.set(sessionId, {
-        bbox: { lamin, lomin, lamax, lomax },
-        lastSeen: Date.now()
-    });
-    res.json({ status: 'ok', activeSessions: activeViewports.size });
-});
 
 // ==========================================
 // METAR 機場天氣 API (每小時更新)
@@ -1552,7 +1463,7 @@ async function fetchMetarData() {
     try {
         const ids = METAR_AIRPORTS.join(',');
         const url = `https://aviationweather.gov/api/data/metar?ids=${ids}&format=json`;
-        console.log(`📡 [METAR] Fetching weather for ${METAR_AIRPORTS.length} airports...`);
+        console.log(`${getLogTime()} 📡 [METAR] Fetching weather for ${METAR_AIRPORTS.length} airports...`);
 
         const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
         if (!response.ok) throw new Error(`METAR API error: ${response.status}`);
@@ -1586,9 +1497,9 @@ async function fetchMetarData() {
             await Metar.bulkWrite(operations, { ordered: false });
         }
 
-        console.log(`📡 [METAR] Updated ${data.length} airport weather records in MongoDB`);
+        console.log(`${getLogTime()} 📡 [METAR] Updated ${data.length} airport weather records in MongoDB`);
     } catch (error) {
-        console.error('❌ [METAR] Fetch error:', error.message);
+        console.error(`${getLogTime()} ❌ [METAR ERROR] Fetch error:`, error.message);
     }
 }
 
@@ -1629,19 +1540,19 @@ app.use((req, res) => {
 // 自動化資料庫引擎 (Background Auto-Sync)
 // ==========================================
 async function syncSchedulesDatabase() {
-    console.log('⚙️ [AUTO-SYNC] Starting daily database synchronization...');
+    console.log(`${getLogTime()} ⚙️ [AUTO-SYNC] Starting daily database synchronization...`);
     try {
         // [數據獲取] 這裡使用的是一個開源的、定期更新的航班班表來源範例
         // 實際部署時使用者可以根據需要修改此 URL
         const SCHEDULES_URL = 'https://raw.githubusercontent.com/LiaoCho/flight-data-source/main/schedules_latest.json';
 
-        console.log(`📡 [AUTO-SYNC] Downloading latest data from ${SCHEDULES_URL}...`);
+        console.log(`${getLogTime()} 📡 [AUTO-SYNC] Downloading latest data from ${SCHEDULES_URL}...`);
 
         // 設定較短的逾時，避免阻塞事件循環
         const response = await fetch(SCHEDULES_URL, { signal: AbortSignal.timeout(60000) });
 
         if (!response.ok) {
-            console.warn(`⚠️ [AUTO-SYNC] Failed to download schedules: ${response.status}. Using existing local data.`);
+            console.warn(`${getLogTime()} ⚠️ [AUTO-SYNC] Failed to download schedules: ${response.status}. Using existing local data.`);
             return;
         }
 
@@ -1655,9 +1566,9 @@ async function syncSchedulesDatabase() {
         // 同步完成後更新記憶體中的變數
         schedulesStaticDB = newData;
 
-        console.log(`✅ [AUTO-SYNC] Successfully synced ${Object.keys(newData).length} flights. Schedules updated.`);
+        console.log(`${getLogTime()} ✅ [AUTO-SYNC] Successfully synced ${Object.keys(newData).length} flights. Schedules updated.`);
     } catch (error) {
-        console.error('❌ [AUTO-SYNC] Critical synchronization error:', error.message);
+        console.error(`${getLogTime()} ❌ [AUTO-SYNC ERROR] Critical synchronization error:`, error.message);
     }
 }
 
@@ -1679,7 +1590,7 @@ server.listen(PORT, () => {
     console.log('║   ✈️  AEROSTRAT Surveillance Server      ║');
     console.log(`║   🌐 http://localhost:${PORT}               ║`);
     console.log(`║   📁 Serving: ./public-react             ║`);
-    console.log(`║   🔐 Version: v4.3.0                     ║`);
+    console.log(`║   🔐 Version: v4.4.1                     ║`);
     console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
     console.log('╚══════════════════════════════════════════╝');
     console.log('');

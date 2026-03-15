@@ -31,7 +31,10 @@ export function useFlightData(mapRef) {
     const nextScheduledFetchRef = useRef(Date.now() + 60000);
     const workerRef = useRef(null);
     const usesWebSocketRef = useRef(false);
-    const sessionIdRef = useRef(`session-${Math.random().toString(36).substring(2, 10)}`);
+    
+    // [v4.3.6] Auto-Backfill Queue for Cold Starts
+    const backfillQueueRef = useRef([]);
+    const backfilledIcaosRef = useRef(new Set());
 
     // [Project AERO-SYNC] Zero-GC Projection Helper
     const sharedPointRef = useRef({ x: 0, y: 0 });
@@ -212,6 +215,12 @@ export function useFlightData(mapRef) {
                         globalX: globalPt.x,
                         globalY: globalPt.y
                     };
+
+                    // [v4.4.0] Trigger Enhanced Auto-Backfill
+                    if (!backfilledIcaosRef.current.has(icao24) && !pData.isBackfilling) {
+                        next[icao24].isBackfilling = true;
+                        backfillQueueRef.current.push(icao24);
+                    }
                 } else {
                     const existing = next[icao24];
                     const isDirty =
@@ -325,8 +334,6 @@ export function useFlightData(mapRef) {
 
                     if (timeDiff > 1800 && (validPoints[i - 1][5] === true || isOnGround)) {
                         latestSegmentStartIdx = i;
-                    } else if (isOnGround && isCurrentlyOnGround) {
-                        latestSegmentStartIdx = i;
                     } else if (timeDiff > 0) {
                         const dist = getDistance(validPoints[i - 1][1], validPoints[i - 1][2], validPoints[i][1], validPoints[i][2]);
                         if (timeDiff > 30 && (dist / timeDiff) > 400) {
@@ -374,6 +381,56 @@ export function useFlightData(mapRef) {
         ]);
     }, []);
 
+    // [v4.4.0] Enhanced Priority Backfill Processor
+    useEffect(() => {
+        const processor = setInterval(async () => {
+            if (backfillQueueRef.current.length === 0) return;
+
+            // Priority Logic: Selected aircraft > Viewport center > Others
+            // Find selected aircraft in queue if any
+            const urlParams = new URLSearchParams(window.location.search);
+            const selectedIcao = urlParams.get('selected');
+            
+            let targetIdx = backfillQueueRef.current.findIndex(id => id === selectedIcao);
+            if (targetIdx === -1) {
+                // If no selected, just take the first one (or we could sort by viewport distance)
+                targetIdx = 0;
+            }
+
+            const icao24 = backfillQueueRef.current.splice(targetIdx, 1)[0];
+            if (!icao24 || backfilledIcaosRef.current.has(icao24)) return;
+            
+            backfilledIcaosRef.current.add(icao24);
+
+            try {
+                const path = await fetchTrack(icao24);
+                if (path && path.length > 0) {
+                    trackStore.clearTrack(icao24);
+                    
+                    const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
+                    path.forEach(pt => {
+                        const lat = pt[1];
+                        const lng = pt[2];
+                        const globalPt = latLngToGlobalPixels(lat, lng, zoom, sharedPointRef.current);
+                        trackStore.addTrackPoint(icao24, lat, lng, globalPt.x, globalPt.y);
+                    });
+                    
+                    // [v4.4.0] Instant Rendering: Force Update
+                    setPlanesDict(prev => {
+                        if (prev[icao24]) {
+                            return { ...prev, [icao24]: { ...prev[icao24], isBackfilling: false, isDirty: true } };
+                        }
+                        return prev;
+                    });
+                }
+            } catch (e) {
+                // Silent
+            }
+        }, 500); // 500ms per aircraft as requested
+
+        return () => clearInterval(processor);
+    }, [fetchTrack]);
+
     // 定時更新飛機    // 初次載入驅動迴圈
     useEffect(() => {
         if (!isFetchingRef.current) {
@@ -397,12 +454,6 @@ export function useFlightData(mapRef) {
         if (workerRef.current) {
             workerRef.current.postMessage({ type: 'SET_VIEWPORT', payload: bbox });
         }
-        // [v4.3.0] Heartbeat to server for Engine B (Sniper)
-        fetch('/api/viewport', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...bbox, sessionId: sessionIdRef.current })
-        }).catch(() => {}); // Silent fail
     }, []);
 
     // [Project AERO-SYNC] Initialize WebWorker for WebSocket Binary Stream
@@ -471,6 +522,12 @@ export function useFlightData(mapRef) {
                     p.targetUpdatedAt = now;
                     p.globalX = globalPt.x;
                     p.globalY = globalPt.y;
+
+                    // [v4.4.0] Trigger Enhanced Auto-Backfill (WS stream)
+                    if (!backfilledIcaosRef.current.has(id) && !p.isBackfilling) {
+                        p.isBackfilling = true;
+                        backfillQueueRef.current.push(id);
+                    }
                 });
 
                 removed.forEach(id => {
