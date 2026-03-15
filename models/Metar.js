@@ -30,6 +30,6 @@ const MetarSchema = new mongoose.Schema({
     lastUpdated: { type: Date, default: Date.now }
 });
 
-MetarSchema.index({ icaoId: 1 });
+
 
 module.exports = mongoose.model('Metar', MetarSchema);

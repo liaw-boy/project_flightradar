@@ -23,6 +23,6 @@ const RouteSchema = new mongoose.Schema({
 });
 
 // 建立索引
-RouteSchema.index({ callsign: 1 });
+
 
 module.exports = mongoose.model('Route', RouteSchema);

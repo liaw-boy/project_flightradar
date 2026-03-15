@@ -54,6 +54,7 @@ function debounce(fn, delayMs) {
 }
 
 const app = express();
+app.set('trust proxy', 1); // Fix ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
 const PORT = process.env.PORT || 3000;
 
 // ==========================================

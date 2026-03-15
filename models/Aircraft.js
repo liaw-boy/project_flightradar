@@ -20,6 +20,6 @@ const AircraftSchema = new mongoose.Schema({
     lastUpdated: { type: Date, default: Date.now }
 });
 
-AircraftSchema.index({ icao24: 1 });
+
 
 module.exports = mongoose.model('Aircraft', AircraftSchema);
