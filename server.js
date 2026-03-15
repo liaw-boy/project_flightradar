@@ -17,18 +17,34 @@ const Aircraft = require('./models/Aircraft'); // [Cache Migration]
 const Metar = require('./models/Metar'); // [Cache Migration]
 
 // ==========================================
-// [Phase 15] MongoDB Connection
+// [Phase 15] MongoDB Connection (Cloud & Local Hybrid)
 // ==========================================
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat';
+const MONGODB_URI = process.env.MONGODB_URI;
+const LOCAL_MONGODB_URI = process.env.LOCAL_MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat';
 
+// 1. Primary Cloud Connection (Atlas)
 mongoose.connect(MONGODB_URI, {
     serverSelectionTimeoutMS: 5000,
     connectTimeoutMS: 10000,
-}).then(() => console.log('🍃 [DATABASE] Connected to MongoDB (Aerostrat DB)'))
-  .catch(err => console.error('❌ [DATABASE] Initial connection error:', err));
+}).then(() => console.log('🍃 [CLOUD DB] Connected to MongoDB Atlas'))
+  .catch(err => console.error('❌ [CLOUD DB] Initial connection error:', err));
+
+// 2. Secondary Local Connection (Shadow)
+const localConn = mongoose.createConnection(LOCAL_MONGODB_URI, {
+    serverSelectionTimeoutMS: 2000,
+    connectTimeoutMS: 5000,
+});
+localConn.on('connected', () => console.log('🏠 [LOCAL DB] Local Shadowing Active'));
+localConn.on('error', err => console.error('⚠️ [LOCAL DB] Shadowing error:', err.message));
+
+// 3. Create Local Models (using schemas from primary models)
+const LocalRoute = localConn.model('Route', Route.schema);
+const LocalAircraft = localConn.model('Aircraft', Aircraft.schema);
+const LocalMetar = localConn.model('Metar', Metar.schema);
+const LocalTrackPoint = localConn.model('TrackPoint', TrackPoint.schema);
 
 mongoose.connection.on('error', err => {
-    console.error('❌ [DATABASE] Runtime connection error:', err);
+    console.error('❌ [CLOUD DB] Runtime connection error:', err);
 });
 
 mongoose.connection.on('disconnected', () => {
@@ -657,6 +673,10 @@ async function ingestTrackPoints(states, timeUnix) {
 
     try {
         await TrackPoint.insertMany(trackPoints, { ordered: false });
+        // Local Shadow Write
+        if (localConn.readyState === 1) {
+            LocalTrackPoint.insertMany(trackPoints, { ordered: false }).catch(() => {});
+        }
     } catch (err) {
         // Bulk write errors are expected (e.g. duplicate keys in same snapshot time)
         if (err.name !== 'MongoBulkWriteError' && err.name !== 'MongoServerError') {
@@ -877,11 +897,11 @@ app.get('/api/metadata/:icao24', async (req, res) => {
         if (!response.ok) {
             syncAccountQuota(currentAccountIndex, response);
             // 記錄為「無資料」存入 DB 避免重複查詢
-            await Aircraft.findOneAndUpdate(
-                { icao24 },
-                { icao24, noData: true, lastUpdated: new Date() },
-                { upsert: true }
-            );
+            const noDataMarker = { icao24, noData: true, lastUpdated: new Date() };
+            await Aircraft.findOneAndUpdate({ icao24 }, noDataMarker, { upsert: true });
+            if (localConn.readyState === 1) {
+                LocalAircraft.findOneAndUpdate({ icao24 }, noDataMarker, { upsert: true }).catch(() => {});
+            }
             logMissingData(icao24, 'metadata');
             return res.json({ icao24, noData: true });
         }
@@ -902,10 +922,13 @@ app.get('/api/metadata/:icao24', async (req, res) => {
             lastUpdated: new Date()
         };
 
-        // 存入 MongoDB
+        // 存入 MongoDB (Cloud + Local Shadow)
         await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true });
+        if (localConn.readyState === 1) {
+            LocalAircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true }).catch(() => {});
+        }
         resolveMissingData(icao24, 'metadata');
-        console.log(`📦 [METADATA] Cached to DB: ${icao24} = ${metadata.typecode} ${metadata.model}`);
+        console.log(`📦 [METADATA] Cached to Cloud & Local DB: ${icao24}`);
 
         res.json(metadata);
     } catch (error) {
@@ -983,10 +1006,17 @@ app.post('/api/metadata/batch', async function (req, res) {
                         lastUpdated: new Date()
                     };
                     await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true });
+                    if (localConn.readyState === 1) {
+                        LocalAircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true }).catch(() => {});
+                    }
                     resolveMissingData(icao24, 'metadata');
                     fetched++;
                 } else {
-                    await Aircraft.findOneAndUpdate({ icao24 }, { icao24, noData: true, lastUpdated: new Date() }, { upsert: true });
+                    const noDataMarker = { icao24, noData: true, lastUpdated: new Date() };
+                    await Aircraft.findOneAndUpdate({ icao24 }, noDataMarker, { upsert: true });
+                    if (localConn.readyState === 1) {
+                        LocalAircraft.findOneAndUpdate({ icao24 }, noDataMarker, { upsert: true }).catch(() => {});
+                    }
                     logMissingData(icao24, 'metadata');
                 }
             } catch (e) {
@@ -1323,15 +1353,15 @@ app.get('/api/route/external', async (req, res) => {
         if (externalData) {
             // --- Layer 4: Persistence (SAVE TO DB) ---
             console.log(`💾 [DB SAVE] Persisting new route for ${callsign} to MongoDB...`);
-            await Route.findOneAndUpdate(
-                { callsign },
-                {
-                    departureAirport: externalData.dep,
-                    arrivalAirport: externalData.arr,
-                    lastUpdated: new Date()
-                },
-                { upsert: true, new: true }
-            );
+            const routeData = {
+                departureAirport: externalData.dep,
+                arrivalAirport: externalData.arr,
+                lastUpdated: new Date()
+            };
+            await Route.findOneAndUpdate({ callsign }, routeData, { upsert: true, new: true });
+            if (localConn.readyState === 1) {
+                LocalRoute.findOneAndUpdate({ callsign }, routeData, { upsert: true }).catch(() => {});
+            }
 
             return res.json({
                 callsign,
@@ -1465,6 +1495,9 @@ async function fetchMetarData() {
 
         if (operations.length > 0) {
             await Metar.bulkWrite(operations, { ordered: false });
+            if (localConn.readyState === 1) {
+                LocalMetar.bulkWrite(operations, { ordered: false }).catch(() => {});
+            }
         }
 
         console.log(`📡 [METAR] Updated ${data.length} airport weather records in MongoDB`);
