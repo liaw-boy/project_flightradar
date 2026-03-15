@@ -1,4 +1,4 @@
-# ✈️ AEROSTRAT 全球航空雷達系統 (Global Surveillance Radar) - v4.2.0 "Persistence Edition"
+# ✈️ AEROSTRAT 全球航空雷達系統 (Global Surveillance Radar) - v4.3.0 "Resolution Edition"
 
 這是一款專門為「極端數據吞吐量」與「大數據持久化」而生的專業級全球航空監控系統。基於 **React (Vite)**、**Node.js (Worker Threads)** 與 **MongoDB**，本系統不僅提供 60fps 的電影級視覺體驗，更具備完善的飛行軌跡紀錄功能。
 

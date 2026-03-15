@@ -31,6 +31,7 @@ export function useFlightData(mapRef) {
     const nextScheduledFetchRef = useRef(Date.now() + 60000);
     const workerRef = useRef(null);
     const usesWebSocketRef = useRef(false);
+    const sessionIdRef = useRef(`session-${Math.random().toString(36).substring(2, 10)}`);
 
     // [Project AERO-SYNC] Zero-GC Projection Helper
     const sharedPointRef = useRef({ x: 0, y: 0 });
@@ -396,6 +397,12 @@ export function useFlightData(mapRef) {
         if (workerRef.current) {
             workerRef.current.postMessage({ type: 'SET_VIEWPORT', payload: bbox });
         }
+        // [v4.3.0] Heartbeat to server for Engine B (Sniper)
+        fetch('/api/viewport', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...bbox, sessionId: sessionIdRef.current })
+        }).catch(() => {}); // Silent fail
     }, []);
 
     // [Project AERO-SYNC] Initialize WebWorker for WebSocket Binary Stream

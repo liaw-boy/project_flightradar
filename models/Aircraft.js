@@ -17,6 +17,10 @@ const AircraftSchema = new mongoose.Schema({
     built: { type: String, default: '' },
     categoryDescription: { type: String, default: '' },
     photoUrl: { type: String, default: null }, // Future expansion
+    specs: {
+        engines: { type: String, default: '' },
+        capacity: { type: Number, default: 0 }
+    },
     lastUpdated: { type: Date, default: Date.now }
 });
 

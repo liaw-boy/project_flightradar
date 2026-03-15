@@ -123,6 +123,37 @@ export default function MapView({
     useEffect(() => { onUsageUpdateRef.current = onUsageUpdate; }, [onUsageUpdate]);
     useEffect(() => { colorSchemeRef.current = colorScheme; }, [colorScheme]);
     useEffect(() => { filtersRef.current = filters; }, [filters]);
+    
+    // ==========================================
+    // 💧 軌跡自動注水 (Track Hydration Pipeline) [v4.2.1]
+    // ==========================================
+    useEffect(() => {
+        // 確保有選中飛機，且歷史軌跡資料已載入
+        if (!selectedIcao24 || !trackPoints || trackPoints.length === 0) return;
+        if (!mapRef.current) return;
+
+        console.log(`💧 [HYDRATION] Injecting ${trackPoints.length} historical points for ${selectedIcao24}`);
+
+        // 1. 清空該飛機在繪圖引擎中的舊軌跡緩衝，避免殘影
+        trackStore.clearTrack(selectedIcao24);
+
+        const zoom = mapRef.current.getZoom();
+
+        // 2. 投影並批次注入歷史軌跡點
+        // 注意：trackPoints 格式為 [time, lat, lng, altitude, heading, velocity]
+        trackPoints.forEach(point => {
+            const [time, lat, lng] = point;
+            
+            // 投影轉換為繪圖引擎看得懂的全局像素座標
+            const pixelPos = latLngToGlobalPixels(lat, lng, zoom);
+
+            // 注入高效率繪圖引擎
+            trackStore.addTrackPoint(selectedIcao24, lat, lng, pixelPos.x, pixelPos.y);
+        });
+
+        console.log(`✅ [HYDRATION] Track reconstruction complete for ${selectedIcao24}.`);
+
+    }, [selectedIcao24, trackPoints]);
 
     const [airports, setAirports] = useState([]);
     const airportsRef = useRef([]);
@@ -907,44 +938,8 @@ export default function MapView({
                     if (dataAge > 60) opacity = 0.4;
                     else if (dataAge > 30) opacity = 0.7;
 
-                    // [Phase 11 Hotfix - 修復版] 釘死於地圖的大圓航線預測 (Anchored Projected Path)
-                    if (plane.velocity >= 10 && !plane.onGround && zoom >= 5) {
-                        const DEG_TO_RAD = Math.PI / 180;
-                        const R = 6371000;
-                        const TIME_HORIZON = 120; // 繪製未來 120 秒的預測長度
-
-                        // 🔑 關鍵修正：將起點「錨定」在最後一次收到真實訊號的靜態座標，而不是跟著滑動的 renderLat
-                        const startLat = plane.lat;
-                        const startLng = plane.lng;
-
-                        const dist = plane.velocity * TIME_HORIZON;
-                        const headingRad = plane.heading * DEG_TO_RAD;
-                        const latRad = startLat * DEG_TO_RAD;
-
-                        // 以靜態起點推算 120 秒後的靜態終點
-                        const endLat = Math.asin(
-                            Math.sin(latRad) * Math.cos(dist / R) +
-                            Math.cos(latRad) * Math.sin(dist / R) * Math.cos(headingRad)
-                        ) / DEG_TO_RAD;
-                        const endLng = startLng + Math.atan2(
-                            Math.sin(headingRad) * Math.sin(dist / R) * Math.cos(latRad),
-                            Math.cos(dist / R) - Math.sin(latRad) * Math.sin(endLat * DEG_TO_RAD)
-                        ) / DEG_TO_RAD;
-
-                        // 將經緯度轉換為螢幕上的絕對像素位置
-                        const startPt = map.latLngToContainerPoint([startLat, normalizeLongitude(startLng)]);
-                        const endPt = map.latLngToContainerPoint([endLat, normalizeLongitude(endLng)]);
-
-                        ctx.save();
-                        ctx.beginPath();
-                        ctx.moveTo(startPt.x, startPt.y); // 起點釘死在地圖上
-                        ctx.lineTo(endPt.x, endPt.y);     // 終點也釘死在地圖上
-                        ctx.strokeStyle = isSelected ? '#f59e0b' : 'rgba(245, 158, 11, 0.3)';
-                        ctx.lineWidth = isSelected ? 2 : 1.5;
-                        ctx.setLineDash(isSelected ? [6, 4] : [3, 4]);
-                        ctx.stroke();
-                        ctx.restore();
-                    }
+                    // [v4.2.0] Projected Path Removed for Minimalist Aesthetic
+                    // Only historical tracks (cyan) are now rendered.
 
                     ctx.save();
                     ctx.globalAlpha = opacity;

@@ -154,7 +154,7 @@ app.get('/api/admin/missing-data', (req, res) => {
 // 快取系統
 // ==========================================
 const cache = new Map();
-const CACHE_TTL = 60000; // 60 秒快取 (配合前端 60s 輪詢)
+const CACHE_TTL = 30000; // 30 秒快取 (配合前端 30s 輪詢)
 
 function getCached(key) {
     if (cache.has(key)) {
@@ -401,6 +401,20 @@ function broadcastSSE(data) {
 // ==========================================
 const _prevStates = new Map(); // icao24 -> prev state for diff
 
+   // [AERO-SYNC v4.3.0] Active Viewports Registry
+const activeViewports = new Map(); // Store viewport heartbeats { sessionId -> { bbox, lastSeen } }
+const VIEWPORT_TTL = 60000; // 60s inactivity auto-clear
+
+function cleanExpiredViewports() {
+    const now = Date.now();
+    for (const [sid, vp] of activeViewports.entries()) {
+        if (now - vp.lastSeen > VIEWPORT_TTL) activeViewports.delete(sid);
+    }
+}
+setInterval(cleanExpiredViewports, 10000);
+
+// 機場快取
+const airportListCache = [];
 function detectAnomalies(states) {
     const alerts = [];
     for (const s of states) {
@@ -671,7 +685,7 @@ async function ingestTrackPoints(states, timeUnix) {
  * [V3.0] 視角驅動自適應抓取迴圈
  */
 async function runAdaptiveViewportPolling() {
-    const viewports = getActiveViewports();
+    const viewports = Array.from(activeViewports.values()).map(v => v.bbox);
     if (viewports.length === 0) return;
 
     for (const v of viewports) {
@@ -715,27 +729,127 @@ setInterval(runAdaptiveViewportPolling, 5000);
 async function fetchGlobalPlanes() {
     if (isFetchingGlobal) return;
     isFetchingGlobal = true;
+    const start = performance.now();
+    const acc = ACCOUNTS[currentAccountIndex];
+    
     try {
         const data = await fetchOpenSky();
+        const latency = Math.round(performance.now() - start);
+        
         globalPlanesCache = { states: data.states, time: data.time };
         broadcastPlanes(data.states, data.time);
         lastGlobalFetchTime = Date.now();
-        console.log(`🌏 [GLOBAL] Global snapshot updated: ${data.states.length} planes.`);
+        
+        console.log(`\x1b[32m🌏 [GLOBAL] Baseline updated | Latency: ${latency}ms | Planes: ${data.states.length} | Acc: #${currentAccountIndex + 1} (${acc.user})\x1b[0m`);
     } catch (e) {
-        console.error(`❌ [GLOBAL] Error: ${e.message}`);
+        if (e.message.includes('429') || e.message.includes('timeout')) {
+            console.warn(`\x1b[33m⚠️ [GLOBAL WARN] ${e.message}\x1b[0m`);
+        } else {
+            console.error(`\x1b[31m❌ [GLOBAL ERROR] ${e.message}\x1b[0m`);
+        }
     } finally {
         isFetchingGlobal = false;
     }
 
     // [v4.3.5] Broadcast precise global telemetry
-    broadcastTelemetry(apiStats, 60);
+    broadcastTelemetry(apiStats, 30);
 
     // [Audit Fix] Use centralized ingestion helper
     ingestTrackPoints(globalPlanesCache.states, globalPlanesCache.time);
 }
 
-// 啟動 60 秒全球資料輪詢機制 (配合 CACHE_TTL=60s)
-setInterval(fetchGlobalPlanes, 60000);
+// [v4.3.0] ADSB.fi Engine B: Viewport Sniper
+async function fetchAdsbFiViewports() {
+    if (activeViewports.size === 0) return;
+
+    // 1. 去重並獲取所有不重複的視角中心點與半徑
+    const baselineIcaos = new Set(globalPlanesCache.states.map(s => s[0]));
+
+    for (const [sid, vp] of activeViewports.entries()) {
+        const start = performance.now();
+        let targetSource = 'adsb.fi';
+        let hiddenCount = 0;
+        let capturedCount = 0;
+
+        try {
+            const { lamin, lomin, lamax, lomax } = vp.bbox;
+            const centerLat = (lamin + lamax) / 2;
+            const centerLon = (lomin + lomax) / 2;
+            
+            const latDist = (lamax - lamin) * 30;
+            const lonDist = (lomax - lomin) * 30 * Math.cos(centerLat * Math.PI / 180);
+            const radius = Math.min(250, Math.ceil(Math.sqrt(latDist*latDist + lonDist*lonDist)));
+
+            const primaryUrl = `https://api.adsb.fi/v2/lat/${centerLat.toFixed(4)}/lon/${centerLon.toFixed(4)}/dist/${radius}`;
+            const fallbackUrl = `https://api.adsb.one/v2/lat/${centerLat.toFixed(4)}/lon/${centerLon.toFixed(4)}/dist/${radius}`;
+            const headers = { 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AEROSTRAT/2.0',
+                'Accept': 'application/json'
+            };
+
+            let response;
+            try {
+                response = await fetch(primaryUrl, { headers, signal: AbortSignal.timeout(8000) });
+                if (!response.ok) throw new Error('Primary failed');
+            } catch (e) {
+                console.log('\x1b[33m⚠️ [SNIPER FALLBACK] Switch to adsb.one\x1b[0m');
+                targetSource = 'adsb.one';
+                try {
+                    response = await fetch(fallbackUrl, { headers, signal: AbortSignal.timeout(8000) });
+                    if (!response.ok) continue;
+                } catch (e2) {
+                    continue;
+                }
+            }
+
+            const data = await response.json();
+            if (!data.aircraft || !Array.isArray(data.aircraft)) continue;
+
+            capturedCount = data.aircraft.length;
+
+            data.aircraft.forEach(ac => {
+                if (!ac.hex) return;
+                const icao24 = ac.hex.toLowerCase();
+                
+                if (!baselineIcaos.has(icao24)) hiddenCount++;
+
+                const baroAltMeters = ac.alt_baro === 'ground' ? 0 : (ac.alt_baro ? ac.alt_baro * 0.3048 : null);
+                const geoAltMeters = ac.alt_geom ? ac.alt_geom * 0.3048 : null;
+                const velocityMs = ac.gs ? ac.gs * 0.514444 : null;
+                const vRateMs = ac.baro_rate ? ac.baro_rate * 0.00508 : null;
+
+                const osArray = [
+                    icao24, (ac.flight || '').trim() || null, 'ADSB.fi Sniper',
+                    Math.floor(Date.now() / 1000), ac.seen || Math.floor(Date.now()/1000),
+                    ac.lon, ac.lat, geoAltMeters, ac.alt_baro === 'ground',
+                    velocityMs, ac.track, vRateMs, null, baroAltMeters,
+                    ac.squawk || null, !!ac.spi, ac.type === 'adsb_icao' ? 0 : 2
+                ];
+
+                const existingIdx = globalPlanesCache.states.findIndex(s => s[0] === icao24);
+                if (existingIdx !== -1) {
+                    globalPlanesCache.states[existingIdx] = osArray;
+                } else {
+                    globalPlanesCache.states.push(osArray);
+                }
+            });
+
+            const latency = Math.round(performance.now() - start);
+            console.log(`\x1b[36m🎯 [SNIPER] Source: ${targetSource} | Latency: ${latency}ms | Captured: ${capturedCount} planes (+${hiddenCount} Hidden)\x1b[0m`);
+
+        } catch (err) {
+            // [v4.3.1] Silent failure
+        }
+    }
+
+    // 更新快取時間戳
+    globalPlanesCache.time = Math.floor(Date.now() / 1000);
+}
+
+// 啟動 30 秒全球資料輪詢機制 (配合 CACHE_TTL=30s)
+setInterval(fetchGlobalPlanes, 30000);
+// [v4.3.0] 啟動 10 秒視角精準狙擊
+setInterval(fetchAdsbFiViewports, 10000);
 // 啟動時讀取快取並初始化
 const isFreshQuota = loadQuotaCache();
 initializeAccountQuotas(isFreshQuota);
@@ -1398,34 +1512,20 @@ async function fetchTracksInternal(icao24) {
 app.get('/api/tracks', async (req, res) => {
     const icao24 = req.query.icao24;
     if (!icao24) return res.status(400).json({ error: 'Missing icao24' });
+    const result = await fetchTracksInternal(icao24);
+    res.json(result);
+});
 
-    // [HOTFIX] 連線狀態守衛：避免在未連線時觸發 Mongoose Buffering 導致 10s 延遲
-    if (mongoose.connection.readyState !== 1) {
-        return res.status(503).json({ error: 'Database not connected', retryAfter: 30 });
-    }
+// [v4.3.0] Viewport Registration API
+app.post('/api/viewport', express.json(), (req, res) => {
+    const { lamin, lomin, lamax, lomax, sessionId = 'default' } = req.body;
+    if (lamin === undefined || lomin === undefined) return res.status(400).json({ error: 'Invalid bbox' });
 
-    try {
-        // Query local MongoDB Time Series instead of OpenSky
-        const points = await TrackPoint.find({ icao24 })
-            .sort({ timestamp: 1 })
-            .lean();
-
-        // Convert to frontend expected format: [[time, lat, lng, altitude, heading, velocity], ...]
-        const path = points.map(pt => [
-            Math.floor(pt.timestamp.getTime() / 1000),
-            pt.lat,
-            pt.lng,
-            pt.altitude,
-            pt.heading,
-            pt.velocity
-        ]);
-
-        res.json({ icao24, path });
-        console.log(`✅ [TRACKS] Served ${path.length} points from MongoDB for ${icao24}`);
-    } catch (error) {
-        console.error(`❌ [TRACKS DB ERROR] ${icao24}: ${error.message}`);
-        res.status(500).json({ error: 'Database query failed' });
-    }
+    activeViewports.set(sessionId, {
+        bbox: { lamin, lomin, lamax, lomax },
+        lastSeen: Date.now()
+    });
+    res.json({ status: 'ok', activeSessions: activeViewports.size });
 });
 
 // ==========================================
@@ -1460,13 +1560,27 @@ async function fetchMetarData() {
         const data = await response.json();
         
         // 批次更新 MongoDB
-        const operations = data.map(info => ({
-            updateOne: {
-                filter: { icaoId: info.icaoId.toUpperCase() },
-                update: { $set: { ...info, lastUpdated: new Date() } },
-                upsert: true
-            }
-        }));
+        const operations = data.map(info => {
+            const lng = parseFloat(info.lon);
+            const lat = parseFloat(info.lat);
+            
+            return {
+                updateOne: {
+                    filter: { icaoId: info.icaoId.toUpperCase() },
+                    update: { 
+                        $set: { 
+                            ...info, 
+                            location: {
+                                type: 'Point',
+                                coordinates: [lng, lat]
+                            },
+                            lastUpdated: new Date() 
+                        } 
+                    },
+                    upsert: true
+                }
+            };
+        });
 
         if (operations.length > 0) {
             await Metar.bulkWrite(operations, { ordered: false });
@@ -1565,7 +1679,7 @@ server.listen(PORT, () => {
     console.log('║   ✈️  AEROSTRAT Surveillance Server      ║');
     console.log(`║   🌐 http://localhost:${PORT}               ║`);
     console.log(`║   📁 Serving: ./public-react             ║`);
-    console.log(`║   🔐 Version: v4.2.0                     ║`);
+    console.log(`║   🔐 Version: v4.3.0                     ║`);
     console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
     console.log('╚══════════════════════════════════════════╝');
     console.log('');
