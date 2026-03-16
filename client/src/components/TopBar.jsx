@@ -41,7 +41,7 @@ export default function TopBar({
                 </div>
                 <div className="brand-subtitle">
                     <span className="brand-highlight">RADAR</span>
-                    <span className="brand-version">v4.2.2</span>
+                    <span className="brand-version">v4.6.0</span>
                 </div>
 
                 <div className="top-stat-pill">

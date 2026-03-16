@@ -29,19 +29,23 @@ const airportSchema = new mongoose.Schema({
     country: {
         type: String
     },
-    lat: {
-        type: Number,
-        required: true
-    },
-    lng: {
-        type: Number,
-        required: true
+    // [GIS MODERNIZATION] 使用 GeoJSON Point 替代獨立的 lat/lng
+    location: {
+        type: {
+            type: String,
+            enum: ['Point'],
+            default: 'Point'
+        },
+        coordinates: {
+            type: [Number], // [longitude, latitude]
+            required: true
+        }
     }
 }, {
     timestamps: true
 });
 
-// [GIS Optimization] 空間索引：加速近接機場搜尋與 O/D 推論
-airportSchema.index({ lat: 1, lng: 1 });
+// [GIS Optimization] 2dsphere 索引：解鎖極速球面距離查詢與 $near 演算
+airportSchema.index({ location: "2dsphere" });
 
 module.exports = mongoose.model('Airport', airportSchema);

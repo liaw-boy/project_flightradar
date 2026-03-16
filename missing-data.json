@@ -182,5 +182,29 @@
     ],
     "firstSeen": "2026-03-15T15:40:47.849Z",
     "lastAttempt": "2026-03-15T15:40:47.849Z"
+  },
+  "84c068": {
+    "icao24": "84c068",
+    "missing": [
+      "metadata"
+    ],
+    "firstSeen": "2026-03-16T03:50:53.242Z",
+    "lastAttempt": "2026-03-16T03:50:53.243Z"
+  },
+  "84bbbd": {
+    "icao24": "84bbbd",
+    "missing": [
+      "metadata"
+    ],
+    "firstSeen": "2026-03-16T08:59:35.201Z",
+    "lastAttempt": "2026-03-16T08:59:35.201Z"
+  },
+  "71c594": {
+    "icao24": "71c594",
+    "missing": [
+      "metadata"
+    ],
+    "firstSeen": "2026-03-16T08:59:41.969Z",
+    "lastAttempt": "2026-03-16T08:59:41.969Z"
   }
 }

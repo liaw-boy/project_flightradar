@@ -89,8 +89,10 @@ async function seedAirports() {
                 name: a.name,
                 city: a.city,
                 country: a.country,
-                lat: parseFloat(a.lat),
-                lng: parseFloat(a.lon)
+                location: {
+                    type: 'Point',
+                    coordinates: [parseFloat(a.lon), parseFloat(a.lat)]
+                }
             });
         }
 

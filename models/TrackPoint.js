@@ -2,16 +2,23 @@ const mongoose = require('mongoose');
 
 /**
  * TrackPoint Schema - Optimized for MongoDB Time Series
- * This collection will store high-frequency aircraft coordinate updates.
+ * This collection stores high-frequency aircraft coordinate updates.
  */
 const trackPointSchema = new mongoose.Schema({
+    sessionId: {
+        type: String,
+        required: true,
+        index: true
+    },
     icao24: {
         type: String,
-        required: true
+        required: true,
+        index: true
     },
     timestamp: {
         type: Date,
-        required: true
+        required: true,
+        index: true
     },
     lat: {
         type: Number,
@@ -25,6 +32,10 @@ const trackPointSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    geo_altitude: {
+        type: Number,
+        default: null
+    },
     velocity: {
         type: Number,
         default: 0
@@ -33,18 +44,28 @@ const trackPointSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
-    createdAt: { // [Task 2] TTL 磁碟空間守衛
-        type: Date,
-        default: Date.now,
-        index: { expires: '24h' }
+    vertical_rate: {
+        type: Number,
+        default: null
+    },
+    onGround: {
+        type: Boolean,
+        default: false
+    },
+    squawk: {
+        type: String,
+        default: null
     }
 }, {
     // Time Series optimization (MongoDB 5.0+)
     timeseries: {
         timeField: 'timestamp',
-        metaField: 'icao24',
+        metaField: 'sessionId', // Use sessionId as the metaField for better grouping
         granularity: 'seconds'
     }
 });
+
+// Add a TTL index to prevent disk exhaustion if needed
+trackPointSchema.index({ timestamp: 1 }, { expireAfterSeconds: 86400 * 3 }); // Keep for 3 days
 
 module.exports = mongoose.model('TrackPoint', trackPointSchema);
