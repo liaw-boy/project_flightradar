@@ -32,6 +32,11 @@ const trackPointSchema = new mongoose.Schema({
     heading: {
         type: Number,
         default: 0
+    },
+    createdAt: { // [Task 2] TTL 磁碟空間守衛
+        type: Date,
+        default: Date.now,
+        index: { expires: '24h' }
     }
 }, {
     // Time Series optimization (MongoDB 5.0+)
@@ -41,8 +46,5 @@ const trackPointSchema = new mongoose.Schema({
         granularity: 'seconds'
     }
 });
-
-// TTL Index: Automatically delete data older than 24 hours (86400 seconds)
-trackPointSchema.index({ timestamp: 1 }, { expireAfterSeconds: 86400 });
 
 module.exports = mongoose.model('TrackPoint', trackPointSchema);

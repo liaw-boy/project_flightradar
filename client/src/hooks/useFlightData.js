@@ -196,7 +196,8 @@ export function useFlightData(mapRef) {
                 if (mapRef && mapRef.current) {
                     const zoom = mapRef.current.getZoom();
                     const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
-                    trackStore.addTrackPoint(icao24, pData.lat, pData.lng, globalPt.x, globalPt.y);
+                    const timestamp = pData.lastSeenTime; 
+                    trackStore.addTrackPoint(icao24, pData.lat, pData.lng, globalPt.x, globalPt.y, timestamp);
                 }
 
                 if (!next[icao24]) {
@@ -319,37 +320,14 @@ export function useFlightData(mapRef) {
                     .filter((p) => p[1] && p[2] && p[0] <= limitTime)
                     .sort((a, b) => a[0] - b[0]);
 
-                if (validPoints.length === 0) return [];
-
-                // 找出最新的飛行航段：
-                // 1. 絕對切斷：時間間隔大於 30 分鐘 (1800s) 且兩端有地面點，代表是前一趟航班
-                // 2. 條件切斷：飛機目前在地面，遇到地面點就切斷避免畫出滑行線
-                // 3. 速度異常切斷：超過音速 400 m/s 的跳躍一定是資料雜訊
-                let latestSegmentStartIdx = 0;
-                const isCurrentlyOnGround = validPoints[validPoints.length - 1][5] === true;
-
-                for (let i = 1; i < validPoints.length; i++) {
-                    const timeDiff = validPoints[i][0] - validPoints[i - 1][0];
-                    const isOnGround = validPoints[i][5] === true;
-
-                    if (timeDiff > 1800 && (validPoints[i - 1][5] === true || isOnGround)) {
-                        latestSegmentStartIdx = i;
-                    } else if (timeDiff > 0) {
-                        const dist = getDistance(validPoints[i - 1][1], validPoints[i - 1][2], validPoints[i][1], validPoints[i][2]);
-                        if (timeDiff > 30 && (dist / timeDiff) > 400) {
-                            latestSegmentStartIdx = i;
-                        }
-                    }
-                }
-
-                // [v3.1] Return full data tuple [time, lat, lng, altitude, heading, velocity] for TimePlayer
-                return validPoints.slice(latestSegmentStartIdx).map((p) => [
+                // [v4.7.0] 極簡化前端邏輯：信任後端經過 30min GAP 與 0,0 清洗後的純淨陣列
+                return validPoints.map((p) => [
                     p[0],  // time (UNIX)
                     p[1],  // lat
                     p[2],  // lng
                     p[3],  // altitude (meters)
                     p[4],  // true_track (heading)
-                    null   // velocity (not in track path API)
+                    p[5]   // velocity
                 ]);
             }
         } catch (e) {
@@ -405,28 +383,66 @@ export function useFlightData(mapRef) {
             try {
                 const path = await fetchTrack(icao24);
                 if (path && path.length > 0) {
-                    trackStore.clearTrack(icao24);
+                    // [v4.5.1] Seamless Merge & Deduplication
+                    // 1. Get current points from store (Live Points)
+                    const livePoints = [];
+                    trackStore.getTrackPoints(icao24, (time, lat, lng, x, y) => {
+                        livePoints.push([time, lat, lng, x, y]);
+                    });
+
+                    // 2. Combine with Historical Path and Deduplicate by Time
+                    // Convert historical path [time, lat, lng, alt, head, vel] to [time, lat, lng]
+                    const historicalPoints = path.map(p => [p[0], p[1], p[2]]);
                     
+                    // Full Blend: Set used to track unique timestamps
+                    const seenTimes = new Set();
+                    const merged = [];
+                    
+                    // Process: Historical first, then Live
+                    [...historicalPoints, ...livePoints].forEach(pt => {
+                        const time = pt[0];
+                        if (!seenTimes.has(time)) {
+                            seenTimes.add(time);
+                            merged.push(pt);
+                        }
+                    });
+
+                    // Sort strict by time (old to new)
+                    merged.sort((a, b) => a[0] - b[0]);
+
+                    // 3. Re-inject fully merged track into store
+                    trackStore.clearTrack(icao24);
                     const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
-                    path.forEach(pt => {
-                        const lat = pt[1];
-                        const lng = pt[2];
+                    merged.forEach(pt => {
+                        const [time, lat, lng] = pt;
                         const globalPt = latLngToGlobalPixels(lat, lng, zoom, sharedPointRef.current);
-                        trackStore.addTrackPoint(icao24, lat, lng, globalPt.x, globalPt.y);
+                        trackStore.addTrackPoint(icao24, lat, lng, globalPt.x, globalPt.y, time);
                     });
                     
-                    // [v4.4.0] Instant Rendering: Force Update
+                    // [v4.6.0] Forced State Update: Break Reference and Force UI Redraw
                     setPlanesDict(prev => {
-                        if (prev[icao24]) {
-                            return { ...prev, [icao24]: { ...prev[icao24], isBackfilling: false, isDirty: true } };
+                        const currentPlane = prev[icao24];
+                        if (currentPlane) {
+                            // Create a brand new plane object with a new 'track' property if needed
+                            // and a 'forceUpdate' timestamp to ensure Mapbox/React detect the change.
+                            return { 
+                                ...prev, 
+                                [icao24]: { 
+                                    ...currentPlane, 
+                                    isBackfilling: false, 
+                                    isDirty: true,
+                                    forceUpdate: Date.now(),
+                                    _renderTrigger: Math.random() // Extra safety for shallow comparison
+                                } 
+                            };
                         }
                         return prev;
                     });
                 }
             } catch (e) {
-                // Silent
+                console.error('Backfill Merge Error:', e);
             }
-        }, 500); // 500ms per aircraft as requested
+        }, 500); // 500ms per aircraft
 
         return () => clearInterval(processor);
     }, [fetchTrack]);

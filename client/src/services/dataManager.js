@@ -138,11 +138,53 @@ export const dataManager = {
             const res = await fetch(`/api/metadata/${icao24}`);
             if (!res.ok) throw new Error('Metadata API error');
             const data = await res.json();
-
             lruCache.put(cacheKey, data);
             return data;
         } catch (err) {
             return { noData: true };
+        }
+    },
+
+    /**
+     * [L2 -> API] 獲取航空公司詳細資訊 (名稱與 Logo)
+     */
+    async getAirline(callsign) {
+        if (!callsign || callsign === 'N/A' || callsign === 'UNKNOWN') return { name: "Unknown", logo: null };
+        const cacheKey = `airline_${callsign}`;
+        const cached = lruCache.get(cacheKey);
+        if (cached) return cached;
+
+        try {
+            const res = await fetch(`/api/airline/${callsign}`);
+            if (!res.ok) throw new Error('Airline API error');
+            const data = await res.json();
+            lruCache.put(cacheKey, data);
+            return data;
+        } catch (err) {
+            return { name: "Unknown", logo: null };
+        }
+    },
+
+    /**
+     * [L2 -> API] 獲取 AeroDataBox 深層飛機履歷 (機齡/發動機/首航)
+     * 策略：持久化 MongoDB 緩存優先，減少 API 消耗。
+     */
+    async getAircraftRegistry(icao24) {
+        if (!icao24) return null;
+        const cacheKey = `registry_${icao24}`;
+        const cached = lruCache.get(cacheKey);
+        if (cached) return cached;
+
+        try {
+            const res = await fetch(`/api/aircraft/${icao24}`);
+            if (!res.ok) throw new Error('Registry API error');
+            const data = await res.json();
+
+            lruCache.put(cacheKey, data);
+            return data;
+        } catch (err) {
+            console.warn('[DataManager] Registry fetch failed:', err);
+            return null;
         }
     },
 

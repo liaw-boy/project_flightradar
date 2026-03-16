@@ -14,7 +14,10 @@ const mongoose = require('mongoose'); // [Phase 15] Database Persistence
 const Route = require('./models/Route'); // [Phase 15] Route Schema
 const TrackPoint = require('./models/TrackPoint'); // [Time Series] Historical Tracks
 const Aircraft = require('./models/Aircraft'); // [Cache Migration]
+const AircraftRegistry = require('./models/AircraftRegistry'); // [AeroDataBox Caching]
 const Metar = require('./models/Metar'); // [Cache Migration]
+const Airline = require('./models/Airline'); // [Airline Identity]
+const Airport = require('./models/Airport'); // [Global Aviation Infra]
 
 // ==========================================
 // [Phase 15] MongoDB Connection (Local Only)
@@ -165,6 +168,7 @@ app.get('/api/admin/missing-data', (req, res) => {
 // 快取系統
 // ==========================================
 const cache = new Map();
+const lastTrackWriteMap = new Map(); // [Throttling] icao24 -> lastWriteTime
 const CACHE_TTL = 30000; // 30 秒快取 (配合前端 30s 輪詢)
 
 function getCached(key) {
@@ -657,10 +661,23 @@ async function ingestTrackPoints(states, timeUnix) {
     }
 
     const timestamp = new Date(timeUnix * 1000);
+    const now = Date.now();
+    
     const trackPoints = states
-        .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number') // Second-layer safety
+        .filter(p => {
+            if (typeof p.lat !== 'number' || typeof p.lng !== 'number') return false;
+            
+            const icao = p.icao24.toLowerCase();
+            const lastWrite = lastTrackWriteMap.get(icao) || 0;
+            
+            // [Throttling] 同一架飛機每 20 秒才寫入一次，節省資源
+            if (now - lastWrite < 20000) return false;
+            
+            lastTrackWriteMap.set(icao, now);
+            return true;
+        })
         .map(p => ({
-            icao24: p.icao24.toLowerCase(), // Force casing consistency
+            icao24: p.icao24.toLowerCase(),
             timestamp,
             lat: p.lat,
             lng: p.lng,
@@ -722,7 +739,26 @@ async function runAdaptiveViewportPolling() {
     broadcastTelemetry(apiStats, nextIn);
 }
 
-// 保持每 5 秒檢查一次是否有視角需要更新 (實際抓取受分段計時器控制)
+// ==========================================
+// [Autonomous Engine] 全天候背景輪詢引擎
+// ==========================================
+let backgroundPollingTimer = null;
+
+/**
+ * 啟動自主輪詢，與前端狀態完全脫鉤
+ */
+function startAutonomousPolling() {
+    if (backgroundPollingTimer) return;
+    console.log(`${getLogTime()} 🚀 [ENGINE] Starting autonomous background polling (30s interval)...`);
+    
+    // 立即執行一次，避免起始空白
+    fetchGlobalPlanes();
+    
+    // 設定全天候定時任務
+    backgroundPollingTimer = setInterval(fetchGlobalPlanes, 30000);
+}
+
+// 保持每 5 秒檢查一次是否有視角需要更新 (主動性優化)
 setInterval(runAdaptiveViewportPolling, 5000);
 
 // 改寫原本的 fetchGlobalPlanes 為 fetchOpenSky 的封裝
@@ -761,8 +797,7 @@ async function fetchGlobalPlanes() {
 }
 
 
-// 啟動 30 秒全球資料輪詢機制 (配合 CACHE_TTL=30s)
-setInterval(fetchGlobalPlanes, 30000);
+// [REMOVED] setInterval(fetchGlobalPlanes, 30000); 
 // 啟動時讀取快取並初始化
 const isFreshQuota = loadQuotaCache();
 initializeAccountQuotas(isFreshQuota);
@@ -803,8 +838,8 @@ async function initializeAccountQuotas(isFreshQuota) {
         }
     }
 
-    // 預熱完後立刻執行一次真正的全球抓取
-    fetchGlobalPlanes();
+    // 預熱完後啟動 Autonomous Engine
+    startAutonomousPolling();
 }
 
 // ==========================================
@@ -877,6 +912,33 @@ try {
 
 // [REMOVED] saveMetadataCache is no longer needed with MongoDB
 
+// ==========================================
+// [Airline Identity] 航空公司呼號翻譯與 Logo 系統
+// ==========================================
+app.get('/api/airline/:callsign', async (req, res) => {
+    let callsign = req.params.callsign || '';
+    callsign = callsign.trim().toUpperCase();
+
+    // 擷取前 3 碼作為 ICAO 代碼 (例如 EVA065 -> EVA)
+    const icao = callsign.substring(0, 3);
+    
+    if (icao.length < 3) {
+        return res.json({ name: "Unknown", logo: null });
+    }
+
+    try {
+        const airline = await Airline.findOne({ icao }).lean();
+        if (airline) {
+            return res.json(airline);
+        } else {
+            return res.json({ name: "Unknown", logo: null });
+        }
+    } catch (e) {
+        console.error(`${getLogTime()} ❌ [AIRLINE] Lookup error:`, e.name + ': ' + e.message);
+        return res.status(500).json({ error: "Airline database error" });
+    }
+});
+
 app.get('/api/metadata/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
 
@@ -942,6 +1004,99 @@ app.get('/api/metadata/:icao24', async (req, res) => {
         res.json(metadata);
     } catch (error) {
         console.error(`${getLogTime()} ❌ [METADATA ERROR] ${icao24}: ${error.message}`);
+        res.json({ icao24, noData: true, error: error.message });
+    }
+});
+
+// ==========================================
+// [Task 1 & 2] Aircraft Registry API (AeroDataBox)
+// ==========================================
+app.get('/api/aircraft/:icao24', async (req, res) => {
+    const icao24 = req.params.icao24.toLowerCase();
+
+    // [HOTFIX] 連線狀態守衛
+    if (mongoose.connection.readyState !== 1) {
+        return res.json({ icao24, noData: true, error: 'Database not connected' });
+    }
+
+    try {
+        // Step 1: 攔截 (Check DB First)
+        const cached = await AircraftRegistry.findOne({ icao24 }).lean();
+        if (cached) {
+            // [熔斷機制] 檢查是否在封鎖期內
+            if (cached.apiStatus === 'BLOCKED' && cached.blockedUntil && new Date(cached.blockedUntil) > new Date()) {
+                console.log(`${getLogTime()} 🛡️ [REGISTRY] Circuit Breaker: ${icao24} is BLOCKED until ${cached.blockedUntil}`);
+                return res.json({ ...cached, isBlocked: true });
+            }
+            console.log(`${getLogTime()} ⚡ [REGISTRY] Cache Hit: ${icao24}`);
+            return res.json(cached);
+        }
+
+        // Step 2: 抓取 (Fetch from AeroDataBox via RapidAPI)
+        const apiKey = process.env.AERODATABOX_API_KEY;
+        if (!apiKey || apiKey === 'YOUR_RAPIDAPI_KEY') {
+            return res.json({ icao24, noData: true, error: 'AeroDataBox API key not configured' });
+        }
+
+        console.log(`${getLogTime()} 🌐 [REGISTRY] Fetching from AeroDataBox for ${icao24}...`);
+        const url = `https://aerodatabox.p.rapidapi.com/aircraft/icao24/${icao24}`;
+        const response = await fetch(url, {
+            headers: {
+                'X-RapidAPI-Key': apiKey,
+                'X-RapidAPI-Host': 'aerodatabox.p.rapidapi.com'
+            },
+            signal: AbortSignal.timeout(10000)
+        });
+
+        // Step 3: 儲存與熔斷處理
+        if (!response.ok) {
+            let blockedUntil = null;
+            let status = 'OK';
+
+            if (response.status === 404) {
+                // 404 封鎖 7 天
+                blockedUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+                status = 'BLOCKED';
+                console.log(`${getLogTime()} 🔍 [REGISTRY] 404 Not Found: Block ${icao24} for 7 days.`);
+            } else if (response.status === 429) {
+                // 429 封鎖 12 小時
+                blockedUntil = new Date(Date.now() + 12 * 60 * 60 * 1000);
+                status = 'BLOCKED';
+                console.warn(`${getLogTime()} ⚠️ [REGISTRY] 429 Rate Limit: Block ${icao24} for 12 hours.`);
+            }
+
+            if (status === 'BLOCKED') {
+                await AircraftRegistry.findOneAndUpdate(
+                    { icao24 },
+                    { icao24, notFound: true, apiStatus: status, blockedUntil, lastUpdated: new Date() },
+                    { upsert: true }
+                );
+                return res.json({ icao24, notFound: true, apiStatus: status, blockedUntil });
+            }
+            throw new Error(`AeroDataBox API Error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const registryData = {
+            icao24,
+            registration: data.registration || '',
+            model: data.model || '',
+            engineType: data.engineType || '',
+            firstFlightDate: data.firstFlightDate || '',
+            age: data.ageYears || null,
+            airline: data.airlineName || '',
+            isLeased: !!data.isLeased,
+            notFound: false,
+            apiStatus: 'OK',
+            blockedUntil: null,
+            lastUpdated: new Date()
+        };
+
+        await AircraftRegistry.findOneAndUpdate({ icao24 }, registryData, { upsert: true });
+        console.log(`${getLogTime()} 📦 [REGISTRY] Cached to DB: ${icao24}`);
+        res.json(registryData);
+    } catch (error) {
+        console.error(`${getLogTime()} ❌ [REGISTRY ERROR] ${icao24}: ${error.message}`);
         res.json({ icao24, noData: true, error: error.message });
     }
 });
@@ -1072,6 +1227,46 @@ function loadGlobalData() {
     }
 }
 
+// ==========================================
+// 機場資訊 API (Airports)
+// ==========================================
+app.get('/api/airport/:code', async (req, res) => {
+    const code = (req.params.code || '').toUpperCase().trim();
+    if (!code) return res.status(400).json({ error: 'Airport code is required' });
+
+    try {
+        // [New Solution] Step 1: 優先查詢本地全機場資料庫 (MongoDB)
+        const dbAirport = await Airport.findOne({ 
+            $or: [{ icao: code }, { iata: code }] 
+        }).lean();
+
+        if (dbAirport) {
+            return res.json({
+                ...dbAirport,
+                source: 'mongodb'
+            });
+        }
+
+        // [Legacy Fallback] Step 2: 如果全機場庫查不到，轉向原本的 METAR 快取 (可能是臨時建立的資料)
+        const cached = await Metar.findOne({ icao: code }).lean();
+        if (cached && cached.name) {
+            return res.json({
+                icao: cached.icao,
+                name: cached.name,
+                city: cached.city,
+                country: cached.country,
+                lat: cached.lat,
+                lng: cached.lng,
+                source: 'metar_cache'
+            });
+        }
+
+        return res.status(404).json({ error: 'Airport not found' });
+    } catch (err) {
+        console.error(`${getLogTime()} ❌ [AIRPORT API ERROR] ${code}:`, err.message);
+        res.status(500).json({ error: 'Internal database error' });
+    }
+});
 // [OPT 1.1] 機場清單快取變數與函式——必須在 loadGlobalData()/buildAirportGrid() 之前宣告
 let _cachedAirportList = null;
 let _cachedAirportListETag = '';
@@ -1311,20 +1506,37 @@ app.get('/api/route/external', async (req, res) => {
 
         let externalData = null;
 
-        // --- Layer 2: AirLabs API Proxy ---
-        const AIRLABS_KEY = process.env.AIRLABS_API_KEY;
-        if (AIRLABS_KEY) {
-            const response = await fetch(`https://airlabs.co/api/v9/flights?flight_icao=${callsign}&api_key=${AIRLABS_KEY}`);
-            if (response.ok) {
-                const data = await response.json();
-                if (data.response && data.response.length > 0) {
-                    const flight = data.response[0];
-                    externalData = {
-                        dep: flight.dep_icao || flight.dep_iata,
-                        arr: flight.arr_icao || flight.arr_iata,
-                        source: 'airlabs_api'
-                    };
+        // --- Layer 2: AeroDataBox API Proxy ---
+        const apiKey = process.env.AERODATABOX_API_KEY;
+        if (apiKey && apiKey !== 'YOUR_RAPIDAPI_KEY') {
+            try {
+                const url = `https://aerodatabox.p.rapidapi.com/flights/callsign/${callsign}`;
+                const response = await fetch(url, {
+                    headers: {
+                        'X-RapidAPI-Key': apiKey,
+                        'X-RapidAPI-Host': 'aerodatabox.p.rapidapi.com'
+                    },
+                    signal: AbortSignal.timeout(10000)
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (Array.isArray(data) && data.length > 0) {
+                        // 尋找陣列中第一筆具有完整 ICAO 的航班資料
+                        const flight = data.find(f => f.departure?.airport?.icao && f.arrival?.airport?.icao);
+                        if (flight) {
+                            externalData = {
+                                dep: flight.departure.airport.icao,
+                                arr: flight.arrival.airport.icao,
+                                source: 'aerodatabox'
+                            };
+                            console.log(`${getLogTime()} 🌐 [EXT-ROUTE] AeroDataBox HIT for ${callsign}: ${externalData.dep} -> ${externalData.arr}`);
+                        }
+                    }
                 }
+            } catch (e) {
+                // 安靜地 catch 錯誤，讓其掉入 Layer 3 Mock Fallback
+                console.warn(`${getLogTime()} ⚠️ [EXT-ROUTE] AeroDataBox failed for ${callsign}: ${e.message}`);
             }
         }
 
@@ -1409,16 +1621,38 @@ async function fetchTracksInternal(icao24) {
             .sort({ timestamp: 1 })
             .lean();
 
-        const path = points.map(pt => [
-            Math.floor(pt.timestamp.getTime() / 1000),
-            pt.lat,
-            pt.lng,
-            pt.altitude,
-            pt.heading,
-            pt.velocity
-        ]);
+        // [Validation] 座標破壞防禦：過濾 0,0 或無效座標，防止地圖渲染崩潰
+        let rawPath = points
+            .filter(pt => pt.lat !== 0 && pt.lng !== 0 && pt.lat != null && pt.lng != null)
+            .map(pt => [
+                Math.floor(pt.timestamp.getTime() / 1000),
+                pt.lat,
+                pt.lng,
+                pt.altitude,
+                pt.heading,
+                pt.velocity
+            ]);
 
-        const result = { icao24, path };
+        // [Smart Segmentation] 智慧軌跡切割 (30 分鐘斷層)
+        // 從最新點反向搜尋，捨棄上一趟航班或訊號中斷大於 30 分鐘的舊資料
+        const GAP_THRESHOLD = 30 * 60 * 1000;
+        let finalPath = [];
+        if (rawPath.length > 0) {
+            finalPath.unshift(rawPath[rawPath.length - 1]);
+            for (let i = rawPath.length - 2; i >= 0; i--) {
+                const current = rawPath[i];
+                const next = rawPath[i + 1];
+                const timeDiff = (next[0] - current[0]) * 1000; // ms
+
+                if (timeDiff > GAP_THRESHOLD) {
+                    console.log(`${getLogTime()} ✂️ [TRACK] Segmentation triggered for ${icao24}: ${Math.round(timeDiff/60000)} min gap. Truncating.`);
+                    break;
+                }
+                finalPath.unshift(current);
+            }
+        }
+
+        const result = { icao24, path: finalPath };
         trackCache.set(icao24, { data: result, timestamp: Date.now() });
         return result;
     } catch (e) {
