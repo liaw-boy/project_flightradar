@@ -77,20 +77,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(compression()); // [v2.9.0] Gzip
 
-// [v2.9.0] Serve static files BEFORE security middleware
-// This prevents helmet's nosniff from blocking JS/CSS MIME types
-app.use(express.static(path.join(__dirname, 'public-react'), {
-    setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.html')) {
-            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-            res.setHeader('Pragma', 'no-cache');
-            res.setHeader('Expires', '0');
-        }
-        if (filePath.endsWith('.js')) res.setHeader('Content-Type', 'application/javascript');
-        if (filePath.endsWith('.css')) res.setHeader('Content-Type', 'text/css');
-    }
-}));
-app.use(express.static(path.join(__dirname, 'public')));
+// [v5.0.0] Static file serving REMOVED — Frontend runs independently via Vite Dev Server
+// Backend is now a pure API + WebSocket data engine
+
 
 // [v3.0] Security Headers
 app.use(helmet({
@@ -1596,13 +1585,6 @@ app.use('/api', (req, res) => {
     res.status(404).json({ error: 'API endpoint not found' });
 });
 
-// [v2.5.2] SPA Fallback — 未匹配的路由指向 React 前端
-app.use((req, res) => {
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    res.sendFile(path.join(__dirname, 'public-react', 'index.html'));
-});
 
 // ==========================================
 // 自動化資料庫引擎 (Background Auto-Sync)
@@ -1655,10 +1637,10 @@ server.listen(PORT, () => {
     const readyTime = new Date().toLocaleTimeString();
     console.log('');
     console.log('╔══════════════════════════════════════════╗');
-    console.log('║   ✈️  AEROSTRAT Surveillance Server      ║');
-    console.log(`║   🌐 http://localhost:${PORT}               ║`);
-    console.log(`║   📁 Serving: ./public-react             ║`);
-    console.log(`║   🔐 Version: v4.4.0                     ║`);
+    console.log('║   ✈️  AEROSTRAT API Engine (Decoupled)    ║');
+    console.log(`║   🌐 API: http://localhost:${PORT}            ║`);
+    console.log(`║   🔌 WS:  ws://localhost:${PORT}/ws           ║`);
+    console.log(`║   🔐 Version: v5.0.0 (Zero Downtime)     ║`);
     console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
     console.log('╚══════════════════════════════════════════╝');
     console.log('');
