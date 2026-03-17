@@ -156,19 +156,7 @@ export function useFlightData(mapRef) {
             isFetchingRef.current = false;
             return; // 成功結束
         } catch (error) {
-            const elapsed = Math.round(performance.now() - startTime);
-            setLatency(elapsed);
             console.warn('❌ API Error:', error.message);
-
-            if (error.name === 'AbortError') {
-                setApiStatus('TIMEOUT');
-                setApiErrorDetail('Request took longer than 20s to resolve.');
-            } else if (!apiStatusRef.current || apiStatusRef.current === 'INIT') {
-                setApiStatus('ERROR');
-                setApiErrorDetail(error.message);
-            } else {
-                setApiErrorDetail(error.message);
-            }
             setApiStatusClass('stat-error');
 
             // 失敗後同樣釋放鎖
@@ -402,7 +390,7 @@ export function useFlightData(mapRef) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ...bbox, sessionId: sessionIdRef.current })
-        }).catch(() => {}); // Silent fail
+        }).catch(() => { }); // Silent fail
     }, []);
 
     // [Project AERO-SYNC] Initialize WebWorker for WebSocket Binary Stream

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { createPlaneSVG, getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath, getGreatCircleTrajectory, splitPathAtIDL, normalizeLongitude, predictPosition, getPlaneCanvasData, latLngToGlobalPixels } from '../utils/flightUtils';
+import { getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath, getGreatCircleTrajectory, splitPathAtIDL, normalizeLongitude, predictPosition, getPlaneCanvasData, latLngToGlobalPixels } from '../utils/flightUtils';
+import { getAircraftIconUrl } from '../utils/aircraftIcons';
+import { createAircraftMarker, updateAircraftMarker } from '../utils/markerFactory';
 import { trackStore } from '../store/FlightDataStore';
 import { dataManager } from '../services/dataManager';
 
@@ -88,6 +90,8 @@ export default function MapView({
     const canvasLayerRef = useRef(null);
     const cachedPathsRef = useRef(new Map()); // Cache Path2D objects
     const routeLineRef = useRef(null);
+    const airplaneLayerRef = useRef(null);
+    const airplaneMarkersRef = useRef(new Map()); // icao24 -> L.marker
     const predictiveLineRef = useRef(null);
     const animFrameRef = useRef(null);
     const lastDrawTimeRef = useRef(performance.now());
@@ -123,7 +127,7 @@ export default function MapView({
     useEffect(() => { onUsageUpdateRef.current = onUsageUpdate; }, [onUsageUpdate]);
     useEffect(() => { colorSchemeRef.current = colorScheme; }, [colorScheme]);
     useEffect(() => { filtersRef.current = filters; }, [filters]);
-    
+
     // ==========================================
     // 💧 軌跡自動注水 (Track Hydration Pipeline) [v4.2.1]
     // ==========================================
@@ -143,7 +147,7 @@ export default function MapView({
         // 注意：trackPoints 格式為 [time, lat, lng, altitude, heading, velocity]
         trackPoints.forEach(point => {
             const [time, lat, lng] = point;
-            
+
             // 投影轉換為繪圖引擎看得懂的全局像素座標
             const pixelPos = latLngToGlobalPixels(lat, lng, zoom);
 
@@ -265,6 +269,9 @@ export default function MapView({
         const cLayer = new PlaneCanvasLayer();
         map.addLayer(cLayer);
         canvasLayerRef.current = cLayer;
+
+        // [v4.5.0] 加入飛機標記圖層 (Imperative Layer)
+        airplaneLayerRef.current = L.layerGroup().addTo(map);
 
         // [AERO-SYNC] 權重化命中偵測 (Weighted Hit Detection)
         map.on('click', (e) => {
@@ -651,6 +658,53 @@ export default function MapView({
         [filters, bounds, selectedIcao24]
     );
 
+    // [v4.5.0] 飛機標記同步引擎 (Aircraft Marker Sync Engine)
+    useEffect(() => {
+        const map = mapRef.current;
+        if (!map || !airplaneLayerRef.current) return;
+
+        const currentPlanes = planesDict || {};
+        const markerMap = airplaneMarkersRef.current;
+        const layer = airplaneLayerRef.current;
+
+        // 1. 找出需要更新或新增的飛機
+        const visibleIds = new Set();
+        
+        Object.values(currentPlanes).forEach(plane => {
+            if (!shouldShowPlane(plane, 1.0)) return;
+            visibleIds.add(plane.icao24);
+
+            const mappedPlane = {
+                ...plane,
+                latitude: plane.renderLat || plane.lat,
+                longitude: plane.renderLng || plane.lng,
+                aircraft_type: plane.aircraftType || plane.typecode || ''
+            };
+
+            if (markerMap.has(plane.icao24)) {
+                // 更新既有標記
+                updateAircraftMarker(markerMap.get(plane.icao24), mappedPlane);
+            } else {
+                // 新增標記
+                const marker = createAircraftMarker(mappedPlane);
+                marker.on('click', (e) => {
+                    L.DomEvent.stopPropagation(e);
+                    onSelectPlane(plane.icao24, plane);
+                });
+                marker.addTo(layer);
+                markerMap.set(plane.icao24, marker);
+            }
+        });
+
+        // 2. 移除不再顯示的飛機
+        for (const [icao24, marker] of markerMap) {
+            if (!visibleIds.has(icao24)) {
+                layer.removeLayer(marker);
+                markerMap.delete(icao24);
+            }
+        }
+    }, [planesDict, filters, selectedIcao24, shouldShowPlane]);
+
     // [v2.8.0] Keep refs of mutable props for the persistent animation loop (avoids stale closures)
     const planesDictRef = useRef(planesDict);
     useEffect(() => { planesDictRef.current = planesDict; }, [planesDict]);
@@ -697,32 +751,17 @@ export default function MapView({
         const map = mapRef.current;
         if (!map) return;
 
-        // [v3.3] High Performance SVG Rasterization Cache
-        const getSVGImage = (cData) => {
-            const cacheKey = `${cData.pathData}_${cData.planeColor}_${cData.strokeColor}_${cData.strokeWidth}_${cData.scale}_${cData.size}`;
-            if (!cachedPathsRef.current.has(cacheKey)) {
+        // [v4.4.0] High Performance SVG Data URI Cache
+        const getSVGImage = (plane) => {
+            const url = getAircraftIconUrl(plane);
+            if (!cachedPathsRef.current.has(url)) {
                 const img = new Image();
-                // [v3.6] High-DPI physical scaling: Rasterize at device pixel ratio, draw at physical size
-                const dpr = window.devicePixelRatio || 1;
-                const physicalSize = cData.size;
-                const renderSize = physicalSize * dpr;
-
-                const svgStr = `
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${renderSize}" height="${renderSize}">
-                        <path fill="${cData.planeColor}" 
-                              stroke="${cData.strokeColor}" 
-                              stroke-width="${cData.strokeWidth}" 
-                              stroke-linejoin="round"
-                              d="${cData.pathData}" 
-                              transform="${cData.scale !== 1.0 ? `translate(12, 12) scale(${cData.scale}) translate(-12, -12)` : ''}" />
-                    </svg>
-                `;
-                const blob = new Blob([svgStr], { type: 'image/svg+xml' });
-                const url = URL.createObjectURL(blob);
                 img.src = url;
-                cachedPathsRef.current.set(cacheKey, { img, drawSize: physicalSize });
+                // [v3.6] High-DPI physical scaling
+                const size = plane.onGround ? 24 : Math.min(36, 24 + (plane.altitude !== 'N/A' && plane.altitude !== 'GROUND' ? plane.altitude / 500 : 0));
+                cachedPathsRef.current.set(url, { img, drawSize: size });
             }
-            return cachedPathsRef.current.get(cacheKey);
+            return cachedPathsRef.current.get(url);
         };
 
         // [v3.4] Airline Logo Cache for Canvas
@@ -928,36 +967,10 @@ export default function MapView({
                     if (ptX < -100 || ptX > canvas.width + 100 || ptY < -100 || ptY > canvas.height + 100) continue;
 
                     drawnCount++;
-                    const isSelected = plane.icao24 === currentSelected;
-                    const cData = getPlaneCanvasData(plane.altitude, isSelected, plane.onGround, plane.isEmergency, plane.category, colorSchemeRef.current);
-
-                    // [AERO-SYNC] 視覺訊號質量 (Signal Quality)
-                    // 對於資料較舊的飛機，降低透明度，讓使用者直覺分辨實時性
-                    const dataAge = (nowMs / 1000) - (plane.lastContact || (nowMs / 1000));
-                    let opacity = 1.0;
-                    if (dataAge > 60) opacity = 0.4;
-                    else if (dataAge > 30) opacity = 0.7;
-
-                    // [v4.2.0] Projected Path Removed for Minimalist Aesthetic
-                    // Only historical tracks (cyan) are now rendered.
-
-                    ctx.save();
-                    ctx.globalAlpha = opacity;
-                    ctx.translate(ptX, ptY);
-
-                    // Draw glow (Original aesthetic applies subtle glow to ALL planes)
-                    ctx.shadowColor = cData.planeColor;
-                    ctx.shadowBlur = isSelected ? 15 : (plane.onGround ? 2 : 6);
-
-                    ctx.rotate(plane.heading * Math.PI / 180);
-
-                    const { img, drawSize } = getSVGImage(cData);
-                    if (img.complete && img.naturalHeight !== 0) {
-                        const offset = drawSize / 2;
-                        ctx.drawImage(img, -offset, -offset, drawSize, drawSize);
-                    }
-
-                    ctx.restore();
+                    // [v4.5.0] Individual Marker Rendering (DOM-based for Hover Effects)
+                    // We skip drawing the plane icon here as it's handled by AircraftMarker component
+                    // But we still process stats and drawnCount for transparency
+                    drawnCount++;
 
                     // [v4.0.1] Label Strategy: Only show on explicit selection (User request)
                     // Added isEmergency as a safety fallback at high zoom levels
@@ -1078,5 +1091,26 @@ export default function MapView({
         return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
     }, []); // 永動機解耦 (Decoupled Loop Architecture)
 
-    return <div ref={mapContainerRef} className="map-container" />;
+    return (
+        <div ref={mapContainerRef} className="map-container">
+            {Object.values(planesDict).filter(p => shouldShowPlane(p, 1.0)).map(plane => {
+                // 適配資料結構：將內部的 lat/lng/aircraftType 映射至 AircraftMarker 期待的格式
+                const mappedPlane = {
+                    ...plane,
+                    latitude: plane.renderLat || plane.lat,
+                    longitude: plane.renderLng || plane.lng,
+                    aircraft_type: plane.aircraftType || plane.typecode || ''
+                };
+
+                return (
+                    <AircraftMarker
+                        key={plane.icao24}
+                        plane={mappedPlane}
+                        isSelected={plane.icao24 === selectedIcao24}
+                        onClick={(p) => onSelectPlane(p.icao24, p)}
+                    />
+                );
+            })}
+        </div>
+    );
 }

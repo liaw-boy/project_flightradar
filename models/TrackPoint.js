@@ -5,9 +5,15 @@ const mongoose = require('mongoose');
  * This collection will store high-frequency aircraft coordinate updates.
  */
 const trackPointSchema = new mongoose.Schema({
+    sessionId: {
+        type: String,
+        required: true,
+        index: true
+    },
     icao24: {
         type: String,
-        required: true
+        required: true,
+        index: true
     },
     timestamp: {
         type: Date,
@@ -32,12 +38,16 @@ const trackPointSchema = new mongoose.Schema({
     heading: {
         type: Number,
         default: 0
+    },
+    onGround: {
+        type: Boolean,
+        default: false
     }
 }, {
     // Time Series optimization (MongoDB 5.0+)
     timeseries: {
         timeField: 'timestamp',
-        metaField: 'icao24',
+        metaField: 'sessionId',
         granularity: 'seconds'
     }
 });

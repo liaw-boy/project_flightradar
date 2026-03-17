@@ -75,6 +75,6 @@ if exist "client\" (
 )
 
 :: [Step 5] Start Server
-echo [5/5] Starting Aerostrat Server (v4.2.1)...
+echo [5/5] Starting Aerostrat Server (v4.4.0)...
 echo ===========================================
 npm start

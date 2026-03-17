@@ -1,25 +1,25 @@
-# ✈️ AEROSTRAT 全球航空雷達系統 (Global Surveillance Radar) - v4.3.0 "Resolution Edition"
+# ✈️ AEROSTRAT 全球航空雷達系統 (Global Surveillance Radar) - v4.4.0 "AERO-DYNAMIC"
 
-這是一款專門為「極端數據吞吐量」與「大數據持久化」而生的專業級全球航空監控系統。基於 **React (Vite)**、**Node.js (Worker Threads)** 與 **MongoDB**，本系統不僅提供 60fps 的電影級視覺體驗，更具備完善的飛行軌跡紀錄功能。
+這是一款專門為「極端數據吞吐量」與「大數據持久化」而生的專業級全球航空監控系統。基於 **React (Vite)**、**Node.js (Worker Threads)** 與 **MongoDB**，本系統不僅提供 60fps 的電影級視覺體驗，更具備完善的飛行紀錄與動態機型渲染功能。
 
 ---
 
 ## 🌟 核心突破架構 (Core Innovations)
 
-### 🗄️ 1. MongoDB 深度持久化架構 (Omni-Persistence)
-本系統已全面捨棄傳統 JSON 檔案存儲，轉而採用高效能的 **MongoDB** 驅動：
-*   **全時自動歷史紀錄**：當伺服器運作時，會自動每隔數十秒抓取全球 5,000+ 架飛機的座標，並透過 **Time-Series (時序資料庫)** 模式存入數據庫。
-*   **毫秒級軌跡查詢**：藉由索引優化，系統能瞬間從數十萬筆紀錄中精確撈出特定飛機的飛行路徑。
-*   **智慧自動清理 (TTL)**：資料庫內建生存週期管理，自動清理逾期的歷史座標，保證系統能 24/7 長期運作而不塞滿硬碟。
+### 🎨 1. AERO-DYNAMIC SVG 渲染引擎 (Next-Gen Visuals)
+本系統實作了業界領先的「SVG Data URI 轉譯引擎」，徹底擺脫單一圖示限制：
+*   **動態機型識別**：根據真實 `typecode` (如 A388, B77W, H25B) 自動切換 5 種高精度輪廓（窄體客機、廣體客機、巨無霸、輕型機、直升機）。
+*   **戰術發光特效 (Neon Glow)**：內建 SVG Filter 發光濾鏡與高對比戰術配色，在任何縮放層級均能保持極致視覺清晰度。
+*   **Zero-GC 渲染優化**：透過 Image Bitmap 快取與 Data URI 預編碼，確保在萬架飛機同時渲染時依然維持 60 FPS 平穩幀率。
 
-### 🚀 2. AERO-SYNC 原生 Canvas 渲染引擎 (Ultra-High-Performance)
-*   **萬架飛機同框流暢**：全面改採硬體加速的 HTML5 Canvas 底層繪圖，支援網頁同時流暢顯示 10,000+ 飛行器。
-*   **高解析度視網膜支援 (High-DPI)**：在 4K 螢幕上提供極致銳利的飛機圖示與高清航空公司徽標。
-*   **FR24 風格還原**：完美重現 FlightRadar24 經典的發光立體折射、機型按比例縮放（如 A380 vs 小型 Cessna）。
+### ⚡ 2. 背景情報預縫合架構 (Pre-Stitched Metadata)
+為了追求毫秒級的響應速度，系統將「情報融合」壓力從讀取端移至背景寫入端：
+*   **毫秒級 BBox API**：`/api/planes/bbox` 現在僅執行經緯度範圍過濾，回應時間低於 5ms，實現無感地圖拖拽。
+*   **背景自動縫合**：每 30 秒自動從 MongoDB 撈取全球航機 Metadata (機型、公司) 並直接縫合至記憶體快取，確保數據即時性 100%。
 
-### 🔐 3. 多帳號智慧調度系統 (Multi-Account API Scheduler)
-*   **自動額度輪詢**：內建多組 OpenSky 帳號輪流調度算法，當一組帳號達到查詢限制時，系統會智慧切換至下一個可用帳號，保證連線不中斷。
-*   **即時配額儀表板**：在 UI 上方可即時監控各帳號的剩餘點數與倒數計時。
+### 🗄️ 3. MongoDB 深度持久化架構 (Omni-Persistence)
+*   **全時自動歷史紀錄**：自動每隔數十秒抓取全球 5,000+ 架飛機座標，並以 Time-Series 模式持久化。
+*   **智慧自動清理 (TTL)**：資料庫內建生存週期管理，自動清理 48 小時前的歷史資料。
 
 ---
 
@@ -27,50 +27,35 @@
 
 ```text
 project_flightradar/
-├── server.js               # 核心中樞：資料庫管理、API 調度、軌跡過濾演算
-├── socketEngine.js         # WebSocket 引擎：Delta 編碼推送萬筆座標至前端
-├── start.bat / stop.bat    # 專用啟動腳本：自動檢查環境、資料庫狀態與依賴
-├── .env                    # 機密配置：API 帳號與 MongoDB 連線網址
-├── models/
-│   ├── Aircraft.js         # 飛機數據模型 (機型、所屬公司)
-│   ├── TrackPoint.js       # 軌跡時序模型 (座標、高度、速度)
-│   └── Route.js            # 航線數據模型 (啟程、目的地)
+├── server.js               # 核心中樞：背景情報融合、API 調度、超高速 BBox 過濾
+├── socketEngine.js         # WebSocket 引擎：即時推送萬筆座標與遙測數據
+├── start.bat / stop.bat    # 專用啟動腳本：自動檢查環境、資料庫狀態與自動化 Build
 ├── client/src/
-│   ├── App.jsx             # React UI 核心佈局
 │   ├── components/
-│   │   ├── MapView.jsx     # AERO-SYNC Canvas 繪圖引擎
-│   │   └── Sidebar.jsx     # 飛機詳細規格與高度剖面圖
+│   │   ├── MapView.jsx     # AERO-DYNAMIC Canvas 繪圖引擎 (SVG Data URI 驅動)
+│   │   └── Sidebar.jsx     # 飛行情報、機型細節與高度剖面圖
+│   └── utils/
+│       ├── aircraftIcons.js # SVG Data URI 指令集與轉譯引擎
+│       └── flightUtils.js  # 航電計算、投影演算與垂直速率格式化
 ```
 
 ---
 
 ## ⚙️ 快速啟動 (Quick Start)
 
-本專案支援 **一鍵式啟動**，會自動幫你檢查 Node.js 環境與資料庫狀態。
+本專案支援 **一鍵式啟動**，會自動幫你檢查 Node.js 環境、資料庫狀態並完成 Build。
 
 1.  **安裝與啟動**：
-    直接雙擊執行目錄下的 `start.bat`。它會：
-    *   檢查是否有安裝 Node.js 與 npm。
-    *   確認 MongoDB 服務是否已啟動。
-    *   自動安裝所有專案依賴。
-    *   啟動前端編譯與後端伺服器。
+    直接執行 `start.bat`。它將自動完成依賴安裝、MongoDB 啟測與前端編譯。
 
 2.  **前端網址**：`http://localhost:3000`
 
 ---
 
-## 🛠️ 配置說明 (.env)
-
-在專案根目錄的 `.env` 文件中，你可以配置：
-*   `MONGODB_URI`: 你的本地或是雲端 MongoDB 連線網址。
-*   `OPENSKY_USER / PASS`: OpenSky 帳號資訊（可配置多組，如 `USER2`, `PASS2` 等）。
-
----
-
 ## 📦 維護與最佳化
-*   **資料清理**：軌跡資料庫設有 TTL 索引，預設自動保留 48 小時。
-*   **生產環境整合**：前端編譯檔案已整合至 `public-react` 目錄，後端 Node.js 會自動代管靜態資源。
+*   **數據即時性**：預設由 OpenSky 驅動，結合後台 Metadata 資料庫進行動態補全。
+*   **效能監控**：伺服器啟動日誌會顯示 BBox API 的回應延遲與背景縫合成功率。
 
 ---
 
-**✈️ Aerostrat - 全球飛安監控的極致方案。**
+**✈️ Aerostrat - 全球飛安監控與大數據融合的極致方案。**

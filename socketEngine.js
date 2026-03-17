@@ -160,7 +160,8 @@ function broadcastTelemetry(stats, nextFetchIn) {
         nextFetchIn: nextFetchIn,
         accounts: stats.accounts.map(acc => ({
             user: acc.user,
-            remaining: acc.remainingCredits,
+            remainingCredits: acc.remainingCredits, // [v4.3.6] Sync with Dashboard.jsx
+            unlockTime: acc.unlockTime, // [v4.3.6] Restore cooldown timer display
             limited: acc.unlockTime && new Date(acc.unlockTime).getTime() > Date.now()
         }))
     });

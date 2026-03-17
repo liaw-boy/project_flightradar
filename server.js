@@ -15,6 +15,16 @@ const Route = require('./models/Route'); // [Phase 15] Route Schema
 const TrackPoint = require('./models/TrackPoint'); // [Time Series] Historical Tracks
 const Aircraft = require('./models/Aircraft'); // [Cache Migration]
 const Metar = require('./models/Metar'); // [Cache Migration]
+const FlightSession = require('./models/FlightSession'); // [Flight Sessions]
+const Airport = require('./models/Airport'); // [GIS Modernization]
+
+// ==========================================
+// [v4.4.0] Logging Helper with Tactical Timestamps
+// ==========================================
+function getTime() {
+    return `[${new Date().toLocaleTimeString('en-US', { hour12: false })}]`;
+}
+
 
 // ==========================================
 // [Phase 15] MongoDB Connection (Local Only)
@@ -25,7 +35,10 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerost
 mongoose.connect(MONGODB_URI, {
     serverSelectionTimeoutMS: 5000,
     connectTimeoutMS: 10000,
-}).then(() => console.log('🍃 [DATABASE] Connected to Local MongoDB'))
+}).then(() => {
+    console.log(`${getTime()} 🍃 [DATABASE] Connected to Local MongoDB`);
+    restoreActiveSessions();
+})
   .catch(err => console.error('❌ [DATABASE] Connection error:', err));
 
 mongoose.connection.on('error', err => {
@@ -128,7 +141,7 @@ function logMissingData(icao24, type, callsign = null) {
         missingDataLog[key].missing.push(type);
         missingDataLog[key].lastAttempt = new Date().toISOString();
         saveMissingDataLog();
-        console.log(`📝 [MISSING LOG] Recorded ${type} for ${icao24}`);
+        console.log(`${getTime()} 📝 [MISSING LOG] Recorded ${type} for ${icao24}`);
     }
 }
 
@@ -154,6 +167,49 @@ app.get('/api/admin/missing-data', (req, res) => {
 // 快取系統
 // ==========================================
 const cache = new Map();
+const activeSessions = new Map(); // [Flight Sessions] icao24 -> { sessionId, callsign, lastSeen, onGround }
+
+// ==========================================
+// [SESSION HYDRATION] 伺服器重啟時的智慧記憶恢復
+// ==========================================
+async function restoreActiveSessions() {
+    try {
+        const activeSessionsInDb = await FlightSession.find({ status: 'ACTIVE' }).lean();
+        let restoredCount = 0;
+        let closedCount = 0;
+        const now = Date.now();
+        const STALE_THRESHOLD = 60 * 60 * 1000; // 嚴格定義：1 小時內沒更新的航班，視為已結束
+
+        for (const session of activeSessionsInDb) {
+            // 找出這個航班在資料庫裡「最後一筆」軌跡點
+            const lastPoint = await TrackPoint.findOne({ sessionId: session.sessionId })
+                                              .sort({ timestamp: -1 })
+                                              .lean();
+
+            // 如果有軌跡，且最後一次更新是在 1 小時以內，代表它「現在」還在飛
+            if (lastPoint && (now - lastPoint.timestamp.getTime() < STALE_THRESHOLD)) {
+                activeSessions.set(session.icao24, {
+                    sessionId: session.sessionId,
+                    callsign: session.callsign || 'N/A',
+                    lastSeen: lastPoint.timestamp.getTime(), // 精準使用真實的最後看見時間
+                    onGround: !!lastPoint.onGround
+                });
+                restoredCount++;
+            } else {
+                // 幽靈航班：伺服器關機太久，這趟飛行早就結束了。強制標記為 COMPLETED。
+                const endTime = lastPoint ? lastPoint.timestamp : new Date();
+                await FlightSession.updateOne(
+                    { sessionId: session.sessionId }, 
+                    { status: 'COMPLETED', endTime: endTime }
+                );
+                closedCount++;
+            }
+        }
+        console.log(`\x1b[32m✅ [SESSION] 系統重啟：成功恢復 ${restoredCount} 架現役航班，並強制結案 ${closedCount} 架逾期航班。\x1b[0m`);
+    } catch (e) {
+        console.error(`❌ [SESSION] 記憶恢復失敗:`, e.message);
+    }
+}
 const CACHE_TTL = 30000; // 30 秒快取 (配合前端 30s 輪詢)
 
 function getCached(key) {
@@ -369,7 +425,7 @@ app.get('/api/events', (req, res) => {
 
     // 登錄這個客戶端
     sseClients.add(res);
-    console.log(`📡 [SSE] Client connected. Total: ${sseClients.size}`);
+    console.log(`${getTime()} 📡 [SSE] Client connected. Total: ${sseClients.size}`);
 
     // 立即發送当前資料快照
     res.write(`data: ${JSON.stringify({ type: 'connected', time: globalPlanesCache.time, count: globalPlanesCache.states.length })}\n\n`);
@@ -400,18 +456,6 @@ function broadcastSSE(data) {
 // 每次 globalPlanesCache 更新後這行，偵測危險狀態後用 SSE 廣播
 // ==========================================
 const _prevStates = new Map(); // icao24 -> prev state for diff
-
-   // [AERO-SYNC v4.3.0] Active Viewports Registry
-const activeViewports = new Map(); // Store viewport heartbeats { sessionId -> { bbox, lastSeen } }
-const VIEWPORT_TTL = 60000; // 60s inactivity auto-clear
-
-function cleanExpiredViewports() {
-    const now = Date.now();
-    for (const [sid, vp] of activeViewports.entries()) {
-        if (now - vp.lastSeen > VIEWPORT_TTL) activeViewports.delete(sid);
-    }
-}
-setInterval(cleanExpiredViewports, 10000);
 
 // 機場快取
 const airportListCache = [];
@@ -573,7 +617,7 @@ function buildAirportGrid() {
 /**
  * [v2.8.4] 使用空間格狀索引尋找最近的機場 (O(k) 取代 O(n))
  */
-function findNearestAirport(lat, lng, maxDist = 8) {
+function findNearestAirport(lat, lng, maxDist = 15) {
     let nearestAp = null;
     let minDist = maxDist;
 
@@ -597,10 +641,6 @@ function findNearestAirport(lat, lng, maxDist = 8) {
     }
     return nearestAp;
 }
-
-// [Project AERO-SYNC] Viewport-Driven Adaptive Fetcher
-const bboxActiveRequests = new Map();
-const bboxFetchHistory = new Map();
 
 /**
  * 核心：向 OpenSky 發起請求的新型通用函數
@@ -657,73 +697,84 @@ async function ingestTrackPoints(states, timeUnix) {
     }
 
     const timestamp = new Date(timeUnix * 1000);
-    const trackPoints = states
-        .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number') // Second-layer safety
-        .map(p => ({
-            icao24: p.icao24.toLowerCase(), // Force casing consistency
+    const now = Date.now();
+    const batchTrackPoints = [];
+
+    for (const p of states) {
+        if (typeof p.lat !== 'number' || typeof p.lng !== 'number') continue;
+        
+        const icao24 = p.icao24.toLowerCase();
+        const callsign = (p.callsign || 'N/A').toUpperCase().trim();
+        const onGround = !!p.onGround;
+
+        // [SESSION STATE MACHINE]
+        let session = activeSessions.get(icao24);
+        let needsNewSession = false;
+
+        if (!session) {
+            needsNewSession = true;
+        } else if (session.callsign !== callsign && callsign !== 'N/A') {
+            needsNewSession = true;
+        } else if (!session.onGround && onGround) {
+            session.onGround = true;
+            session.lastSeen = now;
+        } else if (session.onGround && !onGround) {
+            needsNewSession = true;
+        }
+
+        if (session && (now - session.lastSeen > 3600000)) {
+            needsNewSession = true;
+        }
+
+        if (needsNewSession) {
+            if (session) {
+                FlightSession.updateOne({ sessionId: session.sessionId }, { status: 'COMPLETED', endTime: new Date() }).catch(() => {});
+            }
+
+            const newSessionId = `${icao24}_${Date.now()}`;
+            session = { sessionId: newSessionId, callsign, lastSeen: now, onGround };
+            activeSessions.set(icao24, session);
+
+            const newSession = new FlightSession({
+                sessionId: newSessionId,
+                icao24,
+                callsign: callsign !== 'N/A' ? callsign : null,
+                startTime: timestamp,
+                status: 'ACTIVE'
+            });
+            newSession.save().catch(e => console.error(`❌ [SESSION DB] Save error:`, e.message));
+        } else if (session) {
+            session.lastSeen = now;
+            session.onGround = onGround;
+            if (session.callsign === 'N/A' && callsign !== 'N/A') {
+                session.callsign = callsign;
+                FlightSession.updateOne({ sessionId: session.sessionId }, { callsign }).catch(() => {});
+            }
+        }
+
+        batchTrackPoints.push({
+            sessionId: session.sessionId,
+            icao24,
             timestamp,
             lat: p.lat,
             lng: p.lng,
             altitude: (typeof p.altitude === 'number') ? p.altitude : 0,
             velocity: p.velocity || 0,
-            heading: p.heading || 0
-        }));
+            heading: p.heading || 0,
+            onGround: onGround
+        });
+    }
 
-    if (trackPoints.length === 0) return;
+    if (batchTrackPoints.length === 0) return;
 
     try {
-        await TrackPoint.insertMany(trackPoints, { ordered: false });
+        await TrackPoint.insertMany(batchTrackPoints, { ordered: false });
     } catch (err) {
-        // Bulk write errors are expected (e.g. duplicate keys in same snapshot time)
         if (err.name !== 'MongoBulkWriteError' && err.name !== 'MongoServerError') {
             console.error('❌ [DATABASE] Ingestion error:', err.message);
         }
     }
 }
-
-/**
- * [V3.0] 視角驅動自適應抓取迴圈
- */
-async function runAdaptiveViewportPolling() {
-    const viewports = Array.from(activeViewports.values()).map(v => v.bbox);
-    if (viewports.length === 0) return;
-
-    for (const v of viewports) {
-        // 1. 生成聚合 Key (四捨五入至小數點後 1 位，增加命中率)
-        const key = `${v.lamin.toFixed(1)}_${v.lomin.toFixed(1)}_${v.lamax.toFixed(1)}_${v.lomax.toFixed(1)}`;
-
-        // 2. 決定採樣頻率 (面積小於 10 單位視為「區域」，給予 10s 更新)
-        const area = Math.abs(v.lamax - v.lamin) * Math.abs(v.lomax - v.lomin);
-        const interval = area < 20 ? 10000 : 60000;
-
-        const lastFetch = bboxFetchHistory.get(key) || 0;
-        if (Date.now() - lastFetch < interval) continue;
-        if (bboxActiveRequests.has(key)) continue;
-
-        // 3. 請求聚合
-        const p = (async () => {
-            try {
-                const data = await fetchOpenSky(v);
-                bboxFetchHistory.set(key, Date.now());
-                broadcastPlanes(data.states, data.time); // 立即推播 delta
-                ingestTrackPoints(data.states, data.time); // [Audit Fix] Ingest high-res adaptive data
-                console.log(`🎯 [ADAPTIVE] Portions for ${key} updated. Area: ${area.toFixed(2)}`);
-            } catch (e) {
-                // console.warn(`[ADAPTIVE] Skip ${key}: ${e.message}`);
-            } finally {
-                bboxActiveRequests.delete(key);
-            }
-        })();
-        bboxActiveRequests.set(key, p);
-    }
-
-    // [v4.3.5] Broadcast adaptive telemetry estimate
-    const nextIn = Math.max(0, Math.ceil((lastGlobalFetchTime + 60000 - Date.now()) / 1000));
-    broadcastTelemetry(apiStats, nextIn);
-}
-
-// 保持每 5 秒檢查一次是否有視角需要更新 (實際抓取受分段計時器控制)
-setInterval(runAdaptiveViewportPolling, 5000);
 
 // 改寫原本的 fetchGlobalPlanes 為 fetchOpenSky 的封裝
 async function fetchGlobalPlanes() {
@@ -734,18 +785,42 @@ async function fetchGlobalPlanes() {
     
     try {
         const data = await fetchOpenSky();
-        const latency = Math.round(performance.now() - start);
+        const fetchLatency = Math.round(performance.now() - start);
         
-        globalPlanesCache = { states: data.states, time: data.time };
-        broadcastPlanes(data.states, data.time);
+        let enrichedStates = data.states;
+        let enrichedCount = 0;
+
+        // [Architecture Upgrade] Background Pre-Stitching Metadata
+        try {
+            const icaoList = data.states.map(p => p.icao24.toLowerCase());
+            // Use .lean() for maximum performance and minimum memory footprint
+            const metadata = await Aircraft.find({ icao24: { $in: icaoList } }, { icao24: 1, typecode: 1, model: 1 }).lean();
+            
+            const metaMap = new Map(metadata.map(m => [m.icao24, m.typecode || m.model || '']));
+            
+            enrichedStates = data.states.map(p => {
+                const typecode = metaMap.get(p.icao24.toLowerCase());
+                if (typecode) enrichedCount++;
+                return { ...p, typecode: typecode || null };
+            });
+        } catch (dbErr) {
+            console.warn(`${getTime()} ⚠️ [METADATA PRE-STITCH] DB Lookup failed: ${dbErr.message}. Proceding with basic data.`);
+        }
+
+        const totalLatency = Math.round(performance.now() - start);
+        
+        globalPlanesCache = { states: enrichedStates, time: data.time, stale: false };
+        broadcastPlanes(enrichedStates, data.time);
         lastGlobalFetchTime = Date.now();
         
-        console.log(`\x1b[32m🌏 [GLOBAL] Baseline updated | Latency: ${latency}ms | Planes: ${data.states.length} | Acc: #${currentAccountIndex + 1} (${acc.user})\x1b[0m`);
+        console.log(`${getTime()} \x1b[32m🌏 [GLOBAL] Baseline updated | Latency: ${totalLatency}ms (Fetch: ${fetchLatency}ms) | Planes: ${data.states.length} (Enriched: ${enrichedCount}) | Acc: #${currentAccountIndex + 1} (${acc.user})\x1b[0m`);
     } catch (e) {
         if (e.message.includes('429') || e.message.includes('timeout')) {
-            console.warn(`\x1b[33m⚠️ [GLOBAL WARN] ${e.message}\x1b[0m`);
+            console.warn(`${getTime()} \x1b[33m⚠️ [GLOBAL WARN] ${e.message}. Freezing cache until next window.\x1b[0m`);
+            globalPlanesCache.stale = true;
         } else {
-            console.error(`\x1b[31m❌ [GLOBAL ERROR] ${e.message}\x1b[0m`);
+            console.error(`${getTime()} \x1b[31m❌ [GLOBAL ERROR] ${e.message}\x1b[0m`);
+            globalPlanesCache.stale = true;
         }
     } finally {
         isFetchingGlobal = false;
@@ -758,98 +833,8 @@ async function fetchGlobalPlanes() {
     ingestTrackPoints(globalPlanesCache.states, globalPlanesCache.time);
 }
 
-// [v4.3.0] ADSB.fi Engine B: Viewport Sniper
-async function fetchAdsbFiViewports() {
-    if (activeViewports.size === 0) return;
-
-    // 1. 去重並獲取所有不重複的視角中心點與半徑
-    const baselineIcaos = new Set(globalPlanesCache.states.map(s => s[0]));
-
-    for (const [sid, vp] of activeViewports.entries()) {
-        const start = performance.now();
-        let targetSource = 'adsb.fi';
-        let hiddenCount = 0;
-        let capturedCount = 0;
-
-        try {
-            const { lamin, lomin, lamax, lomax } = vp.bbox;
-            const centerLat = (lamin + lamax) / 2;
-            const centerLon = (lomin + lomax) / 2;
-            
-            const latDist = (lamax - lamin) * 30;
-            const lonDist = (lomax - lomin) * 30 * Math.cos(centerLat * Math.PI / 180);
-            const radius = Math.min(250, Math.ceil(Math.sqrt(latDist*latDist + lonDist*lonDist)));
-
-            const primaryUrl = `https://api.adsb.fi/v2/lat/${centerLat.toFixed(4)}/lon/${centerLon.toFixed(4)}/dist/${radius}`;
-            const fallbackUrl = `https://api.adsb.one/v2/lat/${centerLat.toFixed(4)}/lon/${centerLon.toFixed(4)}/dist/${radius}`;
-            const headers = { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AEROSTRAT/2.0',
-                'Accept': 'application/json'
-            };
-
-            let response;
-            try {
-                response = await fetch(primaryUrl, { headers, signal: AbortSignal.timeout(8000) });
-                if (!response.ok) throw new Error('Primary failed');
-            } catch (e) {
-                console.log('\x1b[33m⚠️ [SNIPER FALLBACK] Switch to adsb.one\x1b[0m');
-                targetSource = 'adsb.one';
-                try {
-                    response = await fetch(fallbackUrl, { headers, signal: AbortSignal.timeout(8000) });
-                    if (!response.ok) continue;
-                } catch (e2) {
-                    continue;
-                }
-            }
-
-            const data = await response.json();
-            if (!data.aircraft || !Array.isArray(data.aircraft)) continue;
-
-            capturedCount = data.aircraft.length;
-
-            data.aircraft.forEach(ac => {
-                if (!ac.hex) return;
-                const icao24 = ac.hex.toLowerCase();
-                
-                if (!baselineIcaos.has(icao24)) hiddenCount++;
-
-                const baroAltMeters = ac.alt_baro === 'ground' ? 0 : (ac.alt_baro ? ac.alt_baro * 0.3048 : null);
-                const geoAltMeters = ac.alt_geom ? ac.alt_geom * 0.3048 : null;
-                const velocityMs = ac.gs ? ac.gs * 0.514444 : null;
-                const vRateMs = ac.baro_rate ? ac.baro_rate * 0.00508 : null;
-
-                const osArray = [
-                    icao24, (ac.flight || '').trim() || null, 'ADSB.fi Sniper',
-                    Math.floor(Date.now() / 1000), ac.seen || Math.floor(Date.now()/1000),
-                    ac.lon, ac.lat, geoAltMeters, ac.alt_baro === 'ground',
-                    velocityMs, ac.track, vRateMs, null, baroAltMeters,
-                    ac.squawk || null, !!ac.spi, ac.type === 'adsb_icao' ? 0 : 2
-                ];
-
-                const existingIdx = globalPlanesCache.states.findIndex(s => s[0] === icao24);
-                if (existingIdx !== -1) {
-                    globalPlanesCache.states[existingIdx] = osArray;
-                } else {
-                    globalPlanesCache.states.push(osArray);
-                }
-            });
-
-            const latency = Math.round(performance.now() - start);
-            console.log(`\x1b[36m🎯 [SNIPER] Source: ${targetSource} | Latency: ${latency}ms | Captured: ${capturedCount} planes (+${hiddenCount} Hidden)\x1b[0m`);
-
-        } catch (err) {
-            // [v4.3.1] Silent failure
-        }
-    }
-
-    // 更新快取時間戳
-    globalPlanesCache.time = Math.floor(Date.now() / 1000);
-}
-
 // 啟動 30 秒全球資料輪詢機制 (配合 CACHE_TTL=30s)
 setInterval(fetchGlobalPlanes, 30000);
-// [v4.3.0] 啟動 10 秒視角精準狙擊
-setInterval(fetchAdsbFiViewports, 10000);
 // 啟動時讀取快取並初始化
 const isFreshQuota = loadQuotaCache();
 initializeAccountQuotas(isFreshQuota);
@@ -858,7 +843,7 @@ initializeAccountQuotas(isFreshQuota);
  * 啟動預熱：若帳號沒有額度紀錄，或跨日更新，先各戳一次 API 建立狀態
  */
 async function initializeAccountQuotas(isFreshQuota) {
-    console.log(`🌐 [QUOTA] Initializing quotas for ${ACCOUNTS.length} accounts...`);
+    console.log(`${getTime()} 🌐 [QUOTA] Initializing quotas for ${ACCOUNTS.length} accounts...`);
     for (let i = 0; i < ACCOUNTS.length; i++) {
         const acc = apiStats.accounts[i];
         // 如果本地已經有今日的額度紀錄，就不再額外請求
@@ -868,7 +853,7 @@ async function initializeAccountQuotas(isFreshQuota) {
         }
 
         try {
-            console.log(`🌐 [QUOTA] Warming up account #${i + 1} (${acc.user})...`);
+            console.log(`${getTime()} 🌐 [QUOTA] Warming up account #${i + 1} (${acc.user})...`);
             // 切換暫時索引來發送請求
             const savedIndex = currentAccountIndex;
             currentAccountIndex = i;
@@ -894,54 +879,33 @@ async function initializeAccountQuotas(isFreshQuota) {
     fetchGlobalPlanes();
 }
 
-// ==========================================
-// V2.0.0 BBox Slicer API
-// ==========================================
-app.get('/api/planes/bbox', (req, res) => {
-    let { lamin, lomin, lamax, lomax } = req.query;
-
+// [Surgical Patch] 極簡化 BBox 路由：整合 MongoDB 飛機情報融合
+app.get('/api/planes/bbox', async (req, res) => {
+    const { lamin, lomin, lamax, lomax } = req.query;
+    
     if (!lamin || !lomin || !lamax || !lomax) {
-        return res.status(400).json({ error: "Missing BBox parameters" });
+        return res.status(400).json({ error: 'Missing bounding box parameters' });
     }
 
-    let minLat = parseFloat(lamin);
-    let minLng = parseFloat(lomin);
-    let maxLat = parseFloat(lamax);
-    let maxLng = parseFloat(lomax);
+    const minLat = parseFloat(lamin);
+    const minLng = parseFloat(lomin);
+    const maxLat = parseFloat(lamax);
+    const maxLng = parseFloat(lomax);
 
-    // 實作 10% Buffer Zone
-    const latDiff = maxLat - minLat;
-    const lonDiff = maxLng - minLng;
-
-    const bufLamin = minLat - (latDiff * 0.1);
-    const bufLamax = maxLat + (latDiff * 0.1);
-    const bufLomin = minLng - (lonDiff * 0.1);
-    const bufLomax = maxLng + (lonDiff * 0.1);
-
-    // Helper to check if a longitude (-180 to +180) is within the unnormalized BBox [bufLomin, bufLomax]
-    const isLngInBounds = (lng, min, max) => {
-        if (max - min >= 360) return true; // Box covers whole world
-        const center = (min + max) / 2;
-        let pLng = lng;
-        while (pLng < center - 180) pLng += 360;
-        while (pLng > center + 180) pLng -= 360;
-        return pLng >= min && pLng <= max;
-    };
-
-    // globalPlanesCache.states is an array of pre-parsed objects from workers/parser.js
-    const filteredStates = globalPlanesCache.states.filter(p => {
-        if (p.lat === null || p.lng === null || p.lat === undefined || p.lng === undefined) return false;
-        if (p.lat < bufLamin || p.lat > bufLamax) return false;
-        return isLngInBounds(p.lng, bufLomin, bufLomax);
+    // [v4.4.0 Optimization] Ultra-fast minimalist filter
+    // Enrichment is now handled in the background (fetchGlobalPlanes)
+    const planesInBBox = (globalPlanesCache.states || []).filter(p => {
+        return p.lat >= minLat && p.lat <= maxLat && 
+               p.lng >= minLng && p.lng <= maxLng;
     });
 
     res.json({
         time: globalPlanesCache.time,
-        globalLastUpdate: globalPlanesCache.time, // 用於前端判斷資料是否真正過時
-        states: filteredStates,
-        totalGlobal: globalPlanesCache.states.length,
-        stats: apiStats,
-        recommendedInterval: calculateRecommendedInterval()
+        globalLastUpdate: globalPlanesCache.time,
+        states: planesInBBox,
+        source: 'global_cache_prestitched',
+        stale: !!globalPlanesCache.stale,
+        stats: apiStats // [v4.3.6] Restore API stats for HUD synchronization
     });
 });
 
@@ -956,7 +920,7 @@ let aircraftStaticDB = {};
 try {
     if (fs.existsSync(AIRCRAFT_STATIC_FILE)) {
         aircraftStaticDB = JSON.parse(fs.readFileSync(AIRCRAFT_STATIC_FILE, 'utf8'));
-        console.log(`📂 [METADATA STATIC] Loaded ${Object.keys(aircraftStaticDB).length} aircraft from static DB`);
+        console.log(`${getTime()} 📂 [METADATA STATIC] Loaded ${Object.keys(aircraftStaticDB).length} aircraft from static DB`);
     }
 } catch (e) {
     console.warn('⚠️ Failed to load static metadata:', e.message);
@@ -1024,7 +988,7 @@ app.get('/api/metadata/:icao24', async (req, res) => {
         // 存入 MongoDB
         await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true });
         resolveMissingData(icao24, 'metadata');
-        console.log(`📦 [METADATA] Cached to DB: ${icao24} = ${metadata.typecode} ${metadata.model}`);
+        console.log(`${getTime()} 📦 [METADATA] Cached to DB: ${icao24} = ${metadata.typecode} ${metadata.model}`);
 
         res.json(metadata);
     } catch (error) {
@@ -1117,7 +1081,7 @@ app.post('/api/metadata/batch', async function (req, res) {
             }
         }
 
-        console.log(`📦 [BATCH] Fetched ${fetched}/${toFetch.length} metadata to MongoDB`);
+        console.log(`${getTime()} 📦 [BATCH] Fetched ${fetched}/${toFetch.length} metadata to MongoDB`);
         res.json({ fetched: fetched, requested: toFetch.length });
     } catch (err) {
         console.error('❌ [BATCH ERROR]', err.message);
@@ -1163,15 +1127,31 @@ function loadGlobalData() {
 let _cachedAirportList = null;
 let _cachedAirportListETag = '';
 
-function buildAirportListCache() {
-    _cachedAirportList = Object.entries(globalAirportsDB)
-        .filter(([key, ap]) => {
-            if (ap.icao) return key === ap.icao;
-            return key === ap.iata;
-        })
-        .map(([key, ap]) => ap);
-    _cachedAirportListETag = `"${_cachedAirportList.length}-${Date.now()}"`;
-    console.log(`✅ [OPT] Airport list cache built: ${_cachedAirportList.length} airports.`);
+async function buildAirportListCache() {
+    try {
+        // [Surgical Patch] GIS 快取升級：捨棄舊的 JSON，改由 MongoDB 撈取
+        const airports = await Airport.find({}, { icao: 1, iata: 1, name: 1, city: 1, country: 1, location: 1 }).lean();
+        
+        if (airports.length === 0) {
+            console.warn('⚠️ [GIS] MongoDB airports collection is empty! Map markers might be missing.');
+        }
+
+        _cachedAirportList = airports.map(a => ({
+            icao: a.icao,
+            iata: a.iata,
+            name: a.name,
+            city: a.city,
+            country: a.country,
+            lat: a.location ? a.location.coordinates[1] : null,
+            lng: a.location ? a.location.coordinates[0] : null
+        }));
+        
+        // 保留 W/ 前綴與生成邏輯
+        _cachedAirportListETag = 'W/"' + _cachedAirportList.length + '-' + Date.now() + '"';
+        console.log(`✅ [GIS] Airport cache built from MongoDB: ${_cachedAirportList.length} airports.`);
+    } catch (e) {
+        console.error('❌ [GIS] Failed to build airport cache:', e.message);
+    }
 }
 
 loadGlobalData();
@@ -1215,8 +1195,8 @@ const ROUTE_CACHE_TTL = 1800000; // 30 分鐘
 
 // 快取變數與函式已在上方 loadGlobalData() 前方訝明
 
-app.get('/api/airports/list', (req, res) => {
-    if (!_cachedAirportList) buildAirportListCache();
+app.get('/api/airports/list', async (req, res) => {
+    if (!_cachedAirportList) await buildAirportListCache();
     // ETag 瀏覽器快取：若資料未變，回傳 304 Not Modified 節省頻寬
     if (req.headers['if-none-match'] === _cachedAirportListETag) {
         return res.status(304).end();
@@ -1344,7 +1324,8 @@ app.get('/api/route/:icao24', async (req, res) => {
             const startLng = startPoint[2];
 
             // [OPT 1.2] 使用空間索引 O(k) 取代 O(n) 全量搜尋 (~1000x 加速)
-            const nearestAp = findNearestAirport(startLat, startLng, 10);
+            // [v4.4.0] 擴大半徑至 20km，覆蓋更大範圍的離場活動
+            const nearestAp = findNearestAirport(startLat, startLng, 20);
 
             if (nearestAp) {
                 console.log(`✅ [SPATIAL] Inferred Departure: ${nearestAp.icao} (${nearestAp.name}) for ${cleanCallsign}`);
@@ -1488,17 +1469,22 @@ async function fetchTracksInternal(icao24) {
         return cached.data;
     }
     try {
-        const points = await TrackPoint.find({ icao24 })
-            .sort({ timestamp: 1 })
-            .lean();
+        const icao = icao24.toLowerCase();
+        // 尋找當前航班的 Session
+        const session = await FlightSession.findOne({ icao24: icao }).sort({ startTime: -1 }).lean();
+        if (!session) return { icao24, path: [] };
+
+        // 使用 sessionId 來撈取專屬軌跡
+        const points = await TrackPoint.find({ sessionId: session.sessionId }).sort({ timestamp: 1 }).lean();
 
         const path = points.map(pt => [
             Math.floor(pt.timestamp.getTime() / 1000),
             pt.lat,
             pt.lng,
-            pt.altitude,
-            pt.heading,
-            pt.velocity
+            pt.altitude || 0,
+            pt.heading || 0,
+            pt.velocity || 0,
+            pt.onGround ? 1 : 0
         ]);
 
         const result = { icao24, path };
@@ -1516,17 +1502,6 @@ app.get('/api/tracks', async (req, res) => {
     res.json(result);
 });
 
-// [v4.3.0] Viewport Registration API
-app.post('/api/viewport', express.json(), (req, res) => {
-    const { lamin, lomin, lamax, lomax, sessionId = 'default' } = req.body;
-    if (lamin === undefined || lomin === undefined) return res.status(400).json({ error: 'Invalid bbox' });
-
-    activeViewports.set(sessionId, {
-        bbox: { lamin, lomin, lamax, lomax },
-        lastSeen: Date.now()
-    });
-    res.json({ status: 'ok', activeSessions: activeViewports.size });
-});
 
 // ==========================================
 // METAR 機場天氣 API (每小時更新)
@@ -1616,6 +1591,10 @@ app.get('/api/metar', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// [API 404 防火牆]
+app.use('/api', (req, res) => {
+    res.status(404).json({ error: 'API endpoint not found' });
+});
 
 // [v2.5.2] SPA Fallback — 未匹配的路由指向 React 前端
 app.use((req, res) => {
@@ -1679,7 +1658,7 @@ server.listen(PORT, () => {
     console.log('║   ✈️  AEROSTRAT Surveillance Server      ║');
     console.log(`║   🌐 http://localhost:${PORT}               ║`);
     console.log(`║   📁 Serving: ./public-react             ║`);
-    console.log(`║   🔐 Version: v4.3.0                     ║`);
+    console.log(`║   🔐 Version: v4.4.0                     ║`);
     console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
     console.log('╚══════════════════════════════════════════╝');
     console.log('');
