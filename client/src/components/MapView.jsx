@@ -936,7 +936,12 @@ export default function MapView({
                     ctx.shadowColor = cData.planeColor;
                     ctx.shadowBlur = isSelected ? 15 : (plane.onGround ? 2 : 6);
 
-                    ctx.rotate(plane.heading * Math.PI / 180);
+                    // [v5.0.1] Calibration: Ensure nose points to heading
+                    // Base SVG is North-Up (0°). Canvas rotation is clockwise.
+                    // If heading 45° points wrong, adjust rotationOffset here.
+                    const rotationOffset = 0; 
+                    const finalRotationRad = (plane.heading + rotationOffset) * Math.PI / 180;
+                    ctx.rotate(finalRotationRad);
 
                     const { img, drawSize } = getSVGImage(plane);
                     if (img.complete && img.naturalHeight !== 0) {
