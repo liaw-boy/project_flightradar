@@ -169,7 +169,7 @@ export const dataManager = {
     },
 
     /**
-     * [L2 -> External API] 獲取飛機照片 (Planespotters.net)
+     * [L2 -> API] 獲取飛機照片 (透過後端代理 Planespotters.net)
      * 策略：使用 L2 快取，減少頻繁切換飛機時對第三方 API 的請求壓力。
      */
     async getPhotos(icao24, registration) {
@@ -177,24 +177,46 @@ export const dataManager = {
         const cached = lruCache.get(cacheKey);
         if (cached) return cached;
 
-        const results = [];
         try {
-            if (icao24) {
-                const res = await fetch(`https://api.planespotters.net/pub/photos/hex/${icao24}`);
-                const data = await res.json();
-                if (data.photos) results.push(...data.photos);
-            }
-            if (registration && registration !== 'N/A' && results.length === 0) {
-                const res = await fetch(`https://api.planespotters.net/pub/photos/reg/${registration}`);
-                const data = await res.json();
-                if (data.photos) results.push(...data.photos);
-            }
+            const regParam = registration && registration !== 'N/A' ? `?reg=${encodeURIComponent(registration)}` : '';
+            const res = await fetch(`/api/photos/${icao24}${regParam}`);
+            if (!res.ok) throw new Error('Photos API error');
+            const results = await res.json();
 
             if (results.length > 0) {
                 lruCache.put(cacheKey, results);
             }
             return results;
         } catch (err) {
+            return [];
+        }
+    },
+
+    /**
+     * [L3 -> API] 獲取飛機形狀 SVG 清單 (AircraftShapesSVG)
+     * 策略：永久存入 IndexedDB (shapes 幾乎不變)，APP 啟動時一次性讀取。
+     */
+    async getAircraftShapes() {
+        try {
+            // 1. 嘗試從 IndexedDB 讀取
+            const cached = await idb.getAll('shapes');
+            if (cached && cached.length > 0) {
+                console.log(`📦 [DataManager] L3 Cache Hit: ${cached.length} aircraft shapes`);
+                return cached;
+            }
+
+            // 2. 緩存不存在，從 API 獲取
+            console.log('🌐 [DataManager] Fetching aircraft shapes from API...');
+            const res = await fetch('/api/aircraft-shapes');
+            if (!res.ok) throw new Error('Aircraft shapes API error');
+            const shapes = await res.json();
+
+            // 3. 非同步存入 L3
+            idb.putAll('shapes', shapes).catch(err => console.warn('L3 Shapes Update Failed:', err));
+
+            return shapes;
+        } catch (err) {
+            console.warn('[DataManager] Aircraft shapes load failed:', err.message);
             return [];
         }
     }

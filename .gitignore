@@ -19,3 +19,10 @@ aircraft-cache.json
 metar-cache.json
 routes-cache.json
 quota-cache.json
+
+# Claude Code Agent
+.agent/*
+!.agent/skills/
+
+# Tools
+Claude-Code-Usage-Monitor/

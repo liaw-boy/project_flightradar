@@ -1,19 +1,20 @@
 @echo off
-setlocal enabledelayedexpansion
-cd /d "%~dp0"
+title AEROSTRAT Stop All
 
-echo ===========================================
-echo    AEROSTRAT Unified Dev Engine Stop
-echo ===========================================
 echo.
-echo Stopping all AEROSTRAT background processes...
-echo [1/2] Terminating Node.js background processes...
-taskkill /F /IM node.exe >nul 2>&1
-
-echo [2/2] Terminating Vite frontend processes...
+echo  Stopping AEROSTRAT (ports 3000 and 5173)...
 echo.
 
-echo ===========================================
-echo All radar observer servers successfully closed.
-echo ===========================================
-timeout /t 3
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000" ^| findstr "LISTENING"') do (
+    echo  Stopping backend PID %%a
+    taskkill /F /PID %%a >nul 2>&1
+)
+
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":5173" ^| findstr "LISTENING"') do (
+    echo  Stopping frontend PID %%a
+    taskkill /F /PID %%a >nul 2>&1
+)
+
+echo.
+echo  Done.
+timeout /t 2 /nobreak >nul

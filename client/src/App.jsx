@@ -12,6 +12,7 @@ import { useFlightData } from './hooks/useFlightData';
 import { useI18n } from './hooks/useI18n';
 import { logToServer } from './utils/logger';
 import { dataManager } from './services/dataManager';
+import { initAircraftShapes } from './utils/aircraftIcons';
 import './App.css';
 
 // URL Parsing Utility
@@ -135,6 +136,13 @@ export default function App() {
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
+    // 初始化飛機形狀 (從 MongoDB 載入 SVG 輪廓)
+    useEffect(() => {
+        dataManager.getAircraftShapes().then(shapes => {
+            if (shapes.length > 0) initAircraftShapes(shapes);
+        });
     }, []);
 
     // 載入動畫

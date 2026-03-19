@@ -48,7 +48,7 @@ export class LRUCache {
 
 // --- [L3] IndexedDB Persistent Storage ---
 const DB_NAME = 'AeroSyncDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // v2: added 'shapes' object store
 
 export class IndexedDBManager {
     constructor() {
@@ -68,6 +68,9 @@ export class IndexedDBManager {
                 }
                 if (!db.objectStoreNames.contains('metadata')) {
                     db.createObjectStore('metadata', { keyPath: 'key' });
+                }
+                if (!db.objectStoreNames.contains('shapes')) {
+                    db.createObjectStore('shapes', { keyPath: 'typecode' });
                 }
             };
 
