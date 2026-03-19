@@ -141,7 +141,7 @@ function broadcastPlanes(states, timestamp) {
                 updates: clientUpdates,
                 removed: clientRemoved
             });
-            client.send(payload);
+            try { client.send(payload); } catch (_) { /* client disconnected mid-send */ }
         }
     });
 }
@@ -168,7 +168,7 @@ function broadcastTelemetry(stats, nextFetchIn) {
 
     wss.clients.forEach(client => {
         if (client.readyState === 1 /* WebSocket.OPEN */) {
-            client.send(payload);
+            try { client.send(payload); } catch (_) { /* client disconnected mid-send */ }
         }
     });
 }

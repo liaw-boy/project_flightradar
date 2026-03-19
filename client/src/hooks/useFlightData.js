@@ -120,7 +120,7 @@ export function useFlightData(mapRef) {
                     data: {
                         ...p,
                         callsign: p.callsign || 'UNKNOWN',
-                        registration: p.callsign || 'N/A', // fallback
+                        registration: 'N/A', // populated later from metadata
                         aircraftType: 'Unknown',
                         lastSeenTime: data.globalLastUpdate || Math.floor(Date.now() / 1000)
                     }
