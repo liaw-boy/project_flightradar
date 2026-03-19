@@ -44,11 +44,6 @@ const trackPointSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
-<<<<<<< HEAD:backend/models/TrackPoint.js
-    onGround: {
-        type: Boolean,
-        default: false
-=======
     vertical_rate: {
         type: Number,
         default: null
@@ -60,7 +55,6 @@ const trackPointSchema = new mongoose.Schema({
     squawk: {
         type: String,
         default: null
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:models/TrackPoint.js
     }
 }, {
     // Time Series optimization (MongoDB 5.0+)

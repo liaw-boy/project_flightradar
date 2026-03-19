@@ -378,7 +378,8 @@ export default function MapView({
 
                 const pt = map.latLngToContainerPoint([p.renderLat, normalizeLongitude(p.renderLng)]);
                 const dist = Math.hypot(pt.x - mousePt.x, pt.y - mousePt.y);
-                if (dist < 20) {
+                const hoverRadius = getDrawSize(p, map.getZoom()) / 2 + 4;
+                if (dist < hoverRadius) {
                     found = true;
                     break;
                 }
