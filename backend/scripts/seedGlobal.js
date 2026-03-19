@@ -1,8 +1,8 @@
 const mongoose = require('mongoose');
 const https = require('https');
 require('dotenv').config();
-const Airline = require('./models/Airline');
-const Airport = require('./models/Airport');
+const Airline = require('../models/Airline');
+const Airport = require('../models/Airport');
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat';
 

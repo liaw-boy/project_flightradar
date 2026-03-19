@@ -144,6 +144,11 @@
         "arr": "TPE",
         "name": "釜山 ✈️ 桃園"
     },
+    "JJA2158": {
+        "dep": "RCTP",
+        "arr": "RKPC",
+        "name": "桃園 ✈️ 濟州"
+    },
     "7C6163": {
         "dep": "PUS",
         "arr": "TPE",

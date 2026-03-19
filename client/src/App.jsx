@@ -202,7 +202,7 @@ export default function App() {
                 else logToServer(`Metadata missing for ${icao24}`, 'warn');
             }).catch(e => { logToServer(`Metadata fetch error for ${icao24}: ${e.message}`, 'error'); });
 
-            dataManager.getRoute(icao24).then(data => {
+            dataManager.getRoute(icao24, plane.callsign).then(data => {
                 if (data.noData) logToServer(`Route missing for ${plane.callsign || icao24}`, 'warn');
                 setSelectedRoute(data);
             }).catch(e => { logToServer(`Route fetch error for ${plane.callsign || icao24}: ${e.message}`, 'error'); });

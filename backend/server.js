@@ -18,6 +18,7 @@ const Metar = require('./models/Metar'); // [Cache Migration]
 const FlightSession = require('./models/FlightSession'); // [Flight Sessions]
 const Airport = require('./models/Airport'); // [GIS Modernization]
 const AircraftShape = require('./models/AircraftShape'); // [SVG Shapes]
+const { crawlFlightSchedules } = require('./crawler'); // [CRAWLER] Real-time schedules
 
 // ==========================================
 // [v4.4.0] Logging Helper with Tactical Timestamps
@@ -1255,10 +1256,23 @@ app.get('/api/photos/:icao24', async (req, res) => {
     const { reg } = req.query;
 
     try {
-        let photos = [];
+        // [DB CACHE] 1. 優先從 MongoDB 讀取
+        const aircraft = await Aircraft.findOne({ icao24: icao24.toLowerCase() }).lean();
+        if (aircraft?.photoData?.url) {
+            console.log(`🖼️ [CACHE HIT] Returning saved photo for ${icao24}`);
+            return res.json([{
+                thumbnail: { src: aircraft.photoData.thumbnail },
+                thumbnail_large: { src: aircraft.photoData.url },
+                photographer: aircraft.photoData.photographer,
+                link: aircraft.photoData.link,
+                source: 'mongodb_cache'
+            }]);
+        }
 
+        // 2. 緩存失效，抓取外部 API
+        let photos = [];
         const hexRes = await fetch(`https://api.planespotters.net/pub/photos/hex/${icao24}`, {
-            headers: { 'User-Agent': 'AEROSTRAT/4.4 (flight-tracking)' }
+            headers: { 'User-Agent': 'AEROSTRAT/5.0 (flight-tracking)' }
         });
         if (hexRes.ok) {
             const data = await hexRes.json();
@@ -1267,7 +1281,7 @@ app.get('/api/photos/:icao24', async (req, res) => {
 
         if (photos.length === 0 && reg && reg !== 'N/A') {
             const regRes = await fetch(`https://api.planespotters.net/pub/photos/reg/${reg}`, {
-                headers: { 'User-Agent': 'AEROSTRAT/4.4 (flight-tracking)' }
+                headers: { 'User-Agent': 'AEROSTRAT/5.0 (flight-tracking)' }
             });
             if (regRes.ok) {
                 const data = await regRes.json();
@@ -1275,7 +1289,25 @@ app.get('/api/photos/:icao24', async (req, res) => {
             }
         }
 
-        res.setHeader('Cache-Control', 'public, max-age=3600'); // 1h 快取
+        // [DB CACHE] 3. 若抓到圖片，非同步存入資料庫
+        if (photos.length > 0) {
+            const p = photos[0];
+            Aircraft.findOneAndUpdate(
+                { icao24: icao24.toLowerCase() },
+                { 
+                    $set: { 
+                        'photoData.url': p.thumbnail_large?.src || p.thumbnail?.src,
+                        'photoData.thumbnail': p.thumbnail?.src,
+                        'photoData.photographer': p.photographer,
+                        'photoData.link': p.link,
+                        'photoData.lastUpdated': new Date()
+                    }
+                },
+                { upsert: true }
+            ).catch(err => console.error('❌ [PHOTO SAVE ERROR]', err.message));
+        }
+
+        res.setHeader('Cache-Control', 'public, max-age=3600');
         res.json(photos);
     } catch (err) {
         console.error('[PHOTOS] Proxy error:', err.message);
@@ -1685,6 +1717,13 @@ async function syncSchedulesDatabase() {
 // 設定每日凌晨 3 點 (伺服器離峰時間) 執行任務
 cron.schedule('0 3 * * *', () => {
     syncSchedulesDatabase();
+}, {
+    timezone: "Asia/Taipei"
+});
+
+// 每 15 分鐘抓取一次 TDX 進出港資料 (Real-time Schedules)
+cron.schedule('*/15 * * * *', () => {
+    crawlFlightSchedules();
 }, {
     timezone: "Asia/Taipei"
 });
