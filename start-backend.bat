@@ -1,16 +1,34 @@
 @echo off
-setlocal enabledelayedexpansion
+title AEROSTRAT Backend (Port 3000)
 cd /d "%~dp0backend"
 
-echo ===========================================
-echo    AEROSTRAT Backend API Engine Starter
-echo ===========================================
 echo.
-echo Stopping old backend Node processes...
-taskkill /F /IM node.exe >nul 2>&1
+echo  ==========================================
+echo  AEROSTRAT Backend Engine v4.4.0
+echo  Port 3000  /  MongoDB Local
+echo  ==========================================
+echo.
 
-echo Starting backend server (Port 3000)...
-echo Backend will fetch OpenSky global data every 30 seconds.
+if not exist ".env" (
+    echo  [ERROR] backend\.env not found!
+    echo  Please create backend\.env with MONGODB_URI, PORT, OPENSKY credentials.
+    echo.
+    pause
+    exit /b 1
+)
+
+if not exist "node_modules" (
+    echo  [SETUP] Installing dependencies...
+    npm install
+    echo.
+)
+
+echo  [INFO] Health check: http://localhost:3000/api/health
+echo  [INFO] Press Ctrl+C to stop backend
 echo.
-echo ===========================================
-npm run start
+
+node server.js
+
+echo.
+echo  Backend stopped.
+pause

@@ -17,6 +17,7 @@ const Aircraft = require('./models/Aircraft'); // [Cache Migration]
 const Metar = require('./models/Metar'); // [Cache Migration]
 const FlightSession = require('./models/FlightSession'); // [Flight Sessions]
 const Airport = require('./models/Airport'); // [GIS Modernization]
+const AircraftShape = require('./models/AircraftShape'); // [SVG Shapes]
 
 // ==========================================
 // [v4.4.0] Logging Helper with Tactical Timestamps
@@ -86,10 +87,10 @@ app.use(helmet({
     contentSecurityPolicy: false, // Prevents blocking of inline scripts and external map tiles
     crossOriginEmbedderPolicy: false, // Prevents blocking of external assets
 }));
-// [v3.0] Rate limiter: 120 req/min per IP on all API endpoints
+// Rate limiter: 200 req/min per IP（選飛機會同時觸發 metadata+route+track 3 個請求）
 const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 120,
+    max: 200,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please wait a moment.' },
@@ -1221,6 +1222,59 @@ app.get('/api/airport/:code', async (req, res) => {
     } catch (e) { /* ignore fallback errors */ }
 
     return res.status(404).json({ error: 'Airport not found' });
+});
+
+// ==========================================
+// 飛機輪廓 SVG 資料 (來自 AircraftShape collection)
+// ==========================================
+app.get('/api/aircraft-shapes', async (req, res) => {
+    if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({ error: 'Database not connected' });
+    }
+    try {
+        const shapes = await AircraftShape.find({}, { _id: 0 }).lean();
+        res.setHeader('Cache-Control', 'public, max-age=86400'); // 24h 瀏覽器快取
+        res.json(shapes);
+    } catch (err) {
+        console.error('[SHAPES] Fetch error:', err.message);
+        res.status(500).json({ error: 'Failed to fetch aircraft shapes' });
+    }
+});
+
+// ==========================================
+// 飛機照片代理 (Planespotters.net) — 後端統一出口，避免前端直連
+// ==========================================
+app.get('/api/photos/:icao24', async (req, res) => {
+    const { icao24 } = req.params;
+    const { reg } = req.query;
+
+    try {
+        let photos = [];
+
+        const hexRes = await fetch(`https://api.planespotters.net/pub/photos/hex/${icao24}`, {
+            headers: { 'User-Agent': 'AEROSTRAT/4.4 (flight-tracking)' }
+        });
+        if (hexRes.ok) {
+            const data = await hexRes.json();
+            if (data.photos?.length) photos = data.photos;
+        }
+
+        if (photos.length === 0 && reg && reg !== 'N/A') {
+            const regRes = await fetch(`https://api.planespotters.net/pub/photos/reg/${reg}`, {
+                headers: { 'User-Agent': 'AEROSTRAT/4.4 (flight-tracking)' }
+            });
+            if (regRes.ok) {
+                const data = await regRes.json();
+                if (data.photos?.length) photos = data.photos;
+            }
+        }
+
+        res.setHeader('Cache-Control', 'public, max-age=3600'); // 1h 快取
+        res.json(photos);
+    } catch (err) {
+        console.error('[PHOTOS] Proxy error:', err.message);
+        res.status(500).json({ error: 'Photo fetch failed' });
+    }
 });
 
 /**

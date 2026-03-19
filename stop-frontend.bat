@@ -1,25 +1,12 @@
 @echo off
-setlocal enabledelayedexpansion
-cd /d "%~dp0"
+title AEROSTRAT Stop Frontend
 
-echo ===========================================
-echo    AEROSTRAT Frontend Stopper
-echo ===========================================
-echo.
-echo Stopping Vite (Frontend) development server...
+echo  Stopping frontend (port 5173)...
 
-:: Kill node processes running Vite specifically
-for /f "tokens=2" %%a in ('tasklist /nh /fi "imagename eq node.exe" /v ^| findstr /i "vite"') do (
-    echo Killing Vite Dev Server PID %%a
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":5173" ^| findstr "LISTENING"') do (
+    echo  Stopping PID %%a
     taskkill /F /PID %%a >nul 2>&1
 )
 
-:: Extra forceful clean up for stubborn react dev servers
-taskkill /F /IM cmd.exe /FI "WINDOWTITLE eq AEROSTRAT Frontend UI Starter" >nul 2>&1
-
-echo.
-echo ===========================================
-echo Frontend stopped successfully.
-echo Backend data engine is STILL RUNNING.
-echo ===========================================
-timeout /t 3
+echo  Frontend stopped. Backend still running.
+timeout /t 2 /nobreak >nul

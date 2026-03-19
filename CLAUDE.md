@@ -37,4 +37,4 @@ AEROSTRAT is a professional-grade global aviation surveillance system with a dec
 ## ⚠️ Known Issues / Architecture Notes
 - **Decoupled Proxy**: Vite proxies `/api` and `/ws` to `localhost:3000`.
 - **Memory Pressure**: High plane count (5000+) uses Canvas `ImageBitmap` caching.
-- **Data Persistence**: MongoDB TTL is 48 hours for history tracks.
+- **Data Persistence**: MongoDB TTL is 24 hours for history tracks (TrackPoint `expireAfterSeconds: 86400`).

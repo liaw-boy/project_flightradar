@@ -1,13 +1,27 @@
 @echo off
-setlocal enabledelayedexpansion
+title AEROSTRAT Frontend (Port 5173)
 cd /d "%~dp0client"
 
-echo ===========================================
-echo    AEROSTRAT Frontend UI Starter
-echo ===========================================
 echo.
-echo Starting Vite Dev Server (Port 5173)...
-echo Please ensure backend is running via start-backend.bat
+echo  ==========================================
+echo  AEROSTRAT Frontend UI v4.4.0
+echo  Port 5173  /  Proxy to localhost:3000
+echo  ==========================================
 echo.
-echo ===========================================
+
+if not exist "node_modules" (
+    echo  [SETUP] Installing dependencies...
+    npm install
+    echo.
+)
+
+echo  [INFO] Open browser: http://localhost:5173
+echo  [INFO] Make sure backend is running first!
+echo  [INFO] Press Ctrl+C to stop frontend only
+echo.
+
 npm run dev
+
+echo.
+echo  Frontend stopped. Backend is still running.
+pause
