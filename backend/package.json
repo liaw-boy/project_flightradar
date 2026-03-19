@@ -1,6 +1,10 @@
 {
   "name": "project_flightradar",
+<<<<<<< HEAD:backend/package.json
   "version": "4.4.0",
+=======
+  "version": "4.6.0",
+>>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:package.json
   "description": "",
   "main": "server.js",
   "scripts": {

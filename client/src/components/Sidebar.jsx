@@ -132,9 +132,18 @@ export default function Sidebar({
     const [depInfo, setDepInfo] = useState(null);
     const [arrInfo, setArrInfo] = useState(null);
     const [photos, setPhotos] = useState([]);
+    const [registry, setRegistry] = useState(null);
+    const [airlineData, setAirlineData] = useState(null);
     const [openSections, setOpenSections] = useState({
-        spatial: true, specs: false, status: false, nearest: false,
+        spatial: true, specs: true, status: false, nearest: false,
     });
+
+    useEffect(() => {
+        if (icao24) {
+            setRegistry(null);
+            dataManager.getAircraftRegistry(icao24).then(setRegistry);
+        }
+    }, [icao24]);
 
     useEffect(() => {
         if (depCode && depCode !== 'N/A') dataManager.getAirport(depCode).then(setDepInfo);
@@ -157,6 +166,15 @@ export default function Sidebar({
         return () => { isMounted = false; };
     }, [icao24, registration]);
 
+    useEffect(() => {
+        if (plane.callsign) {
+            setAirlineData(null);
+            dataManager.getAirline(plane.callsign).then(data => {
+                setAirlineData(data);
+            });
+        }
+    }, [plane.callsign]);
+
     const toggleSection = (s) => setOpenSections(prev => ({ ...prev, [s]: !prev[s] }));
 
     const depName = depInfo ? (depInfo.city || depInfo.name) : (depCode || '...');
@@ -170,7 +188,12 @@ export default function Sidebar({
                         {plane.callsign || 'UNKNOWN'}
                         {typecode && <span className="sb-badge">{typecode}</span>}
                     </h2>
-                    <div className="sb-subtitle">{airlineName || 'Unknown'} — {registration}</div>
+                    <div className="sb-subtitle">
+                        {airlineData?.logo && (
+                            <img src={airlineData.logo} alt="" className="sb-airline-logo-mini" onError={(e) => e.target.style.display = 'none'} />
+                        )}
+                        {airlineData?.name && airlineData.name !== 'Unknown' ? airlineData.name : airlineName || 'Unknown'} — {registration}
+                    </div>
                 </div>
                 <div className="sb-header-actions">
                     <div className="sb-close" onClick={onClose}>
@@ -201,8 +224,6 @@ export default function Sidebar({
                         </div>
                     )
                 )}
-
-
 
                 <div className="sb-route-card">
                     <div className="sb-route-display">
@@ -290,6 +311,19 @@ export default function Sidebar({
                         <DataRow label={t('airline')} value={airlineName || '--'} />
                         {metadata?.owner && <DataRow label="Owner" value={metadata.owner} />}
                         <DataRow label={t('country')} value={`${flag} ${plane.country || 'Unknown'}`} />
+                        
+                        {/* AeroDataBox Deep Info */}
+                        {registry && !registry.notFound && (
+                            <>
+                                <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)', margin: '8px 20px' }}></div>
+                                <DataRow label="Age" value={registry.age ? `${registry.age} YRS` : 'N/A'} />
+                                <DataRow label="First Flight" value={registry.firstFlightDate || 'N/A'} />
+                                <DataRow label="Engines" value={registry.engineType || 'N/A'} />
+                                {registry.isLeased && (
+                                    <DataRow label="Status" value="LEASED" valueClass="spi-active" />
+                                )}
+                            </>
+                        )}
                     </div>
                 )}
 

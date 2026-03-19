@@ -22,7 +22,7 @@ export class FlightDataStore {
     constructor(maxPlanes = 10000, pointsPerPlane = 100) {
         this.maxPlanes = maxPlanes;
         this.pointsPerPlane = pointsPerPlane;
-        this.floatsPerPoint = 4; // [Lat, Lng, X, Y]
+        this.floatsPerPoint = 5; // [Time, Lat, Lng, X, Y]
 
         // --- 核心記憶體佈局 (Memory Layout) ---
         // 總長度 = 10,000 * 100 * 4 = 4,000,000 Float32 (約 16MB)
@@ -62,19 +62,25 @@ export class FlightDataStore {
      * @param {number} lng 經度
      * @param {number} x Canvas X 投影點 (快取)
      * @param {number} y Canvas Y 投影點 (快取)
+     * @param {number} timestamp 
      */
-    addTrackPoint(icao24, lat, lng, x, y) {
+    addTrackPoint(icao24, lat, lng, x, y, timestamp = null) {
         const slot = this._getSlotIdx(icao24);
         const count = this.counts[slot];
         const buffer = this.trackBuffer;
         const FPP = this.floatsPerPoint;
         const PPP = this.pointsPerPlane;
+        const time = timestamp || Math.floor(Date.now() / 1000);
 
         // [Phase 8/10] 空間防護邏輯
         if (count > 0) {
             const cursor = this.cursors[slot];
             const lastIdx = (slot * PPP + ((cursor - 1 + PPP) % PPP)) * FPP;
-            const dist = haversineDist(buffer[lastIdx], buffer[lastIdx + 1], lat, lng);
+            
+            // 規則 0: 時間戳查重
+            if (buffer[lastIdx] === time) return;
+
+            const dist = haversineDist(buffer[lastIdx + 1], buffer[lastIdx + 2], lat, lng);
 
             // 規則 1: 去重 (距離 < 50m 則拋棄)
             if (dist < 50) return;
@@ -89,10 +95,11 @@ export class FlightDataStore {
         const cursor = this.cursors[slot];
         const baseIdx = (slot * PPP + cursor) * FPP;
 
-        buffer[baseIdx] = lat;
-        buffer[baseIdx + 1] = lng;
-        buffer[baseIdx + 2] = x;
-        buffer[baseIdx + 3] = y;
+        buffer[baseIdx] = time;
+        buffer[baseIdx + 1] = lat;
+        buffer[baseIdx + 2] = lng;
+        buffer[baseIdx + 3] = x;
+        buffer[baseIdx + 4] = y;
 
         // 環形指標遞增邏輯
         this.cursors[slot] = (cursor + 1) % PPP;
@@ -108,7 +115,7 @@ export class FlightDataStore {
      * 透過 Callback 機制達成 Zero-Allocation 讀取，不產生中間過渡陣列
      * 
      * @param {string} icao24 
-     * @param {Function} callback (lat, lng, x, y) => void
+     * @param {Function} callback (time, lat, lng, x, y) => void
      */
     getTrackPoints(icao24, callback) {
         const slot = this.planeToSlot.get(icao24);
@@ -121,22 +128,18 @@ export class FlightDataStore {
         const baseOffset = slot * PPP * FPP;
         const buffer = this.trackBuffer;
 
-        // 計算起始讀取位置
-        // 如果 Buffer 已滿，最舊的點就在當前寫入指標 (cursor) 指向的位置
-        // 如果未滿，則從 0 開始讀取
         const startReadIdx = count === PPP ? cursor : 0;
 
         for (let i = 0; i < count; i++) {
-            // 處理環形迴轉索引：(起始點 + 步進) % PPP
             const ringIdx = (startReadIdx + i) % PPP;
             const idx = baseOffset + (ringIdx * FPP);
 
-            // 透過快取值呼叫回調，完全不產生新的 Object 或 Array
             callback(
-                buffer[idx],     // lat
-                buffer[idx + 1], // lng
-                buffer[idx + 2], // x
-                buffer[idx + 3]  // y
+                buffer[idx],     // time
+                buffer[idx + 1], // lat
+                buffer[idx + 2], // lng
+                buffer[idx + 3], // x
+                buffer[idx + 4]  // y
             );
         }
     }
@@ -152,7 +155,9 @@ export class FlightDataStore {
 
             // 傳遞一個閉包，讓渲染器決定如何讀取點
             callback(icao24, (pointCb) => {
-                this.getTrackPoints(icao24, pointCb);
+                this.getTrackPoints(icao24, (time, lat, lng, x, y) => {
+                    pointCb(lat, lng, x, y); // Skip time for legacy renderers if needed
+                });
             });
         }
     }
@@ -172,11 +177,10 @@ export class FlightDataStore {
 
             for (let i = 0; i < count; i++) {
                 const idx = baseOffset + (i * FPP);
-                // projectorFn(lat, lng) 內部會修改共用的 outPoint
-                // 這裡傳回的 proj.x/y 即為更新後的快取值
-                const proj = projectorFn(buffer[idx], buffer[idx + 1]);
-                buffer[idx + 2] = proj.x;
-                buffer[idx + 3] = proj.y;
+                // buffer[idx] is time, skip it
+                const proj = projectorFn(buffer[idx + 1], buffer[idx + 2]);
+                buffer[idx + 3] = proj.x;
+                buffer[idx + 4] = proj.y;
             }
         }
     }

@@ -16,6 +16,11 @@ const RouteSchema = new mongoose.Schema({
         type: String,
         default: null
     },
+    // [AI EVOLUTION] 紀錄航線來源：'manual', 'aerodatabox', 'ai_learned'
+    source: {
+        type: String,
+        default: 'manual'
+    },
     lastUpdated: {
         type: Date,
         default: Date.now

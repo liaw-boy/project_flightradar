@@ -31,7 +31,10 @@ export function useFlightData(mapRef) {
     const nextScheduledFetchRef = useRef(Date.now() + 60000);
     const workerRef = useRef(null);
     const usesWebSocketRef = useRef(false);
-    const sessionIdRef = useRef(`session-${Math.random().toString(36).substring(2, 10)}`);
+    
+    // [v4.3.6] Auto-Backfill Queue for Cold Starts
+    const backfillQueueRef = useRef([]);
+    const backfilledIcaosRef = useRef(new Set());
 
     // [Project AERO-SYNC] Zero-GC Projection Helper
     const sharedPointRef = useRef({ x: 0, y: 0 });
@@ -181,7 +184,8 @@ export function useFlightData(mapRef) {
                 if (mapRef && mapRef.current) {
                     const zoom = mapRef.current.getZoom();
                     const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
-                    trackStore.addTrackPoint(icao24, pData.lat, pData.lng, globalPt.x, globalPt.y);
+                    const timestamp = pData.lastSeenTime; 
+                    trackStore.addTrackPoint(icao24, pData.lat, pData.lng, globalPt.x, globalPt.y, timestamp);
                 }
 
                 if (!next[icao24]) {
@@ -200,6 +204,12 @@ export function useFlightData(mapRef) {
                         globalX: globalPt.x,
                         globalY: globalPt.y
                     };
+
+                    // [v4.4.0] Trigger Enhanced Auto-Backfill
+                    if (!backfilledIcaosRef.current.has(icao24) && !pData.isBackfilling) {
+                        next[icao24].isBackfilling = true;
+                        backfillQueueRef.current.push(icao24);
+                    }
                 } else {
                     const existing = next[icao24];
                     const isDirty =
@@ -299,39 +309,14 @@ export function useFlightData(mapRef) {
                     .filter((p) => p[1] && p[2] && p[0] <= limitTime)
                     .sort((a, b) => a[0] - b[0]);
 
-                if (validPoints.length === 0) return [];
-
-                // 找出最新的飛行航段：
-                // 1. 絕對切斷：時間間隔大於 30 分鐘 (1800s) 且兩端有地面點，代表是前一趟航班
-                // 2. 條件切斷：飛機目前在地面，遇到地面點就切斷避免畫出滑行線
-                // 3. 速度異常切斷：超過音速 400 m/s 的跳躍一定是資料雜訊
-                let latestSegmentStartIdx = 0;
-                const isCurrentlyOnGround = validPoints[validPoints.length - 1][5] === true;
-
-                for (let i = 1; i < validPoints.length; i++) {
-                    const timeDiff = validPoints[i][0] - validPoints[i - 1][0];
-                    const isOnGround = validPoints[i][5] === true;
-
-                    if (timeDiff > 1800 && (validPoints[i - 1][5] === true || isOnGround)) {
-                        latestSegmentStartIdx = i;
-                    } else if (isOnGround && isCurrentlyOnGround) {
-                        latestSegmentStartIdx = i;
-                    } else if (timeDiff > 0) {
-                        const dist = getDistance(validPoints[i - 1][1], validPoints[i - 1][2], validPoints[i][1], validPoints[i][2]);
-                        if (timeDiff > 30 && (dist / timeDiff) > 400) {
-                            latestSegmentStartIdx = i;
-                        }
-                    }
-                }
-
-                // [v3.1] Return full data tuple [time, lat, lng, altitude, heading, velocity] for TimePlayer
-                return validPoints.slice(latestSegmentStartIdx).map((p) => [
+                // [v4.7.0] 極簡化前端邏輯：信任後端經過 30min GAP 與 0,0 清洗後的純淨陣列
+                return validPoints.map((p) => [
                     p[0],  // time (UNIX)
                     p[1],  // lat
                     p[2],  // lng
                     p[3],  // altitude (meters)
                     p[4],  // true_track (heading)
-                    null   // velocity (not in track path API)
+                    p[5]   // velocity
                 ]);
             }
         } catch (e) {
@@ -363,6 +348,94 @@ export function useFlightData(mapRef) {
         ]);
     }, []);
 
+    // [v4.4.0] Enhanced Priority Backfill Processor
+    useEffect(() => {
+        const processor = setInterval(async () => {
+            if (backfillQueueRef.current.length === 0) return;
+
+            // Priority Logic: Selected aircraft > Viewport center > Others
+            // Find selected aircraft in queue if any
+            const urlParams = new URLSearchParams(window.location.search);
+            const selectedIcao = urlParams.get('selected');
+            
+            let targetIdx = backfillQueueRef.current.findIndex(id => id === selectedIcao);
+            if (targetIdx === -1) {
+                // If no selected, just take the first one (or we could sort by viewport distance)
+                targetIdx = 0;
+            }
+
+            const icao24 = backfillQueueRef.current.splice(targetIdx, 1)[0];
+            if (!icao24 || backfilledIcaosRef.current.has(icao24)) return;
+            
+            backfilledIcaosRef.current.add(icao24);
+
+            try {
+                const path = await fetchTrack(icao24);
+                if (path && path.length > 0) {
+                    // [v4.5.1] Seamless Merge & Deduplication
+                    // 1. Get current points from store (Live Points)
+                    const livePoints = [];
+                    trackStore.getTrackPoints(icao24, (time, lat, lng, x, y) => {
+                        livePoints.push([time, lat, lng, x, y]);
+                    });
+
+                    // 2. Combine with Historical Path and Deduplicate by Time
+                    // Convert historical path [time, lat, lng, alt, head, vel] to [time, lat, lng]
+                    const historicalPoints = path.map(p => [p[0], p[1], p[2]]);
+                    
+                    // Full Blend: Set used to track unique timestamps
+                    const seenTimes = new Set();
+                    const merged = [];
+                    
+                    // Process: Historical first, then Live
+                    [...historicalPoints, ...livePoints].forEach(pt => {
+                        const time = pt[0];
+                        if (!seenTimes.has(time)) {
+                            seenTimes.add(time);
+                            merged.push(pt);
+                        }
+                    });
+
+                    // Sort strict by time (old to new)
+                    merged.sort((a, b) => a[0] - b[0]);
+
+                    // 3. Re-inject fully merged track into store
+                    trackStore.clearTrack(icao24);
+                    const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
+                    merged.forEach(pt => {
+                        const [time, lat, lng] = pt;
+                        const globalPt = latLngToGlobalPixels(lat, lng, zoom, sharedPointRef.current);
+                        trackStore.addTrackPoint(icao24, lat, lng, globalPt.x, globalPt.y, time);
+                    });
+                    
+                    // [v4.6.0] Forced State Update: Break Reference and Force UI Redraw
+                    setPlanesDict(prev => {
+                        const currentPlane = prev[icao24];
+                        if (currentPlane) {
+                            // Create a brand new plane object with a new 'track' property if needed
+                            // and a 'forceUpdate' timestamp to ensure Mapbox/React detect the change.
+                            return { 
+                                ...prev, 
+                                [icao24]: { 
+                                    ...currentPlane, 
+                                    isBackfilling: false, 
+                                    isDirty: true,
+                                    forceUpdate: Date.now(),
+                                    _renderTrigger: Math.random() // Extra safety for shallow comparison
+                                } 
+                            };
+                        }
+                        return prev;
+                    });
+                }
+            } catch (e) {
+                console.error('Backfill Merge Error:', e);
+            }
+        }, 500); // 500ms per aircraft
+
+        return () => clearInterval(processor);
+    }, [fetchTrack]);
+
     // 定時更新飛機    // 初次載入驅動迴圈
     useEffect(() => {
         if (!isFetchingRef.current) {
@@ -386,12 +459,15 @@ export function useFlightData(mapRef) {
         if (workerRef.current) {
             workerRef.current.postMessage({ type: 'SET_VIEWPORT', payload: bbox });
         }
+<<<<<<< HEAD
         // [v4.3.0] Heartbeat to server for Engine B (Sniper)
         fetch('/api/viewport', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ...bbox, sessionId: sessionIdRef.current })
         }).catch(() => { }); // Silent fail
+=======
+>>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934
     }, []);
 
     // [Project AERO-SYNC] Initialize WebWorker for WebSocket Binary Stream
@@ -460,6 +536,12 @@ export function useFlightData(mapRef) {
                     p.targetUpdatedAt = now;
                     p.globalX = globalPt.x;
                     p.globalY = globalPt.y;
+
+                    // [v4.4.0] Trigger Enhanced Auto-Backfill (WS stream)
+                    if (!backfilledIcaosRef.current.has(id) && !p.isBackfilling) {
+                        p.isBackfilling = true;
+                        backfillQueueRef.current.push(id);
+                    }
                 });
 
                 removed.forEach(id => {
