@@ -21,6 +21,7 @@
         "@types/react-dom": "^19.0.0",
         "@vitejs/plugin-legacy": "^6.1.1",
         "@vitejs/plugin-react": "^4.3.0",
+        "playwright": "^1.58.2",
         "vite": "^6.0.0"
     }
 }
