@@ -105,36 +105,19 @@ export default function Sidebar({
     plane, icao24, metadata, route, trackPoints, playbackTime, onPlaybackChange,
     flightHistoryRef, onClose, trackMode, onToggleTrack
 }) {
-    if (!plane || !icao24) return null;
-
+    // === HOOKS FIRST — React Rules of Hooks 要求所有 hook 在任何 early return 之前 ===
     const { t } = useI18n();
-    const logoUrl = getAirlineLogoUrl(plane.callsign);
-    const nowUnix = Math.floor(Date.now() / 1000);
-    const dataAge = nowUnix - (plane.lastContact || nowUnix);
-    const contactTime = new Date((plane.lastContact || nowUnix) * 1000).toLocaleTimeString();
-    const fr24Url = `https://www.flightradar24.com/${plane.callsign}`;
-
-    const airlineName = getAirlineName(plane.callsign);
-    const flag = getCountryFlag(plane.country);
-    const categoryName = metadata?.categoryDescription || getCategoryName(plane.category);
-    const nearest = getNearestAirport(plane.lat, plane.lng);
-    const posSourceMap = { 0: 'ADS-B', 1: 'ASTERIX', 2: 'MLAT', 3: 'FLARM' };
-
-    const aircraftModel = metadata
-        ? [metadata.manufacturerName, metadata.model].filter(Boolean).join(' ') || 'Unknown'
-        : plane.aircraftType || 'Loading...';
-    const typecode = metadata?.typecode || '';
-    const registration = metadata?.registration || plane.registration || 'N/A';
-
-    const depCode = route?.departureAirport || (route?.noData ? 'N/A' : null);
-    const arrCode = route?.arrivalAirport || (route?.noData ? 'N/A' : null);
-
     const [depInfo, setDepInfo] = useState(null);
     const [arrInfo, setArrInfo] = useState(null);
     const [photos, setPhotos] = useState([]);
     const [openSections, setOpenSections] = useState({
         spatial: true, specs: false, status: false, nearest: false,
     });
+
+    // 這些 derived values 被 useEffect 的 dependency array 使用，必須在 effect 前宣告
+    const registration = metadata?.registration || plane?.registration || 'N/A';
+    const depCode = route?.departureAirport || (route?.noData ? 'N/A' : null);
+    const arrCode = route?.arrivalAirport || (route?.noData ? 'N/A' : null);
 
     useEffect(() => {
         if (depCode && depCode !== 'N/A') dataManager.getAirport(depCode).then(setDepInfo);
@@ -156,6 +139,26 @@ export default function Sidebar({
         fetchPhotos();
         return () => { isMounted = false; };
     }, [icao24, registration]);
+
+    // Early return — 放在所有 hook 之後
+    if (!plane || !icao24) return null;
+
+    const logoUrl = getAirlineLogoUrl(plane.callsign);
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const dataAge = nowUnix - (plane.lastContact || nowUnix);
+    const contactTime = new Date((plane.lastContact || nowUnix) * 1000).toLocaleTimeString();
+    const fr24Url = `https://www.flightradar24.com/${plane.callsign}`;
+
+    const airlineName = getAirlineName(plane.callsign);
+    const flag = getCountryFlag(plane.country);
+    const categoryName = metadata?.categoryDescription || getCategoryName(plane.category);
+    const nearest = getNearestAirport(plane.lat, plane.lng);
+    const posSourceMap = { 0: 'ADS-B', 1: 'ASTERIX', 2: 'MLAT', 3: 'FLARM' };
+
+    const aircraftModel = metadata
+        ? [metadata.manufacturerName, metadata.model].filter(Boolean).join(' ') || 'Unknown'
+        : plane.aircraftType || 'Loading...';
+    const typecode = metadata?.typecode || '';
 
     const toggleSection = (s) => setOpenSections(prev => ({ ...prev, [s]: !prev[s] }));
 
@@ -265,7 +268,7 @@ export default function Sidebar({
                         <DataRow label={t('speed')} value={`${Math.round(plane.velocity * 3.6)} km/h`} />
                         <DataRow label={t('heading')} value={`${Math.round(plane.heading)}°`} />
                         <DataRow label={t('vertRate')} value={formatVerticalRate(plane.vRate)} />
-                        <DataRow label={t('position')} value={`${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}`} />
+                        <DataRow label={t('position')} value={plane.lat != null ? `${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}` : 'N/A'} />
                         <DataRow label={t('source')} value={posSourceMap[plane.positionSource] || 'ADS-B'} />
                         {/* [v2.9.0] Altitude Profile Chart */}
                         {flightHistoryRef?.current && (
