@@ -231,7 +231,7 @@ function setCache(key, data) {
 // OpenSky API OAuth2 多帳號輪替系統
 // ==========================================
 const ACCOUNTS = [
-    { user: process.env.OPENSKY_USER, pass: process.env.OPENSKY_PASS },
+    { user: process.env.OPENSKY_USER1 || process.env.OPENSKY_USER, pass: process.env.OPENSKY_PASS1 || process.env.OPENSKY_PASS },
     { user: process.env.OPENSKY_USER2, pass: process.env.OPENSKY_PASS2 },
     { user: process.env.OPENSKY_USER3, pass: process.env.OPENSKY_PASS3 },
     { user: process.env.OPENSKY_USER4, pass: process.env.OPENSKY_PASS4 },
@@ -848,15 +848,17 @@ async function initializeAccountQuotas(isFreshQuota) {
             const savedIndex = currentAccountIndex;
             currentAccountIndex = i;
 
-            const headers = await getAuthHeaders();
-            // 使用一個極小範圍的 BBox 請求，盡量不耗費太多資源
-            const response = await fetch('https://opensky-network.org/api/states/all?lamin=23.5&lomin=120.5&lamax=23.6&lomax=120.6', {
-                headers,
-                signal: AbortSignal.timeout(10000)
-            });
-
-            syncAccountQuota(i, response);
-            currentAccountIndex = savedIndex; // 還原
+            try {
+                const headers = await getAuthHeaders();
+                // 使用一個極小範圍的 BBox 請求，盡量不耗費太多資源
+                const response = await fetch('https://opensky-network.org/api/states/all?lamin=23.5&lomin=120.5&lamax=23.6&lomax=120.6', {
+                    headers,
+                    signal: AbortSignal.timeout(10000)
+                });
+                syncAccountQuota(i, response);
+            } finally {
+                currentAccountIndex = savedIndex; // 無論成功或失敗都還原
+            }
 
             // 每組間隔一下避免太密集
             await new Promise(r => setTimeout(r, 1000));

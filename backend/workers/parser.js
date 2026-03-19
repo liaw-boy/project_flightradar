@@ -21,12 +21,6 @@ parentPort.on('message', (rawJsonString) => {
                 let velocity = plane[9] || 0;
                 const heading = plane[10] || 0;
 
-                // 若高度過低卻未標示為地面，強制校正
-                if (altitude !== 'N/A' && altitude < 1500) {
-                    onGround = true;
-                    altitude = 'GROUND';
-                    velocity = 0;
-                }
 
                 // 僅回傳 V2 前端動畫與渲染所需的最輕量化欄位
                 const nowUnix = Math.floor(Date.now() / 1000);
