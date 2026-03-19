@@ -41,11 +41,7 @@ export default function TopBar({
                 </div>
                 <div className="brand-subtitle">
                     <span className="brand-highlight">RADAR</span>
-<<<<<<< HEAD
                     <span className="brand-version">v5.0.0</span>
-=======
-                    <span className="brand-version">v4.6.0</span>
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934
                 </div>
 
                 <div className="top-stat-pill">

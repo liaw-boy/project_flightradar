@@ -459,15 +459,12 @@ export function useFlightData(mapRef) {
         if (workerRef.current) {
             workerRef.current.postMessage({ type: 'SET_VIEWPORT', payload: bbox });
         }
-<<<<<<< HEAD
         // [v4.3.0] Heartbeat to server for Engine B (Sniper)
         fetch('/api/viewport', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ...bbox, sessionId: sessionIdRef.current })
         }).catch(() => { }); // Silent fail
-=======
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934
     }, []);
 
     // [Project AERO-SYNC] Initialize WebWorker for WebSocket Binary Stream

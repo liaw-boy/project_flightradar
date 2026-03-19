@@ -14,10 +14,7 @@ const flightSessionSchema = new mongoose.Schema({
     },
     callsign: {
         type: String,
-<<<<<<< HEAD:backend/models/FlightSession.js
         default: null,
-=======
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:models/FlightSession.js
         index: true
     },
     startTime: {
@@ -30,12 +27,7 @@ const flightSessionSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-<<<<<<< HEAD:backend/models/FlightSession.js
         enum: ['ACTIVE', 'COMPLETED', 'TIMEOUT'],
-        default: 'ACTIVE'
-    }
-=======
-        enum: ['ACTIVE', 'COMPLETED'],
         default: 'ACTIVE',
         index: true
     },
@@ -49,7 +41,6 @@ const flightSessionSchema = new mongoose.Schema({
     }
 }, {
     timestamps: true
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:models/FlightSession.js
 });
 
 module.exports = mongoose.model('FlightSession', flightSessionSchema);

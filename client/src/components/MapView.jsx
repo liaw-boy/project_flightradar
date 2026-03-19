@@ -286,10 +286,11 @@ export default function MapView({
                 const pt = map.latLngToContainerPoint([p.renderLat, normalizeLongitude(p.renderLng)]);
                 const dist = Math.hypot(pt.x - clickPt.x, pt.y - clickPt.y);
 
-                if (dist < 25) {
+                const hitRadius = getDrawSize(p, map.getZoom()) / 2 + 8;
+                if (dist < hitRadius) {
                     // 計算命中權重 (Weight)
                     // 基礎權重為距離反比，加上顯著的業務權重
-                    let weight = (25 - dist);
+                    let weight = (hitRadius - dist);
                     if (id === currentSelected) weight += 50;  // 已選中者優先
                     if (p.isEmergency) weight += 100;         // 緊急狀態最高優先
                     if (p.category === 5 || p.category === 6) weight += 20; // 大型機優先
@@ -703,17 +704,23 @@ export default function MapView({
         const map = mapRef.current;
         if (!map) return;
 
-        // [v4.4.0] High Performance SVG Data URI Cache
+        // [v5.1] Icon image cache — only caches the HTMLImageElement, NOT size.
+        // Size is computed per-frame from zoom so all planes are consistent.
         const getSVGImage = (plane) => {
             const url = getAircraftIconUrl(plane);
             if (!cachedPathsRef.current.has(url)) {
                 const img = new Image();
                 img.src = url;
-                // [v3.6] High-DPI physical scaling
-                const size = plane.onGround ? 24 : Math.min(36, 24 + (plane.altitude !== 'N/A' && plane.altitude !== 'GROUND' ? plane.altitude / 500 : 0));
-                cachedPathsRef.current.set(url, { img, drawSize: size });
+                cachedPathsRef.current.set(url, img);
             }
             return cachedPathsRef.current.get(url);
+        };
+
+        // [v5.1] Zoom-based icon sizing — matches FR24/adsb.fi proportions.
+        // Ground planes 30% smaller; airborne scales with zoom level.
+        const getDrawSize = (plane, z) => {
+            const t = Math.max(0.45, Math.min(1.8, (z - 4) / 8));
+            return Math.round((plane.onGround ? 22 : 32) * t);
         };
 
         // [v3.4] Airline Logo Cache for Canvas
@@ -943,8 +950,9 @@ export default function MapView({
                     const finalRotationRad = (plane.heading + rotationOffset) * Math.PI / 180;
                     ctx.rotate(finalRotationRad);
 
-                    const { img, drawSize } = getSVGImage(plane);
-                    if (img.complete && img.naturalHeight !== 0) {
+                    const img = getSVGImage(plane);
+                    const drawSize = getDrawSize(plane, zoom);
+                    if (img && img.complete && img.naturalHeight !== 0) {
                         const offset = drawSize / 2;
                         ctx.drawImage(img, -offset, -offset, drawSize, drawSize);
                     }

@@ -1,16 +1,15 @@
 require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
-const compression = require('compression'); 
-const helmet = require('helmet'); 
-const rateLimit = require('express-rate-limit'); 
+const compression = require('compression'); // [v2.9.0] Gzip
+const helmet = require('helmet'); // [v3.0] Security headers
+const rateLimit = require('express-rate-limit'); // [v3.0] API abuse protection
 const fs = require('fs');
 const path = require('path');
 const cron = require('node-cron');
 const { Worker } = require('worker_threads');
 const http = require('http');
 const { initWebSocketServer, broadcastPlanes, broadcastTelemetry, getActiveViewports } = require('./socketEngine');
-<<<<<<< HEAD:backend/server.js
 const mongoose = require('mongoose'); // [Phase 15] Database Persistence
 const Route = require('./models/Route'); // [Phase 15] Route Schema
 const TrackPoint = require('./models/TrackPoint'); // [Time Series] Historical Tracks
@@ -27,28 +26,16 @@ function getTime() {
     return `[${new Date().toLocaleTimeString('en-US', { hour12: false })}]`;
 }
 
-=======
-const mongoose = require('mongoose'); 
-const Route = require('./models/Route'); 
-const TrackPoint = require('./models/TrackPoint'); 
-const Aircraft = require('./models/Aircraft'); 
-const AircraftRegistry = require('./models/AircraftRegistry'); 
-const Metar = require('./models/Metar'); 
-const Airline = require('./models/Airline'); 
-const Airport = require('./models/Airport'); 
-const { crawlFlightSchedules } = require('./crawler'); 
-const FlightSession = require('./models/FlightSession'); 
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 
 // ==========================================
 // [Phase 15] MongoDB Connection (Local Only)
 // ==========================================
+// We default to local MongoDB to ensure privacy and speed.
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat';
 
 mongoose.connect(MONGODB_URI, {
     serverSelectionTimeoutMS: 5000,
     connectTimeoutMS: 10000,
-<<<<<<< HEAD:backend/server.js
 }).then(() => {
     console.log(`${getTime()} 🍃 [DATABASE] Connected to Local MongoDB`);
     restoreActiveSessions();
@@ -66,24 +53,9 @@ mongoose.connection.on('disconnected', () => {
 mongoose.connection.on('reconnected', () => {
     console.log('✅ [DATABASE] MongoDB reconnected.');
 });
-=======
-}).then(() => console.log(`${getLogTime()} 🍃 [DATABASE] Connected to Local MongoDB`))
-  .catch(err => console.error(`${getLogTime()} ❌ [DATABASE] Connection error:`, err));
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 
 // ==========================================
-// [v4.4.1] Unified Log Timestamp Helper (\x1b[90m is gray)
-// ==========================================
-function getLogTime() {
-    const now = new Date();
-    const h = String(now.getHours()).padStart(2, '0');
-    const m = String(now.getMinutes()).padStart(2, '0');
-    const s = String(now.getSeconds()).padStart(2, '0');
-    return `\x1b[90m[${h}:${m}:${s}]\x1b[0m`;
-}
-
-// ==========================================
-// [OPT] Debounce utility
+// [OPT] Debounce utility — 合併高頻磁碟寫入
 // ==========================================
 function debounce(fn, delayMs) {
     let timer = null;
@@ -97,55 +69,38 @@ function debounce(fn, delayMs) {
 }
 
 const app = express();
-app.set('trust proxy', 1); 
+app.set('trust proxy', 1); // Fix ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
 const PORT = process.env.PORT || 3000;
 
 // ==========================================
 // Middleware
 // ==========================================
 app.use(cors());
-app.use(compression()); 
+app.use(compression()); // [v2.9.0] Gzip
 
-<<<<<<< HEAD:backend/server.js
 // [v5.0.0] Static file serving REMOVED — Frontend runs independently via Vite Dev Server
 // Backend is now a pure API + WebSocket data engine
 
-=======
-app.use(express.static(path.join(__dirname, 'public-react'), {
-    setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.html')) {
-            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-            res.setHeader('Pragma', 'no-cache');
-            res.setHeader('Expires', '0');
-        }
-        if (filePath.endsWith('.js')) res.setHeader('Content-Type', 'application/javascript');
-        if (filePath.endsWith('.css')) res.setHeader('Content-Type', 'text/css');
-    }
-}));
-app.use(express.static(path.join(__dirname, 'public')));
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 
+// [v3.0] Security Headers
 app.use(helmet({
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: false, // Prevents blocking of inline scripts and external map tiles
+    crossOriginEmbedderPolicy: false, // Prevents blocking of external assets
 }));
-<<<<<<< HEAD:backend/server.js
 // Rate limiter: 200 req/min per IP（選飛機會同時觸發 metadata+route+track 3 個請求）
-=======
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 200,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please wait a moment.' },
-    skip: (req) => req.path === '/api/events', 
+    skip: (req) => req.path === '/api/events', // SSE exempt
 });
 app.use('/api', apiLimiter);
 app.use(express.json());
 
 // ==========================================
-// [v2.5.2] 資料缺失日誌系統
+// [v2.5.2] 資料缺失日誌系統 (Data Deficiency Logging)
 // ==========================================
 const MISSING_DATA_FILE = path.join(__dirname, 'missing-data.json');
 let missingDataLog = {};
@@ -155,12 +110,13 @@ function loadMissingDataLog() {
         if (fs.existsSync(MISSING_DATA_FILE)) {
             missingDataLog = JSON.parse(fs.readFileSync(MISSING_DATA_FILE, 'utf8'));
         }
-    } catch (e) { console.error(`${getLogTime()} ❌ [MISSING LOG] Load error:`, e.message); }
+    } catch (e) { console.error('❌ [MISSING LOG] Load error:', e.message); }
 }
 
+// [OPT] 防抖寫入：5秒內的多次觸發合併為一次磁碟寫入
 const _saveMissingDataLogNow = () => {
     fs.writeFile(MISSING_DATA_FILE, JSON.stringify(missingDataLog, null, 2), (e) => {
-        if (e) console.error(`${getLogTime()} ❌ [MISSING LOG] Save error:`, e.message);
+        if (e) console.error('❌ [MISSING LOG] Save error:', e.message);
     });
 };
 const saveMissingDataLog = debounce(_saveMissingDataLogNow, 5000);
@@ -175,11 +131,7 @@ function logMissingData(icao24, type, callsign = null) {
         missingDataLog[key].missing.push(type);
         missingDataLog[key].lastAttempt = new Date().toISOString();
         saveMissingDataLog();
-<<<<<<< HEAD:backend/server.js
         console.log(`${getTime()} 📝 [MISSING LOG] Recorded ${type} for ${icao24}`);
-=======
-        console.log(`${getLogTime()} 📝 [MISSING LOG] Recorded ${type} for ${icao24}`);
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
     }
 }
 
@@ -189,7 +141,7 @@ function resolveMissingData(icao24, type) {
         missingDataLog[key].missing = missingDataLog[key].missing.filter(m => m !== type);
         if (missingDataLog[key].missing.length === 0) {
             delete missingDataLog[key];
-            console.log(`${getLogTime()} ✅ [MISSING LOG] Resolved all for ${icao24}`);
+            console.log(`✅ [MISSING LOG] Resolved all for ${icao24}`);
         }
         saveMissingDataLog();
     }
@@ -205,7 +157,6 @@ app.get('/api/admin/missing-data', (req, res) => {
 // 快取系統
 // ==========================================
 const cache = new Map();
-<<<<<<< HEAD:backend/server.js
 const activeSessions = new Map(); // [Flight Sessions] icao24 -> { sessionId, callsign, lastSeen, onGround }
 
 // ==========================================
@@ -250,13 +201,32 @@ async function restoreActiveSessions() {
     }
 }
 const CACHE_TTL = 30000; // 30 秒快取 (配合前端 30s 輪詢)
-=======
-const lastTrackWriteMap = new Map(); 
-const activePlanesMap = new Map(); 
-const activeSessions = new Map(); // icao24 -> { sessionId, callsign, lastSeen, onGround }
-const CACHE_TTL = 30000; 
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 
+function getCached(key) {
+    if (cache.has(key)) {
+        const entry = cache.get(key);
+        if (Date.now() - entry.timestamp < CACHE_TTL) {
+            return entry.data;
+        }
+        // 不要刪除過期快取，因為這會摧毀發生 Timeout 時的 STALE 備援防護網
+        // cache.delete(key);
+    }
+    return null;
+}
+
+function setCache(key, data) {
+    cache.set(key, { data, timestamp: Date.now() });
+
+    // 清理過期快取（最多保留 50 個）
+    if (cache.size > 50) {
+        const oldest = cache.keys().next().value;
+        cache.delete(oldest);
+    }
+}
+
+// ==========================================
+// OpenSky API OAuth2 認證 Header
+// ==========================================
 // ==========================================
 // OpenSky API OAuth2 多帳號輪替系統
 // ==========================================
@@ -278,22 +248,22 @@ let currentAccountIndex = 0;
 function rotateAccount() {
     if (ACCOUNTS.length <= 1) return false;
     currentAccountIndex = (currentAccountIndex + 1) % ACCOUNTS.length;
-    console.log(`${getLogTime()} 🔄 [AUTH] Rotating to account #${currentAccountIndex + 1} (${ACCOUNTS[currentAccountIndex].user})`);
+    console.log(`🔄 [AUTH] Rotating to account #${currentAccountIndex + 1} (${ACCOUNTS[currentAccountIndex].user})`);
     return true;
 }
 
-const SAFE_RESERVE_CAP = 50; 
+const SAFE_RESERVE_CAP = 50; // 每個帳號保留至少 50 次額度 (User Specified)
 const QUOTA_CACHE_FILE = path.join(__dirname, 'quota-cache.json');
 
 function saveQuotaCache() {
     try {
         const payload = {
-            date: new Date().toISOString().split('T')[0],
+            date: new Date().toISOString().split('T')[0], // YYYY-MM-DD (UTC)
             accounts: apiStats.accounts
         };
         fs.writeFileSync(QUOTA_CACHE_FILE, JSON.stringify(payload, null, 2));
     } catch (e) {
-        console.error(`${getLogTime()} ❌ [QUOTA] Failed to save quota cache:`, e.message);
+        console.error('❌ [QUOTA] Failed to save quota cache:', e.message);
     }
 }
 
@@ -305,6 +275,7 @@ function loadQuotaCache() {
             const savedDate = Array.isArray(saved) ? null : saved.date;
             const currentDate = new Date().toISOString().split('T')[0];
 
+            // 如果是舊格式或同一天，則載入
             if (savedDate === currentDate || !savedDate) {
                 apiStats.accounts.forEach(acc => {
                     const found = savedAccounts.find(s => s.user === acc.user);
@@ -314,18 +285,28 @@ function loadQuotaCache() {
                         acc.rateLimits = found.rateLimits || 0;
                     }
                 });
-                return true;
+                console.log(`💾 [QUOTA] Loaded persistent stats for ${apiStats.accounts.length} accounts.`);
+                return savedDate === currentDate; // 回傳是否為當天
+            } else {
+                console.log(`📅 [QUOTA] Cache is from ${savedDate}, current is ${currentDate}. Forcing reset.`);
             }
         }
-    } catch (e) { console.error(`${getLogTime()} ❌ [QUOTA] Failed to load quota cache:`, e.message); }
+    } catch (e) {
+        console.error('❌ [QUOTA] Failed to load quota cache:', e.message);
+    }
     return false;
 }
 
+/**
+ * 同步並儲存 Quota 資訊
+ */
 function syncAccountQuota(index, response) {
     if (!response || !response.headers) return;
+
     const remainingStr = response.headers.get('x-rate-limit-remaining');
     const retryStr = response.headers.get('x-rate-limit-retry-after-seconds');
     let changed = false;
+
     if (remainingStr) {
         const remainingNum = parseInt(remainingStr, 10);
         if (apiStats.accounts[index].remainingCredits !== remainingNum) {
@@ -334,35 +315,48 @@ function syncAccountQuota(index, response) {
         }
         apiStats.accounts[index].unlockTime = null;
     }
+
     if (response.status === 429 && retryStr) {
         const unlock = new Date(Date.now() + parseInt(retryStr, 10) * 1000).toISOString();
         apiStats.accounts[index].unlockTime = unlock;
         apiStats.accounts[index].rateLimits++;
         changed = true;
     }
-    if (changed) saveQuotaCache();
+
+    if (changed) {
+        saveQuotaCache();
+    }
 }
 
 async function getAuthHeaders(retryCount = 0) {
     if (ACCOUNTS.length === 0) return {};
+    // 防鎖死：如果轉一圈都沒健康的帳號，就硬著頭皮用目前這個 (或交由 429 處理)
     if (retryCount >= ACCOUNTS.length) return { 'Authorization': `Bearer ${accountStates[currentAccountIndex].token}` };
 
+    // 檢查目前帳號是否還有足夠的安全餘額
     const currentStats = apiStats.accounts[currentAccountIndex];
     if (currentStats.remainingCredits !== null && currentStats.remainingCredits <= SAFE_RESERVE_CAP) {
+        // 如果目前帳號正在冷卻中就不特別處理（交由後續 429 機制），
+        // 否則如果還在 ACTIVE 但餘額不足，嘗試主動輪替
         const isCurrentlyLimited = currentStats.unlockTime && new Date(currentStats.unlockTime).getTime() > Date.now();
         if (!isCurrentlyLimited) {
-            if (rotateAccount()) return await getAuthHeaders(retryCount + 1);
+            console.log(`🛡️ [RESERVE] Account ${ACCOUNTS[currentAccountIndex].user} hit safe floor (${currentStats.remainingCredits}). Rotating preemptively...`);
+            if (rotateAccount()) {
+                return await getAuthHeaders(retryCount + 1);
+            }
         }
     }
 
     const account = ACCOUNTS[currentAccountIndex];
     const state = accountStates[currentAccountIndex];
 
+    // 如果 Token 還有效（保留 60 秒緩衝），直接回傳
     if (state.token && Date.now() < state.expiresAt) {
         return { 'Authorization': `Bearer ${state.token}` };
     }
 
     try {
+        console.log(`🔑 [AUTH] Fetching token for account #${currentAccountIndex + 1} (${account.user})...`);
         const params = new URLSearchParams();
         params.append('grant_type', 'client_credentials');
         params.append('client_id', account.user);
@@ -375,6 +369,9 @@ async function getAuthHeaders(retryCount = 0) {
         });
 
         if (!response.ok) {
+            const err = await response.text();
+            console.error(`❌ [AUTH ERROR] Failed to get token for ${account.user}: ${err}`);
+            // 如果這個帳號認證失敗，嘗試切換下一個
             if (rotateAccount()) return await getAuthHeaders(retryCount + 1);
             return {};
         }
@@ -382,35 +379,57 @@ async function getAuthHeaders(retryCount = 0) {
         const data = await response.json();
         state.token = data.access_token;
         state.expiresAt = Date.now() + (data.expires_in - 60) * 1000;
+
+        console.log(`✅ [AUTH] Token received for ${account.user}. Expires in ${data.expires_in}s.`);
         return { 'Authorization': `Bearer ${state.token}` };
     } catch (error) {
-        console.error(`${getLogTime()} ❌ [AUTH ERROR] ${error.message}`);
+        console.error(`❌ [AUTH ERROR] ${error.message}`);
         return {};
     }
 }
 
 // ==========================================
-// SSE 即時推送系統
+// 動作紀錄 API (讓前端的操作顯示在後台中端)
+app.post('/api/log', (req, res) => {
+    const { message, type = 'info', data = {} } = req.body;
+    const timestamp = new Date().toLocaleTimeString();
+    const prefix = type === 'error' ? '❌ [CLIENT ERROR]' : type === 'warn' ? '⚠️ [CLIENT WARN]' : '📱 [USER ACTION]';
+
+    console.log(`${prefix} [${timestamp}] ${message}`, Object.keys(data).length > 0 ? data : '');
+    res.json({ status: 'ok' });
+});
+
+// ==========================================
+// [v2.9.0] SSE 即時推送系統
+// 每次 globalPlanesCache 更新就廣播給所有連接的客戶端
+// 客戶端收到事件後立即觸發 fetchPlanes()，延遲從 60s 降至 <1s
 // ==========================================
 const sseClients = new Set();
+
 app.get('/api/events', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.flushHeaders();
+
+    // 登錄這個客戶端
     sseClients.add(res);
-<<<<<<< HEAD:backend/server.js
     console.log(`${getTime()} 📡 [SSE] Client connected. Total: ${sseClients.size}`);
 
     // 立即發送当前資料快照
-=======
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
     res.write(`data: ${JSON.stringify({ type: 'connected', time: globalPlanesCache.time, count: globalPlanesCache.states.length })}\n\n`);
-    const heartbeat = setInterval(() => res.write(`: ping\n\n`), 30000);
+
+    // 心跳機制：每 30 秒發送一次 ping 防止連線超時斷開
+    const heartbeat = setInterval(() => {
+        res.write(`: ping\n\n`);
+    }, 30000);
+
+    // 客戶端斷開後清理
     req.on('close', () => {
         sseClients.delete(res);
         clearInterval(heartbeat);
+        console.log(`📡 [SSE] Client disconnected. Total: ${sseClients.size}`);
     });
 });
 
@@ -423,7 +442,6 @@ function broadcastSSE(data) {
 }
 
 // ==========================================
-<<<<<<< HEAD:backend/server.js
 // [v3.0] 飛行異常偵測引擎
 // 每次 globalPlanesCache 更新後這行，偵測危險狀態後用 SSE 廣播
 // ==========================================
@@ -486,8 +504,6 @@ app.get('/api/health', (req, res) => {
 });
 
 // ==========================================
-=======
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 // API 請求計數器
 // ==========================================
 var apiStats = {
@@ -508,31 +524,63 @@ var apiStats = {
     startTime: Date.now()
 };
 
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', function (req, res) {
     res.json({
-        ...apiStats,
+        totalCalls: apiStats.totalCalls,
+        stateCalls: apiStats.stateCalls,
+        metadataCalls: apiStats.metadataCalls,
+        cacheHits: apiStats.cacheHits,
+        accounts: apiStats.accounts,
+        errors: apiStats.errors,
+        lastError: apiStats.lastError,
+        lastErrorTime: apiStats.lastErrorTime,
+        lastSuccessTime: apiStats.lastSuccessTime,
         uptimeMinutes: Math.round((Date.now() - apiStats.startTime) / 60000),
         recommendedInterval: calculateRecommendedInterval(),
         activeAccount: ACCOUNTS.length > 0 ? `${currentAccountIndex + 1}/${ACCOUNTS.length} (${ACCOUNTS[currentAccountIndex].user})` : 'none'
     });
 });
 
+// ==========================================
+// 動態 Quota 延展機制 (Quota Stretching)
+// ==========================================
 function calculateRecommendedInterval() {
-    if (ACCOUNTS.length === 0) return 30;
+    let minInterval = 15; // 絕對底線 (秒)，避免打太快被強制封鎖
+
+    if (ACCOUNTS.length === 0) return minInterval;
+
     const currentAcc = apiStats.accounts[currentAccountIndex];
-    if (currentAcc.unlockTime && new Date(currentAcc.unlockTime).getTime() > Date.now()) return 60;
-    if (currentAcc.remainingCredits !== null && currentAcc.remainingCredits <= SAFE_RESERVE_CAP) return 300;
-    return 30; 
+
+    // 如果目前帳號被鎖定了，或者 quota 資料還沒進來，先給一個保守的預設值 (30秒)
+    if (currentAcc.unlockTime && new Date(currentAcc.unlockTime).getTime() > Date.now()) return 30;
+    if (currentAcc.remainingCredits === null || currentAcc.remainingCredits === undefined) return minInterval;
+
+    const remaining = currentAcc.remainingCredits;
+    // 如果剩餘額度低到危險值 (例如剩不到 30 次)，強制拉長間距到 5 分鐘
+    if (remaining <= SAFE_RESERVE_CAP) return 300;
+
+    // 計算距離今日 UTC 00:00 的剩餘秒數
+    const now = new Date();
+    const tomorrowUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+    const secondsUntilReset = Math.floor((tomorrowUTC.getTime() - now.getTime()) / 1000);
+
+    // 留預留額度作為緊急緩衝，剩下的額度平分給剩下的秒數
+    const safeCredits = Math.max(1, remaining - SAFE_RESERVE_CAP);
+    const calculatedInterval = Math.ceil(secondsUntilReset / safeCredits);
+
+    // 限制在 15秒 到 300秒 之間
+    return Math.max(minInterval, Math.min(300, calculatedInterval));
 }
 
 // ==========================================
 // [V2.0.0] Global Polling System & BBox API
 // ==========================================
 let globalPlanesCache = { states: [], time: 0 };
+let lastGlobalStatesMap = new Map(); // icao24 -> state (用於偵測起飛/降落)
 let isFetchingGlobal = false;
+let globalRateLimitCooldown = 0; // The timestamp when we are allowed to ping OpenSky again
 let lastGlobalFetchTime = 0;
 
-<<<<<<< HEAD:backend/server.js
 // ==========================================
 // [v2.8.4] Spatial Grid Index (空間格狀索引)
 // 將全球機場分割到 1°×1° 格子，查詢時只掃描周圍 9 格
@@ -577,78 +625,67 @@ function findNearestAirport(lat, lng, maxDist = 15) {
                 if (dist < minDist) {
                     minDist = dist;
                     nearestAp = ap;
-=======
-async function findNearestAirport(lat, lng, maxDistMeters = 10000) {
-    try {
-        const nearest = await Airport.findOne({
-            location: {
-                $near: {
-                    $geometry: { type: "Point", coordinates: [lng, lat] },
-                    $maxDistance: maxDistMeters
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
                 }
             }
-        }).lean();
-        if (nearest) {
-            return {
-                icao: nearest.icao, iata: nearest.iata, name: nearest.name, city: nearest.city,
-                country: nearest.country, lat: nearest.location.coordinates[1], lng: nearest.location.coordinates[0]
-            };
         }
-        return null;
-    } catch (err) {
-        console.error(`${getLogTime()} ❌ [GIS ERROR] findNearestAirport:`, err.message);
-        return null;
     }
+    return nearestAp;
 }
 
-<<<<<<< HEAD:backend/server.js
 /**
  * 核心：向 OpenSky 發起請求的新型通用函數
  */
-=======
-async function learnRouteFromTrajectory(icao24, callsign) {
-    if (!callsign || callsign === 'N/A') return;
-    try {
-        const cleanCS = callsign.toUpperCase().trim();
-        const existing = await Route.findOne({ callsign: cleanCS });
-        if (existing && existing.source !== 'ai_learned' && existing.departureAirport && existing.arrivalAirport) return;
-        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        const points = await TrackPoint.find({ icao24, timestamp: { $gte: twentyFourHoursAgo } }).sort({ timestamp: 1 }).lean();
-        if (points.length < 2) return;
-        const depAp = await findNearestAirport(points[0].lat, points[0].lng, 15000);
-        const arrAp = await findNearestAirport(points[points.length - 1].lat, points[points.length - 1].lng, 15000);
-        if (depAp && arrAp && depAp.icao !== arrAp.icao) {
-            await Route.findOneAndUpdate({ callsign: cleanCS }, {
-                departureAirport: depAp.icao, arrivalAirport: arrAp.icao, source: 'ai_learned', lastUpdated: new Date()
-            }, { upsert: true });
-        }
-    } catch (e) { console.error(`${getLogTime()} ❌ [AI LEARN ERROR] ${callsign}:`, e.message); }
-}
-
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 async function fetchOpenSky(params = {}) {
     const headers = await getAuthHeaders();
     let url = 'https://opensky-network.org/api/states/all';
-    if (params.lamin !== undefined) url += `?lamin=${params.lamin}&lomin=${params.lomin}&lamax=${params.lamax}&lomax=${params.lomax}`;
-    const response = await fetch(url, { headers, signal: AbortSignal.timeout(30000) });
+
+    // 構建 BBox 語法
+    if (params.lamin !== undefined) {
+        url += `?lamin=${params.lamin}&lomin=${params.lomin}&lamax=${params.lamax}&lomax=${params.lomax}`;
+    }
+
+    const response = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(30000)
+    });
+
     syncAccountQuota(currentAccountIndex, response);
-    apiStats.totalCalls++;
+    apiStats.totalCalls++; // [v4.3.5] Increment total API hits
+
     if (!response.ok) {
         if (response.status === 429) rotateAccount();
         throw new Error(`OpenSky API Error: ${response.status}`);
     }
+
     const rawJsonText = await response.text();
     return new Promise((resolve, reject) => {
         const worker = new Worker(path.join(__dirname, 'workers', 'parser.js'));
         worker.postMessage(rawJsonText);
-        worker.on('message', (msg) => { worker.terminate(); if (msg.success) resolve({ states: msg.planes, time: msg.time }); else reject(new Error(msg.error)); });
-        worker.on('error', (err) => { worker.terminate(); reject(err); });
+        worker.on('message', (msg) => {
+            worker.terminate();
+            if (msg.success) resolve({ states: msg.planes, time: msg.time });
+            else reject(new Error(msg.error));
+        });
+        worker.on('error', (err) => {
+            worker.terminate();
+            reject(err);
+        });
     });
 }
 
+/**
+ * [Time Series] Helper to ingest raw plane data into MongoDB
+ * Standardizes format, lowercases ICAO24, and filters out corrupted coordinates.
+ */
 async function ingestTrackPoints(states, timeUnix) {
-    if (!states || states.length === 0 || mongoose.connection.readyState !== 1) return;
+    if (!states || states.length === 0) return;
+
+    // [HOTFIX] 連線狀態守衛：確保 MongoDB 已連線 (readyState === 1) 才允許寫入
+    if (mongoose.connection.readyState !== 1) {
+        console.warn('⚠️ [DATABASE] Skip ingestion: MongoDB is not connected yet.');
+        return;
+    }
+
     const timestamp = new Date(timeUnix * 1000);
     const now = Date.now();
     const batchTrackPoints = [];
@@ -665,7 +702,6 @@ async function ingestTrackPoints(states, timeUnix) {
         let needsNewSession = false;
 
         if (!session) {
-<<<<<<< HEAD:backend/server.js
             needsNewSession = true;
         } else if (session.callsign !== callsign && callsign !== 'N/A') {
             needsNewSession = true;
@@ -676,32 +712,11 @@ async function ingestTrackPoints(states, timeUnix) {
             needsNewSession = true;
         }
 
-=======
-            // A. New plane detected
-            needsNewSession = true;
-        } else if (session.callsign !== callsign && callsign !== 'N/A') {
-            // B. Callsign changed (and is not N/A)
-            needsNewSession = true;
-        } else if (!session.onGround && onGround) {
-            // C. Plane just landed - we keep the session until they take off or timeout
-            session.onGround = true;
-            session.lastSeen = now;
-        } else if (session.onGround && !onGround) {
-            // D. Plane was on ground and just took off
-            needsNewSession = true;
-        }
-
-        // Handle session timeout/expiry (e.g. if plane hasn't been seen for 1 hour)
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
         if (session && (now - session.lastSeen > 3600000)) {
             needsNewSession = true;
         }
 
         if (needsNewSession) {
-<<<<<<< HEAD:backend/server.js
-=======
-            // Mark old session as completed if it exists
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
             if (session) {
                 FlightSession.updateOne({ sessionId: session.sessionId }, { status: 'COMPLETED', endTime: new Date() }).catch(() => {});
             }
@@ -710,10 +725,6 @@ async function ingestTrackPoints(states, timeUnix) {
             session = { sessionId: newSessionId, callsign, lastSeen: now, onGround };
             activeSessions.set(icao24, session);
 
-<<<<<<< HEAD:backend/server.js
-=======
-            // Create new session entry in DB
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
             const newSession = new FlightSession({
                 sessionId: newSessionId,
                 icao24,
@@ -721,11 +732,7 @@ async function ingestTrackPoints(states, timeUnix) {
                 startTime: timestamp,
                 status: 'ACTIVE'
             });
-<<<<<<< HEAD:backend/server.js
             newSession.save().catch(e => console.error(`❌ [SESSION DB] Save error:`, e.message));
-=======
-            newSession.save().catch(e => console.error(`${getLogTime()} ❌ [SESSION DB] Save error:`, e.message));
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
         } else if (session) {
             session.lastSeen = now;
             session.onGround = onGround;
@@ -735,25 +742,15 @@ async function ingestTrackPoints(states, timeUnix) {
             }
         }
 
-<<<<<<< HEAD:backend/server.js
-=======
-        // [INGESTION THROTTLE]
-        const lastWrite = lastTrackWriteMap.get(icao24) || 0;
-        if (now - lastWrite < 20000) continue; 
-        lastTrackWriteMap.set(icao24, now);
-
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
         batchTrackPoints.push({
             sessionId: session.sessionId,
             icao24,
             timestamp,
             lat: p.lat,
             lng: p.lng,
-            altitude: p.altitude || 0,
-            geo_altitude: p.geo_altitude || null,
+            altitude: (typeof p.altitude === 'number') ? p.altitude : 0,
             velocity: p.velocity || 0,
             heading: p.heading || 0,
-<<<<<<< HEAD:backend/server.js
             onGround: onGround
         });
     }
@@ -765,34 +762,19 @@ async function ingestTrackPoints(states, timeUnix) {
     } catch (err) {
         if (err.name !== 'MongoBulkWriteError' && err.name !== 'MongoServerError') {
             console.error('❌ [DATABASE] Ingestion error:', err.message);
-=======
-            vertical_rate: p.vertical_rate || null,
-            onGround: p.onGround || false,
-            squawk: p.squawk || null
-        });
-    }
-
-    if (batchTrackPoints.length > 0) {
-        try {
-            await TrackPoint.insertMany(batchTrackPoints, { ordered: false });
-        } catch (e) {
-            // ignore duplicate errors or bulk write issues
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
         }
     }
 }
 
-<<<<<<< HEAD:backend/server.js
 // 改寫原本的 fetchGlobalPlanes 為 fetchOpenSky 的封裝
-=======
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 async function fetchGlobalPlanes() {
     if (isFetchingGlobal) return;
     isFetchingGlobal = true;
     const start = performance.now();
+    const acc = ACCOUNTS[currentAccountIndex];
+    
     try {
         const data = await fetchOpenSky();
-<<<<<<< HEAD:backend/server.js
         const fetchLatency = Math.round(performance.now() - start);
         
         let enrichedStates = data.states;
@@ -835,19 +817,12 @@ async function fetchGlobalPlanes() {
     }
 
     // [v4.3.5] Broadcast precise global telemetry
-=======
-        globalPlanesCache = data;
-        broadcastPlanes(data.states, data.time);
-        lastGlobalFetchTime = Date.now();
-        console.log(`${getLogTime()} \x1b[32m🌏 [GLOBAL] Baseline updated | Latency: ${Math.round(performance.now() - start)}ms | Planes: ${data.states.length}\x1b[0m`);
-    } catch (e) { console.warn(`${getLogTime()} ⚠️ [GLOBAL WARN] ${e.message}`); }
-    finally { isFetchingGlobal = false; }
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
     broadcastTelemetry(apiStats, 30);
+
+    // [Audit Fix] Use centralized ingestion helper
     ingestTrackPoints(globalPlanesCache.states, globalPlanesCache.time);
 }
 
-<<<<<<< HEAD:backend/server.js
 // 啟動 30 秒全球資料輪詢機制 (配合 CACHE_TTL=30s)
 setInterval(fetchGlobalPlanes, 30000);
 // 啟動時讀取快取並初始化
@@ -1031,33 +1006,72 @@ app.post('/api/metadata/batch', async function (req, res) {
 
     try {
         // 從 MongoDB 找出已有的
-=======
-// ==========================================
-// 批次 Metadata 預取
-// ==========================================
-app.post('/api/metadata/batch', async (req, res) => {
-    const { icao24s = [] } = req.body;
-    if (mongoose.connection.readyState !== 1 || icao24s.length === 0) return res.json({ fetched: 0 });
-    const filteredIcaos = icao24s.filter(id => !aircraftStaticDB[id.toLowerCase()]);
-    try {
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
         const existingInDb = await Aircraft.find({ icao24: { $in: filteredIcaos.map(id => id.toLowerCase()) } }).lean();
         const existingIcaos = new Set(existingInDb.map(a => a.icao24));
-        const uncached = filteredIcaos.filter(id => !existingIcaos.has(id.toLowerCase())).slice(0, 10);
+
+        const uncached = filteredIcaos.filter(id => !existingIcaos.has(id.toLowerCase()));
+
+        if (uncached.length === 0) {
+            return res.json({ fetched: 0, reason: 'all_cached' });
+        }
+
+        // [OPT 5.1] 如果當前帳號 quota 已低於安全線，跳過本次批次
+        const currentAcc = apiStats.accounts[currentAccountIndex];
+        if (currentAcc.remainingCredits !== null && currentAcc.remainingCredits <= SAFE_RESERVE_CAP) {
+            return res.json({ fetched: 0, skipped: uncached.length, reason: 'quota_low' });
+        }
+
+        // 最多同時查詢 10 架
+        const toFetch = uncached.slice(0, 10);
         let fetched = 0;
-        for (const icao24 of uncached) {
+
+        for (let i = 0; i < toFetch.length; i++) {
+            const icao24 = toFetch[i].toLowerCase();
             try {
                 const headers = await getAuthHeaders();
-                const response = await fetch(`https://opensky-network.org/api/metadata/aircraft/icao/${icao24.toLowerCase()}`, { headers, signal: AbortSignal.timeout(8000) });
+                apiStats.totalCalls++;
+                apiStats.metadataCalls++;
+                const response = await fetch(
+                    'https://opensky-network.org/api/metadata/aircraft/icao/' + icao24,
+                    { headers, signal: AbortSignal.timeout(8000) }
+                );
+
+                if (response.status === 429) {
+                    syncAccountQuota(currentAccountIndex, response);
+                    break;
+                }
+
                 syncAccountQuota(currentAccountIndex, response);
+
                 if (response.ok) {
                     const data = await response.json();
-                    await Aircraft.findOneAndUpdate({ icao24: icao24.toLowerCase() }, { ...data, icao24: icao24.toLowerCase(), lastUpdated: new Date() }, { upsert: true });
+                    const metadata = {
+                        icao24: icao24,
+                        registration: data.registration || '',
+                        manufacturerName: data.manufacturerName || '',
+                        model: data.model || '',
+                        typecode: data.typecode || '',
+                        owner: data.owner || '',
+                        operatorCallsign: data.operatorCallsign || '',
+                        built: data.built || '',
+                        categoryDescription: data.categoryDescription || '',
+                        lastUpdated: new Date()
+                    };
+                    await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true });
+                    resolveMissingData(icao24, 'metadata');
                     fetched++;
+                } else {
+                    await Aircraft.findOneAndUpdate({ icao24 }, { icao24, noData: true, lastUpdated: new Date() }, { upsert: true });
+                    logMissingData(icao24, 'metadata');
                 }
-            } catch (e) {}
+            } catch (e) {
+                apiStats.errors++;
+            }
+
+            if (i < toFetch.length - 1) {
+                await new Promise(r => setTimeout(r, 300));
+            }
         }
-<<<<<<< HEAD:backend/server.js
 
         console.log(`${getTime()} 📦 [BATCH] Fetched ${fetched}/${toFetch.length} metadata to MongoDB`);
         res.json({ fetched: fetched, requested: toFetch.length });
@@ -1065,41 +1079,41 @@ app.post('/api/metadata/batch', async (req, res) => {
         console.error('❌ [BATCH ERROR]', err.message);
         res.status(500).json({ fetched: 0, error: err.message });
     }
-=======
-        res.json({ fetched });
-    } catch (err) { res.status(500).json({ error: err.message }); }
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 });
 
 // ==========================================
-// [v4.6.0] 航班路由與數據模型
+// 航班來源/目的地 API (flights/aircraft & routes)
+// 實作: 固定航班航線字典 (Flight Route Database)
+// ==========================================
+// ==========================================
+// 航班來源/目的地 API (flights/aircraft & routes)
+// 實作: 固定航班航線字典 (Flight Route Database)
 // ==========================================
 const LOCAL_ROUTES_FILE = path.join(__dirname, 'data', 'local_routes.json');
 const SCHEDULES_STATIC_FILE = path.join(__dirname, 'data', 'schedules_static.json');
-const AIRCRAFT_STATIC_FILE = path.join(__dirname, 'data', 'aircraft_static.json');
+const GLOBAL_AIRPORTS_FILE = path.join(__dirname, 'data', 'processed', 'airports_global.json');
+const GLOBAL_AIRLINES_FILE = path.join(__dirname, 'data', 'processed', 'airlines.json');
 
-let localRoutesDB = {}, schedulesStaticDB = {}, aircraftStaticDB = {}, globalAirlinesDB = {};
+let routesDatabase = {};
+let localRoutesDB = {};
+let schedulesStaticDB = {};
+let globalAirportsDB = {};
+let globalAirlinesDB = {};
 
 function loadGlobalData() {
-    globalAirlinesDB = {
-        "SJX": { iata: "JX", name: "Starlux" },
-        "CAL": { iata: "CI", name: "China Airlines" },
-        "EVA": { iata: "BR", name: "EVA Air" },
-        "APJ": { iata: "MM", name: "Peach" },
-        "TTW": { iata: "IT", name: "Tigerair Taiwan" },
-        "TGW": { iata: "TR", name: "Scoot" },
-        "VJC": { iata: "VJ", name: "VietJet" },
-        "JJP": { iata: "GK", name: "Jetstar Japan" },
-        "CQH": { iata: "9C", name: "Spring Airlines" },
-        "CSX": { iata: "ZH", name: "Shenzhen Airlines" }
-    };
     try {
-        if (fs.existsSync(LOCAL_ROUTES_FILE)) localRoutesDB = JSON.parse(fs.readFileSync(LOCAL_ROUTES_FILE, 'utf8'));
-        if (fs.existsSync(SCHEDULES_STATIC_FILE)) schedulesStaticDB = JSON.parse(fs.readFileSync(SCHEDULES_STATIC_FILE, 'utf8'));
-        if (fs.existsSync(AIRCRAFT_STATIC_FILE)) aircraftStaticDB = JSON.parse(fs.readFileSync(AIRCRAFT_STATIC_FILE, 'utf8'));
-    } catch (e) { console.error("Error loading static data:", e.message); }
+        if (fs.existsSync(GLOBAL_AIRPORTS_FILE)) {
+            globalAirportsDB = JSON.parse(fs.readFileSync(GLOBAL_AIRPORTS_FILE, 'utf8'));
+            console.log(`🌍 [GLOBAL] Loaded ${Object.keys(globalAirportsDB).length} airports.`);
+        }
+        if (fs.existsSync(GLOBAL_AIRLINES_FILE)) {
+            globalAirlinesDB = JSON.parse(fs.readFileSync(GLOBAL_AIRLINES_FILE, 'utf8'));
+            console.log(`✈️ [GLOBAL] Loaded ${Object.keys(globalAirlinesDB).length} airline aliases.`);
+        }
+    } catch (e) {
+        console.error('❌ [GLOBAL DATA ERROR] Failed to load global JSON files:', e.message);
+    }
 }
-<<<<<<< HEAD:backend/server.js
 
 // [OPT 1.1] 機場清單快取變數與函式——必須在 loadGlobalData()/buildAirportGrid() 之前宣告
 let _cachedAirportList = null;
@@ -1132,24 +1146,40 @@ async function buildAirportListCache() {
     }
 }
 
-=======
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 loadGlobalData();
+buildAirportGrid(); // [v2.8.4] 建立空間格狀索引
+buildAirportListCache(); // [OPT 1.1] 預計算機場清單快取
 
+// Helper to resolve airline aliases (e.g., APJ -> MM, TTW -> IT)
 function resolveAirlineAlias(callsign) {
     if (!callsign) return null;
     const match = callsign.match(/^([A-Z]{2,3})(\d+)$/);
     if (!match) return callsign;
-    const code = match[1], num = match[2];
+
+    const code = match[1];
+    const num = match[2];
     const alias = globalAirlinesDB[code];
-    if (alias) return { original: callsign, alias: (alias.iata || alias.icao) + num };
+
+    if (alias && (alias.iata || alias.icao)) {
+        const otherCode = alias.iata || alias.icao;
+        return { original: callsign, alias: otherCode + num };
+    }
     return callsign;
 }
 
-const routeCache = new Map();
-const ROUTE_CACHE_TTL = 1800000;
+try {
+    if (fs.existsSync(LOCAL_ROUTES_FILE)) {
+        localRoutesDB = JSON.parse(fs.readFileSync(LOCAL_ROUTES_FILE, 'utf8'));
+        console.log(`🗺️ [LOCAL ROUTES] Loaded ${Object.keys(localRoutesDB).length} routes from static dictionary`);
+    }
+    if (fs.existsSync(SCHEDULES_STATIC_FILE)) {
+        schedulesStaticDB = JSON.parse(fs.readFileSync(SCHEDULES_STATIC_FILE, 'utf8'));
+        console.log(`🗺️ [SCHEDULES STATIC] Loaded ${Object.keys(schedulesStaticDB).length} routes from static DB`);
+    }
+} catch (e) {
+    console.error('❌ [ROUTE DB] Failed to load route JSONs:', e.message);
+}
 
-<<<<<<< HEAD:backend/server.js
 // [REMOVED] routesDatabase is migrated to MongoDB
 
 const routeCache = new Map(); // icao24 -> { data, timestamp } (動態航線快取)
@@ -1166,27 +1196,36 @@ app.get('/api/airports/list', async (req, res) => {
     res.setHeader('ETag', _cachedAirportListETag);
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.json(_cachedAirportList);
-=======
-app.get('/api/airports/list', async (req, res) => {
-    try {
-        const airports = await Airport.find({}, { icao: 1, iata: 1, name: 1, city: 1, country: 1, location: 1 }).limit(5000).lean();
-        res.json(airports.map(a => ({ ...a, lat: a.location.coordinates[1], lng: a.location.coordinates[0] })));
-    } catch (e) { res.status(500).json({ error: e.message }); }
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 });
 
 app.get('/api/airport/:code', async (req, res) => {
-    const code = req.params.code.toUpperCase().trim();
+    const code = req.params.code.toUpperCase();
+
+    // Check Global Database first
+    if (globalAirportsDB[code]) {
+        return res.json(globalAirportsDB[code]);
+    }
+
+    // Check METAR collection (Fallback) [Phase 15 Migration]
     try {
-        const dbAp = await Airport.findOne({ $or: [{ icao: code }, { iata: code }] }).lean();
-        if (dbAp) return res.json({ ...dbAp, lat: dbAp.location.coordinates[1], lng: dbAp.location.coordinates[0], source: 'mongodb' });
-        const metar = await Metar.findOne({ icaoId: code }).lean();
-        if (metar) return res.json({ ...metar, source: 'metar_db' });
-        res.status(404).json({ error: 'Not found' });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+        const metarAirport = await Metar.findOne({ $or: [{ icaoId: code }, { iataId: code }] }).lean();
+        if (metarAirport) {
+            return res.json({
+                icao: metarAirport.icaoId,
+                iata: metarAirport.iataId,
+                name: metarAirport.name,
+                city: metarAirport.city,
+                country: metarAirport.country,
+                lat: metarAirport.lat,
+                lon: metarAirport.lon,
+                source: 'metar_db'
+            });
+        }
+    } catch (e) { /* ignore fallback errors */ }
+
+    return res.status(404).json({ error: 'Airport not found' });
 });
 
-<<<<<<< HEAD:backend/server.js
 // ==========================================
 // 飛機輪廓 SVG 資料 (來自 AircraftShape collection)
 // ==========================================
@@ -1254,40 +1293,69 @@ function getDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-=======
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 app.get('/api/route/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
-    const callsign = (req.query.callsign || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    let search = [callsign];
-    const resolved = resolveAirlineAlias(callsign);
-    if (resolved && resolved.alias) search.push(resolved.alias);
+    const queryCallsign = (req.query.callsign || '').toUpperCase();
+    const cleanCallsign = queryCallsign.replace(/[^A-Z0-9]/g, '');
 
-    let route = null, source = '';
-    for (const cs of search) {
+    // 1. Try static schedules and local routes first (Higher Priority)
+    let searchCallsigns = [cleanCallsign];
+    const resolved = resolveAirlineAlias(cleanCallsign);
+    if (resolved && resolved.alias) {
+        searchCallsigns.push(resolved.alias);
+    }
+
+    let route = null;
+    let matchSource = '';
+
+    // [HOTFIX] 連線狀態守衛
+    if (mongoose.connection.readyState !== 1) {
+        return res.json({ icao24, noData: true, error: 'Database not connected' });
+    }
+
+    for (const cs of searchCallsigns) {
         if (!cs) continue;
-        if (schedulesStaticDB[cs]) { route = schedulesStaticDB[cs]; source = 'static_db'; break; }
-        if (localRoutesDB[cs]) { route = { dep: localRoutesDB[cs][0], arr: localRoutesDB[cs][1] }; source = 'local_dict'; break; }
-        const dbRoute = await Route.findOne({ callsign: new RegExp(`^${cs}$`, 'i') }).lean();
-        if (dbRoute) { route = { dep: dbRoute.departureAirport, arr: dbRoute.arrivalAirport }; source = dbRoute.source || 'mongodb'; break; }
+        if (schedulesStaticDB[cs]) {
+            route = { dep: schedulesStaticDB[cs].dep, arr: schedulesStaticDB[cs].arr };
+            matchSource = 'static_db';
+            break;
+        }
+        if (localRoutesDB[cs]) {
+            route = { dep: localRoutesDB[cs][0], arr: localRoutesDB[cs][1] };
+            matchSource = 'local_dict';
+            break;
+        }
+        
+        // 從 MongoDB 檢查快取
+        const dbRoute = await Route.findOne({ callsign: cs }).lean();
+        if (dbRoute) {
+            route = { dep: dbRoute.departureAirport, arr: dbRoute.arrivalAirport };
+            matchSource = 'mongodb_cache';
+            break;
+        }
     }
 
     if (route) {
-        let depLoc = null, arrLoc = null;
-        try {
-            const d = await Airport.findOne({ icao: route.dep || route.departureAirport }).lean();
-            const a = await Airport.findOne({ icao: route.arr || route.arrivalAirport }).lean();
-            if (d) depLoc = { lat: d.location.coordinates[1], lng: d.location.coordinates[0] };
-            if (a) arrLoc = { lat: a.location.coordinates[1], lng: a.location.coordinates[0] };
-        } catch (e) {}
-        return res.json({ icao24, callsign, departureAirport: route.dep || route.departureAirport, arrivalAirport: route.arr || route.arrivalAirport, departureLocation: depLoc, arrivalLocation: arrLoc, source });
+        if (route.dep && route.dep.length === 3) route.dep = globalAirportsDB[route.dep]?.icao || route.dep;
+        if (route.arr && route.arr.length === 3) route.arr = globalAirportsDB[route.arr]?.icao || route.arr;
+
+        return res.json({
+            icao24,
+            callsign: cleanCallsign,
+            departureAirport: route.dep,
+            arrivalAirport: route.arr,
+            fromStaticDB: true,
+            source: matchSource
+        });
     }
 
+    // 2. 檢查記憶體動態快取
     const cached = routeCache.get(icao24);
-    if (cached && (Date.now() - cached.timestamp < ROUTE_CACHE_TTL)) return res.json(cached.data);
+    if (cached && (Date.now() - cached.timestamp < ROUTE_CACHE_TTL)) {
+        return res.json(cached.data);
+    }
 
     try {
-<<<<<<< HEAD:backend/server.js
         // --- Layer 3: Spatial Reverse-Geocoding (物理足跡推測) ---
         console.log(`🔍 [SPATIAL] Attempting inference for ${cleanCallsign} (${icao24})...`);
 
@@ -1316,44 +1384,144 @@ app.get('/api/route/:icao24', async (req, res) => {
                 };
                 routeCache.set(icao24, { data: inferredResult, timestamp: Date.now() });
                 return res.json(inferredResult);
-=======
-        const track = await fetchTracksInternal(icao24);
-        if (track && track.path && track.path.length > 0) {
-            const nearest = await findNearestAirport(track.path[0][1], track.path[0][2], 15000);
-            if (nearest) {
-                const result = { icao24, callsign, departureAirport: nearest.icao, source: 'spatial' };
-                routeCache.set(icao24, { data: result, timestamp: Date.now() });
-                return res.json(result);
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
             }
         }
-    } catch (e) {}
-    res.json({ icao24, callsign, noData: true });
+
+        console.log(`⚠️ [ROUTE] ${cleanCallsign} not found in Local/Cache/Spatial. Returning noData.`);
+        const noDataResult = { icao24, callsign: cleanCallsign, noData: true, source: 'none' };
+        routeCache.set(icao24, { data: noDataResult, timestamp: Date.now() });
+        return res.json(noDataResult);
+
+    } catch (e) {
+        res.json({ icao24, callsign: cleanCallsign, noData: true, error: e.message });
+    }
 });
 
 // ==========================================
-// 飛機軌跡 Tracks API
+// [Phase 11] 外部航線備援 API (External Route Proxy)
 // ==========================================
+app.get('/api/route/external', async (req, res) => {
+    const callsign = (req.query.callsign || '').toUpperCase().trim();
+    if (!callsign) return res.status(400).json({ error: 'Callsign is required' });
+
+    console.log(`🌐 [EXT-ROUTE] Processing request for ${callsign}...`);
+
+    try {
+        // --- Layer 1: MongoDB Cache (DB HIT) ---
+        const dbRoute = await Route.findOne({ callsign });
+        if (dbRoute) {
+            console.log(`🎯 [DB HIT] Found persistent route for ${callsign}: ${dbRoute.departureAirport} -> ${dbRoute.arrivalAirport}`);
+            return res.json({
+                callsign,
+                departureAirport: dbRoute.departureAirport,
+                arrivalAirport: dbRoute.arrivalAirport,
+                source: 'mongodb_cache',
+                lastUpdated: dbRoute.lastUpdated
+            });
+        }
+
+        console.log(`⚡ [DB MISS] No data in MongoDB for ${callsign}. Escalating to API/Mock...`);
+
+        let externalData = null;
+
+        // --- Layer 2: AirLabs API Proxy ---
+        const AIRLABS_KEY = process.env.AIRLABS_API_KEY;
+        if (AIRLABS_KEY) {
+            const response = await fetch(`https://airlabs.co/api/v9/flights?flight_icao=${callsign}&api_key=${AIRLABS_KEY}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.response && data.response.length > 0) {
+                    const flight = data.response[0];
+                    externalData = {
+                        dep: flight.dep_icao || flight.dep_iata,
+                        arr: flight.arr_icao || flight.arr_iata,
+                        source: 'airlabs_api'
+                    };
+                }
+            }
+        }
+
+        // --- Layer 3: Smart Mock Fallback ---
+        if (!externalData) {
+            const MOCK_DB = {
+                'JAL33': { dep: 'RJTT', arr: 'VTBS' },
+                'JAL727': { dep: 'RJAA', arr: 'RPLL' },
+                'APZ622': { dep: 'RKSI', arr: 'VTBS' },
+                'CPA880': { dep: 'VHHH', arr: 'KLAX' },
+                'JJA2104': { dep: 'RKSI', arr: 'RCTP' },
+                'TTW603': { dep: 'RCTP', arr: 'ROAH' },
+                'TGW875': { dep: 'RCTP', arr: 'WSSS' },
+                'CAL6871': { dep: 'RCTP', arr: 'VHHH' },
+                'AAR756': { dep: 'RPLL', arr: 'RKSI' },
+                'CES739': { dep: 'ZSPD', arr: 'VTBS' },
+                'HKE623': { dep: 'VHHH', arr: 'RCTP' },
+            };
+            if (MOCK_DB[callsign]) {
+                externalData = {
+                    dep: MOCK_DB[callsign].dep,
+                    arr: MOCK_DB[callsign].arr,
+                    source: 'smart_mock'
+                };
+            }
+        }
+
+        if (externalData) {
+            // --- Layer 4: Persistence (SAVE TO DB) ---
+            console.log(`💾 [DB SAVE] Persisting new route for ${callsign} to MongoDB...`);
+            await Route.findOneAndUpdate(
+                { callsign },
+                {
+                    departureAirport: externalData.dep,
+                    arrivalAirport: externalData.arr,
+                    lastUpdated: new Date()
+                },
+                { upsert: true, new: true }
+            );
+
+            return res.json({
+                callsign,
+                departureAirport: externalData.dep,
+                arrivalAirport: externalData.arr,
+                source: externalData.source
+            });
+        }
+
+        // 無法得知任何資訊
+        return res.json({ callsign, noData: true, source: 'none' });
+
+    } catch (err) {
+        console.error('❌ [EXT-ROUTE] Cache Loop Error:', err);
+        res.json({ callsign, noData: true, error: err.message });
+    }
+});
+
+// ==========================================
+// 飛機軌跡 Tracks API (過去 24 小時的飛行路徑)
+// ==========================================
+const trackCache = new Map();
+const TRACK_CACHE_TTL = 30000; // 30 秒快取
+
+/**
+ * [OPT 1.3] 內部 track 取得函式，不透過 HTTP 迴環
+ * 供 /api/route 的空間推測直接呼叫
+ */
 async function fetchTracksInternal(icao24) {
+    if (mongoose.connection.readyState !== 1) {
+        return { icao24, path: [], error: 'Database not connected' };
+    }
+    const cached = trackCache.get(icao24);
+    if (cached && (Date.now() - cached.timestamp < TRACK_CACHE_TTL)) {
+        return cached.data;
+    }
     try {
         const icao = icao24.toLowerCase();
-<<<<<<< HEAD:backend/server.js
         // 尋找當前航班的 Session
         const session = await FlightSession.findOne({ icao24: icao }).sort({ startTime: -1 }).lean();
         if (!session) return { icao24, path: [] };
 
         // 使用 sessionId 來撈取專屬軌跡
         const points = await TrackPoint.find({ sessionId: session.sessionId }).sort({ timestamp: 1 }).lean();
-=======
-        // 1. Find the most recent or active session
-        const session = await FlightSession.findOne({ icao24: icao }).sort({ startTime: -1 }).lean();
-        if (!session) return { icao24, path: [] };
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 
-        // 2. Fetch all points for this specific session
-        const points = await TrackPoint.find({ sessionId: session.sessionId }).sort({ timestamp: 1 }).lean();
-        
-        // 3. Map to path format: [timestamp, lat, lng, altitude, heading, velocity, onGround]
         const path = points.map(pt => [
             Math.floor(pt.timestamp.getTime() / 1000),
             pt.lat,
@@ -1363,59 +1531,111 @@ async function fetchTracksInternal(icao24) {
             pt.velocity || 0,
             pt.onGround ? 1 : 0
         ]);
-        
-        return { 
-            icao24, 
-            sessionId: session.sessionId,
-            callsign: session.callsign,
-            status: session.status,
-            path 
-        };
-    } catch (e) { 
-        console.error(`${getLogTime()} ❌ [TRACKS ERROR] ${icao24}:`, e.message);
-        return { icao24, path: [] }; 
+
+        const result = { icao24, path };
+        trackCache.set(icao24, { data: result, timestamp: Date.now() });
+        return result;
+    } catch (e) {
+        return { icao24, path: [], noData: true, error: e.message };
     }
 }
 
 app.get('/api/tracks', async (req, res) => {
     const icao24 = req.query.icao24;
     if (!icao24) return res.status(400).json({ error: 'Missing icao24' });
-<<<<<<< HEAD:backend/server.js
     const result = await fetchTracksInternal(icao24);
     res.json(result);
 });
 
-=======
-    res.json(await fetchTracksInternal(icao24.toLowerCase()));
-});
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 
 // ==========================================
-// METAR 機場天氣 API
+// METAR 機場天氣 API (每小時更新)
 // ==========================================
+const METAR_TTL = 3600000; // 1 小時
+
+// 所有需要抓 METAR 的機場 ICAO 碼
+const METAR_AIRPORTS = [
+    'RCTP', 'RCSS', 'RCKH', 'RCMQ', 'RCNN', 'RCFN', 'RCQC',
+    'RJTT', 'RJAA', 'RJBB', 'RJFF', 'RJCC', 'ROAH',
+    'RKSI', 'RKSS',
+    'ZBAA', 'ZSPD', 'ZSSS', 'ZGGG', 'ZGSZ', 'VHHH',
+    'WSSS', 'VTBS', 'WMKK', 'RPLL', 'WIII', 'VVNB', 'VVTS', 'VIDP',
+    'OMDB', 'OTHH',
+    'EGLL', 'LFPG', 'EDDF', 'EHAM', 'LTFM',
+    'KJFK', 'KLAX', 'KORD', 'KATL',
+    'YSSY', 'NZAA'
+];
+
 async function fetchMetarData() {
     if (mongoose.connection.readyState !== 1) return;
+
     try {
-        const url = `https://aviationweather.gov/api/data/metar?ids=RCTP,RCSS,RCKH,RCKH,RJTT,RJAA,RKSI,VHHH,WSSS,VTBS&format=json`;
-        const res = await fetch(url);
-        const data = await res.json();
-        const ops = data.map(info => ({
-            updateOne: { filter: { icaoId: info.icaoId.toUpperCase() }, update: { $set: { ...info, lastUpdated: new Date() } }, upsert: true }
-        }));
-        if (ops.length > 0) await Metar.bulkWrite(ops);
-    } catch (e) {}
+        const ids = METAR_AIRPORTS.join(',');
+        const url = `https://aviationweather.gov/api/data/metar?ids=${ids}&format=json`;
+        console.log(`📡 [METAR] Fetching weather for ${METAR_AIRPORTS.length} airports...`);
+
+        const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+        if (!response.ok) throw new Error(`METAR API error: ${response.status}`);
+
+        const data = await response.json();
+        
+        // 批次更新 MongoDB
+        const operations = data.map(info => {
+            const lng = parseFloat(info.lon);
+            const lat = parseFloat(info.lat);
+            
+            return {
+                updateOne: {
+                    filter: { icaoId: info.icaoId.toUpperCase() },
+                    update: { 
+                        $set: { 
+                            ...info, 
+                            location: {
+                                type: 'Point',
+                                coordinates: [lng, lat]
+                            },
+                            lastUpdated: new Date() 
+                        } 
+                    },
+                    upsert: true
+                }
+            };
+        });
+
+        if (operations.length > 0) {
+            await Metar.bulkWrite(operations, { ordered: false });
+        }
+
+        console.log(`📡 [METAR] Updated ${data.length} airport weather records in MongoDB`);
+    } catch (error) {
+        console.error('❌ [METAR] Fetch error:', error.message);
+    }
 }
-setInterval(fetchMetarData, 3600000);
-fetchMetarData();
+
+// 啟動時啟動定時器
+fetchMetarData(); // 立即執行一次
+
+// 每小時定時更新
+setInterval(fetchMetarData, METAR_TTL);
 
 app.get('/api/metar', async (req, res) => {
-    const { icao } = req.query;
+    // [HOTFIX] 連線狀態守衛
+    if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({ error: 'Database not connected' });
+    }
+
     try {
-        if (icao) return res.json(await Metar.findOne({ icaoId: icao.toUpperCase() }).lean() || { error: 'Not found' });
-        res.json(await Metar.find({}).lean());
-    } catch (e) { res.status(500).json({ error: e.message }); }
+        const icao = req.query.icao;
+        if (icao) {
+            const found = await Metar.findOne({ icaoId: icao.toUpperCase() }).lean();
+            return res.json(found || { error: 'Airport not found' });
+        }
+        const all = await Metar.find({}).lean();
+        res.json(all);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
-<<<<<<< HEAD:backend/server.js
 // [API 404 防火牆]
 app.use('/api', (req, res) => {
     res.status(404).json({ error: 'API endpoint not found' });
@@ -1425,40 +1645,59 @@ app.use('/api', (req, res) => {
 // ==========================================
 // 自動化資料庫引擎 (Background Auto-Sync)
 // ==========================================
-=======
-
-app.use((req, res) => res.sendFile(path.join(__dirname, 'public-react', 'index.html')));
-
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
 async function syncSchedulesDatabase() {
+    console.log('⚙️ [AUTO-SYNC] Starting daily database synchronization...');
     try {
-        const res = await fetch('https://raw.githubusercontent.com/LiaoCho/flight-data-source/main/schedules_latest.json');
-        if (res.ok) {
-            const data = await res.json();
-            fs.writeFileSync(SCHEDULES_STATIC_FILE, JSON.stringify(data, null, 2));
-            schedulesStaticDB = data;
-        }
-    } catch (e) {}
-}
-cron.schedule('0 3 * * *', syncSchedulesDatabase);
+        // [數據獲取] 這裡使用的是一個開源的、定期更新的航班班表來源範例
+        // 實際部署時使用者可以根據需要修改此 URL
+        const SCHEDULES_URL = 'https://raw.githubusercontent.com/LiaoCho/flight-data-source/main/schedules_latest.json';
 
+        console.log(`📡 [AUTO-SYNC] Downloading latest data from ${SCHEDULES_URL}...`);
+
+        // 設定較短的逾時，避免阻塞事件循環
+        const response = await fetch(SCHEDULES_URL, { signal: AbortSignal.timeout(60000) });
+
+        if (!response.ok) {
+            console.warn(`⚠️ [AUTO-SYNC] Failed to download schedules: ${response.status}. Using existing local data.`);
+            return;
+        }
+
+        const newData = await response.json();
+        // [OPT 4.3] 修復路徑：使用與 loadGlobalData 相同的路徑 (data/schedules_static.json)
+        const SCHEDULE_FILE = SCHEDULES_STATIC_FILE;
+
+        // 寫入修正後的路徑
+        fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(newData, null, 2));
+
+        // 同步完成後更新記憶體中的變數
+        schedulesStaticDB = newData;
+
+        console.log(`✅ [AUTO-SYNC] Successfully synced ${Object.keys(newData).length} flights. Schedules updated.`);
+    } catch (error) {
+        console.error('❌ [AUTO-SYNC] Critical synchronization error:', error.message);
+    }
+}
+
+// 設定每日凌晨 3 點 (伺服器離峰時間) 執行任務
+cron.schedule('0 3 * * *', () => {
+    syncSchedulesDatabase();
+}, {
+    timezone: "Asia/Taipei"
+});
+
+// 啟動伺服器
 const server = http.createServer(app);
 initWebSocketServer(server);
+
 server.listen(PORT, () => {
+    const readyTime = new Date().toLocaleTimeString();
+    console.log('');
     console.log('╔══════════════════════════════════════════╗');
-<<<<<<< HEAD:backend/server.js
     console.log('║   ✈️  AEROSTRAT API Engine (Decoupled)    ║');
     console.log(`║   🌐 API: http://localhost:${PORT}            ║`);
     console.log(`║   🔌 WS:  ws://localhost:${PORT}/ws           ║`);
     console.log(`║   🔐 Version: v5.0.0 (Zero Downtime)     ║`);
     console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
-=======
-    console.log('║   ✈️  AEROSTRAT Surveillance Server      ║');
-    console.log(`║   🌐 http://localhost:${PORT}               ║`);
-    console.log(`║   🔐 Version: v4.6.0                     ║`);
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:server.js
     console.log('╚══════════════════════════════════════════╝');
-    crawlFlightSchedules();
-    fetchGlobalPlanes();
-    setInterval(fetchGlobalPlanes, 30000);
+    console.log('');
 });

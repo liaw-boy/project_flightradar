@@ -66,11 +66,7 @@ const trackPointSchema = new mongoose.Schema({
     // Time Series optimization (MongoDB 5.0+)
     timeseries: {
         timeField: 'timestamp',
-<<<<<<< HEAD:backend/models/TrackPoint.js
-        metaField: 'sessionId',
-=======
         metaField: 'sessionId', // Use sessionId as the metaField for better grouping
->>>>>>> 7dd1d16eafdaccb34ea04849a1462e04db3c9934:models/TrackPoint.js
         granularity: 'seconds'
     }
 });
