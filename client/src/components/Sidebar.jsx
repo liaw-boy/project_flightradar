@@ -281,12 +281,12 @@ export default function Sidebar({
                 </div>
                 {openSections.spatial && (
                     <div className="sb-section-content">
-                        <DataRow label={t('altitude')} value={plane.onGround ? 'GROUND' : `${plane.altitude} m`} />
+                        <DataRow label={t('altitude')} value={plane.onGround ? 'GROUND' : (plane.altitude != null ? `${plane.altitude} m` : 'N/A')} />
                         {plane.geoAltitude && <DataRow label={t('gpsAlt')} value={`${plane.geoAltitude} m`} />}
-                        <DataRow label={t('speed')} value={`${Math.round(plane.velocity * 3.6)} km/h`} />
-                        <DataRow label={t('heading')} value={`${Math.round(plane.heading)}°`} />
-                        <DataRow label={t('vertRate')} value={formatVerticalRate(plane.vRate)} />
-                        <DataRow label={t('position')} value={`${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}`} />
+                        <DataRow label={t('speed')} value={plane.velocity != null ? `${Math.round(plane.velocity * 3.6)} km/h` : 'N/A'} />
+                        <DataRow label={t('heading')} value={plane.heading != null ? `${Math.round(plane.heading)}°` : 'N/A'} />
+                        <DataRow label={t('vertRate')} value={plane.vRate != null ? formatVerticalRate(plane.vRate) : 'N/A'} />
+                        <DataRow label={t('position')} value={plane.lat != null && plane.lng != null ? `${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}` : 'N/A'} />
                         <DataRow label={t('source')} value={posSourceMap[plane.positionSource] || 'ADS-B'} />
                         {/* [v2.9.0] Altitude Profile Chart */}
                         {flightHistoryRef?.current && (

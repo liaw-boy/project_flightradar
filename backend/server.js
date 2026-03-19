@@ -256,15 +256,12 @@ const SAFE_RESERVE_CAP = 50; // 每個帳號保留至少 50 次額度 (User Spec
 const QUOTA_CACHE_FILE = path.join(__dirname, 'quota-cache.json');
 
 function saveQuotaCache() {
-    try {
-        const payload = {
-            date: new Date().toISOString().split('T')[0], // YYYY-MM-DD (UTC)
-            accounts: apiStats.accounts
-        };
-        fs.writeFileSync(QUOTA_CACHE_FILE, JSON.stringify(payload, null, 2));
-    } catch (e) {
-        console.error('❌ [QUOTA] Failed to save quota cache:', e.message);
-    }
+    const payload = {
+        date: new Date().toISOString().split('T')[0], // YYYY-MM-DD (UTC)
+        accounts: apiStats.accounts
+    };
+    fs.promises.writeFile(QUOTA_CACHE_FILE, JSON.stringify(payload, null, 2))
+        .catch(e => console.error('❌ [QUOTA] Failed to save quota cache:', e.message));
 }
 
 function loadQuotaCache() {
@@ -451,8 +448,10 @@ const _prevStates = new Map(); // icao24 -> prev state for diff
 const airportListCache = [];
 function detectAnomalies(states) {
     const alerts = [];
+    const seenIds = new Set();
     for (const s of states) {
         const icao24 = s[0];
+        seenIds.add(icao24);
         const callsign = (s[1] || '').trim();
         const lat = s[6];
         const lng = s[5];
@@ -484,6 +483,11 @@ function detectAnomalies(states) {
                 alerts.push({ icao24, callsign, lat, lng, type: 'SUDDEN_DECEL', message: `⚠️ RAPID SPEED LOSS: -${Math.round(velDrop * 3.6)}km/h`, severity: 'warning' });
             }
         }
+    }
+
+    // Evict planes no longer in feed to prevent unbounded growth
+    for (const id of _prevStates.keys()) {
+        if (!seenIds.has(id)) _prevStates.delete(id);
     }
 
     if (alerts.length > 0) {
@@ -1666,8 +1670,8 @@ async function syncSchedulesDatabase() {
         // [OPT 4.3] 修復路徑：使用與 loadGlobalData 相同的路徑 (data/schedules_static.json)
         const SCHEDULE_FILE = SCHEDULES_STATIC_FILE;
 
-        // 寫入修正後的路徑
-        fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(newData, null, 2));
+        // 寫入修正後的路徑 (async — 避免阻塞事件循環)
+        await fs.promises.writeFile(SCHEDULE_FILE, JSON.stringify(newData, null, 2));
 
         // 同步完成後更新記憶體中的變數
         schedulesStaticDB = newData;

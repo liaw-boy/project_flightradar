@@ -60,6 +60,14 @@ const PlaneCanvasLayer = L.Layer.extend({
     getCanvas: function () { return this._canvas; }
 });
 
+// [v5.1] Pure helper — zoom-based icon size matching FR24/adsb.fi proportions.
+// Defined at module scope so it is accessible in ALL useEffect closures.
+// Formula: base 28px airborne / 20px ground, scaled by zoom. At zoom 7 → 24px, zoom 12 → 42px.
+function getDrawSize(plane, z) {
+    const t = Math.max(0.7, Math.min(1.8, (z - 2) / 8));
+    return Math.round((plane.onGround ? 20 : 28) * t);
+}
+
 /**
  * MapView — 管理 Leaflet 地圖、飛機 markers、軌跡線、機場圖層
  * 使用原生 Leaflet（非 react-leaflet）以獲得對 marker 的完全控制
@@ -387,13 +395,6 @@ export default function MapView({
             map.getContainer().style.cursor = found ? 'pointer' : 'default';
         });
 
-        // 移除原有的 'zoom move' 即時監聽，實現 $O(1)$ 拖曳效能
-
-        // 機場圖層 zoom 控制
-        map.on('zoomend', () => {
-            updateAirportVisibility(map);
-        });
-
         mapRef.current = map;
 
         // [AERO-SYNC] 確保初始化即校正 (Initial Warmup)
@@ -419,6 +420,10 @@ export default function MapView({
 
         return () => {
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+            map.off('mousemove');
+            map.off('zoomend');
+            map.off('moveend');
+            map.off('click');
             map.remove();
             mapRef.current = null;
         };
@@ -715,13 +720,6 @@ export default function MapView({
                 cachedPathsRef.current.set(url, img);
             }
             return cachedPathsRef.current.get(url);
-        };
-
-        // [v5.1] Zoom-based icon sizing — matches FR24/adsb.fi proportions.
-        // Ground planes 30% smaller; airborne scales with zoom level.
-        const getDrawSize = (plane, z) => {
-            const t = Math.max(0.45, Math.min(1.8, (z - 4) / 8));
-            return Math.round((plane.onGround ? 22 : 32) * t);
         };
 
         // [v3.4] Airline Logo Cache for Canvas

@@ -18,7 +18,7 @@ function initWebSocketServer(server) {
 
         // Send an initial full state marker to force the client to wait for the first full broadcast
         const initMsg = msgpack.encode({ type: 'init' });
-        ws.send(initMsg);
+        try { ws.send(initMsg); } catch (_) { /* client disconnected before init */ }
 
         ws.on('message', (data) => {
             try {

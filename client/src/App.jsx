@@ -102,13 +102,17 @@ export default function App() {
     } = useFlightData(mapInstanceRef);
 
     // [v2.9.0] SSE EventSource — real-time server push
+    // fetchPlanesRef keeps the latest fetchPlanes without causing SSE reconnects
+    const fetchPlanesRef = useRef(fetchPlanes);
+    useEffect(() => { fetchPlanesRef.current = fetchPlanes; }, [fetchPlanes]);
+
     useEffect(() => {
         const es = new EventSource('/api/events');
         es.onmessage = (e) => {
             try {
                 const data = JSON.parse(e.data);
                 if (data.type === 'planes-updated') {
-                    fetchPlanes(); // Immediate fetch on new data
+                    fetchPlanesRef.current(); // Immediate fetch on new data
                 } else if (data.type === 'anomalies' && data.alerts?.length > 0) {
                     setAnomalyAlerts(prev => {
                         // Merge, deduplicate by icao24+type, keep latest 10
@@ -122,7 +126,7 @@ export default function App() {
         };
         es.onerror = () => { }; // Auto-reconnects natively
         return () => es.close();
-    }, [fetchPlanes]);
+    }, []); // SSE connection runs once for the lifetime of the app
 
     // Initial URL Params parsing
     const initializedUrlRef = useRef(false);

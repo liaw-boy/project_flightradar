@@ -28,6 +28,7 @@ export function useFlightData(mapRef) {
     const planesDictRef = useRef({});
     const apiStatusRef = useRef('INIT');
     const globalLastUpdateRef = useRef(0);
+    const sessionIdRef = useRef(`s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
     const nextScheduledFetchRef = useRef(Date.now() + 60000);
     const workerRef = useRef(null);
     const usesWebSocketRef = useRef(false);
