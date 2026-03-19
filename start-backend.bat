@@ -4,7 +4,7 @@ cd /d "%~dp0backend"
 
 echo.
 echo  ==========================================
-echo  AEROSTRAT Backend Engine v4.4.0
+echo  AEROSTRAT Backend Engine v5.0.0
 echo  Port 3000  /  MongoDB Local
 echo  ==========================================
 echo.
@@ -19,7 +19,7 @@ if not exist ".env" (
 
 if not exist "node_modules" (
     echo  [SETUP] Installing dependencies...
-    npm install
+    call npm install
     echo.
 )
 
