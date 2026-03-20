@@ -1,144 +1,79 @@
 /**
  * seedAircraftShapes.js
  *
- * 從 RexKramer1/AircraftShapesSVG (GPLv3) 下載全部飛機 SVG，
- * 解析後批次寫入 MongoDB AircraftShape collection。
+ * Reads preprocessed aircraft shape data from the local build output
+ * and upserts all 182 shapes into MongoDB with scale/category fields.
  *
- * 使用方式 (在 backend/ 目錄執行):
+ * Usage (from backend/ directory):
  *   npm run seed-shapes
  *
- * 注意: 需要 MongoDB 正在運行且 .env 設定正確。
+ * Source: AircraftShapesSVG (GPLv3) by RexKramer1
+ * Preprocessor: scripts/build-aircraft-shapes.js
  */
 
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
+const fs = require('fs');
+const path = require('path');
 const mongoose = require('mongoose');
 const AircraftShape = require('../models/AircraftShape');
 
-const GITHUB_API  = 'https://api.github.com/repos/RexKramer1/AircraftShapesSVG/git/trees/main?recursive=1';
-const RAW_BASE    = 'https://raw.githubusercontent.com/RexKramer1/AircraftShapesSVG/main/Shapes%20SVG/';
+const { execSync } = require('child_process');
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat';
+const DATA_FILE = path.resolve(__dirname, '../../client/src/data/aircraftShapesData.js');
+const BUILD_SCRIPT = path.resolve(__dirname, '../../scripts/build-aircraft-shapes.js');
 
-// ── SVG 解析 ──────────────────────────────────────────────────────────────────
-
-function extractViewBox(svgText) {
-    const m = svgText.match(/viewBox="([^"]+)"/);
-    return m ? m[1] : '0 0 80 80';
-}
-
-function extractPaths(svgText) {
-    const paths = [];
-    const re = /<path[^>]*\sd="([^"]+)"/g;
-    let m;
-    while ((m = re.exec(svgText)) !== null) {
-        const d = m[1].trim();
-        if (d.length > 10) paths.push(d);
+function loadShapesFromBuild() {
+    // Auto-generate data file if it doesn't exist
+    if (!fs.existsSync(DATA_FILE)) {
+        console.log('   Data file not found. Running build-aircraft-shapes.js...\n');
+        execSync(`node "${BUILD_SCRIPT}"`, { stdio: 'inherit' });
     }
-    return paths;
+    const code = fs.readFileSync(DATA_FILE, 'utf-8');
+    const match = code.match(/const AIRCRAFT_SHAPES = ({[\s\S]*});/);
+    if (!match) throw new Error('Cannot parse AIRCRAFT_SHAPES from ' + DATA_FILE);
+    return JSON.parse(match[1]);
 }
-
-function filenameToTypecode(filename) {
-    // "A320.svg" → "A320", "B1 fast.svg" → "B1_FAST"
-    return filename
-        .replace(/\.svg$/i, '')
-        .trim()
-        .replace(/\s+/g, '_')
-        .toUpperCase();
-}
-
-// ── 帶重試的 Fetch ─────────────────────────────────────────────────────────────
-
-async function fetchWithRetry(url, retries = 3) {
-    for (let i = 0; i < retries; i++) {
-        try {
-            const res = await fetch(url, {
-                headers: { 'User-Agent': 'AEROSTRAT-SeedScript/1.0' }
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res;
-        } catch (err) {
-            if (i === retries - 1) throw err;
-            await new Promise(r => setTimeout(r, 1000 * (i + 1)));
-        }
-    }
-}
-
-// ── 主流程 ───────────────────────────────────────────────────────────────────
 
 async function main() {
-    console.log('\n✈  AEROSTRAT Aircraft Shape Seeder');
-    console.log('   Source: github.com/RexKramer1/AircraftShapesSVG (GPLv3)\n');
+    console.log('\n  AEROSTRAT Aircraft Shape Seeder (Local Build)');
+    console.log('   Source: AircraftShapesSVG (GPLv3) preprocessed data\n');
 
-    // 1. 連線 MongoDB
+    const shapesMap = loadShapesFromBuild();
+    const typecodes = Object.keys(shapesMap);
+    console.log(`   Loaded ${typecodes.length} shapes from build output.\n`);
+
     await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
-    console.log('🍃 Connected to MongoDB\n');
+    console.log('   Connected to MongoDB\n');
 
-    // 2. 取得 SVG 檔案清單
-    console.log('📡 Fetching file tree from GitHub API...');
-    const treeRes = await fetchWithRetry(GITHUB_API);
-    const treeData = await treeRes.json();
-
-    if (!treeData.tree) throw new Error('GitHub API missing tree: ' + JSON.stringify(treeData));
-
-    const files = treeData.tree
-        .filter(item => item.type === 'blob' && item.path.startsWith('Shapes SVG/') && item.path.endsWith('.svg'))
-        .map(item => item.path.replace('Shapes SVG/', ''));
-
-    console.log(`   Found ${files.length} SVG files.\n`);
-
-    // 3. 逐一下載、解析、收集
-    const shapes = [];
-    let ok = 0, fail = 0;
-
-    for (let i = 0; i < files.length; i++) {
-        const filename = files[i];
-        const typecode = filenameToTypecode(filename);
-        process.stdout.write(`[${String(i + 1).padStart(3)}/${files.length}] ${typecode.padEnd(14)}`);
-
-        try {
-            const url = RAW_BASE + encodeURIComponent(filename);
-            const svgText = await (await fetchWithRetry(url)).text();
-
-            const viewBox = extractViewBox(svgText);
-            const paths   = extractPaths(svgText);
-
-            if (paths.length === 0) {
-                process.stdout.write(' ⚠  no paths\n');
-                fail++;
-                continue;
+    const ops = typecodes.map(tc => {
+        const s = shapesMap[tc];
+        return {
+            updateOne: {
+                filter: { typecode: tc },
+                update: {
+                    $set: {
+                        typecode: tc,
+                        viewBox: s.viewBox,
+                        paths: s.paths,
+                        scale: s.scale,
+                        category: s.category,
+                    }
+                },
+                upsert: true
             }
+        };
+    });
 
-            shapes.push({ typecode, viewBox, paths });
-            process.stdout.write(` ✓  (${paths.length} paths)\n`);
-            ok++;
-        } catch (err) {
-            process.stdout.write(` ✗  ${err.message}\n`);
-            fail++;
-        }
-
-        // 避免請求過快
-        await new Promise(r => setTimeout(r, 50));
-    }
-
-    // 4. 批次寫入 MongoDB (upsert)
-    console.log(`\n💾 Writing ${shapes.length} shapes to MongoDB...`);
-
-    const ops = shapes.map(s => ({
-        updateOne: {
-            filter: { typecode: s.typecode },
-            update: { $set: s },
-            upsert: true
-        }
-    }));
-
+    console.log(`   Writing ${ops.length} shapes to MongoDB...`);
     const result = await AircraftShape.bulkWrite(ops, { ordered: false });
     console.log(`   Upserted: ${result.upsertedCount}, Modified: ${result.modifiedCount}`);
-    console.log(`\n✅ Done: ${ok} shapes written, ${fail} failed.\n`);
+    console.log(`\n   Done: ${typecodes.length} aircraft shapes persisted.\n`);
 
     await mongoose.disconnect();
 }
 
 main().catch(err => {
-    console.error('\n❌ Fatal error:', err.message);
+    console.error('\n   Fatal error:', err.message);
     mongoose.disconnect();
     process.exit(1);
 });

@@ -26,3 +26,7 @@ quota-cache.json
 
 # Tools
 Claude-Code-Usage-Monitor/
+
+# Data Sources & Raw Assets
+assets/AircraftShapesSVG/
+client/src/assets/AircraftShapesSVG/

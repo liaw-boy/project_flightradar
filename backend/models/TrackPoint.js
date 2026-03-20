@@ -65,7 +65,9 @@ const trackPointSchema = new mongoose.Schema({
     }
 });
 
-// Add a TTL index to prevent disk exhaustion if needed
-trackPointSchema.index({ timestamp: 1 }, { expireAfterSeconds: 86400 * 3 }); // Keep for 3 days
+// TTL index: auto-expire old track points to prevent disk exhaustion.
+// 7 days = 604800s. At ~5000 planes × 2 points/min × 7 days ≈ 100M docs (~10GB).
+// To keep permanently, remove this index or set expireAfterSeconds to a very large value.
+trackPointSchema.index({ timestamp: 1 }, { expireAfterSeconds: 86400 * 7 });
 
 module.exports = mongoose.model('TrackPoint', trackPointSchema);

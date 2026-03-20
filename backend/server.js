@@ -37,9 +37,24 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerost
 mongoose.connect(MONGODB_URI, {
     serverSelectionTimeoutMS: 5000,
     connectTimeoutMS: 10000,
-}).then(() => {
+}).then(async () => {
     console.log(`${getTime()} 🍃 [DATABASE] Connected to Local MongoDB`);
     restoreActiveSessions();
+
+    // Sync TTL index to match schema (MongoDB won't auto-update existing TTL values)
+    try {
+        const db = mongoose.connection.db;
+        await db.command({
+            collMod: 'trackpoints',
+            index: { keyPattern: { timestamp: 1 }, expireAfterSeconds: 86400 * 7 }
+        });
+        console.log(`${getTime()} [TTL] TrackPoint TTL synced to 7 days.`);
+    } catch (ttlErr) {
+        // NamespaceNotFound = collection doesn't exist yet (first run), safe to ignore
+        if (ttlErr.codeName !== 'NamespaceNotFound' && ttlErr.codeName !== 'IndexNotFound') {
+            console.warn(`[TTL] Could not sync TTL index: ${ttlErr.message}`);
+        }
+    }
 })
   .catch(err => console.error('❌ [DATABASE] Connection error:', err));
 
@@ -504,7 +519,28 @@ app.get('/api/health', (req, res) => {
         cacheSize: cache.size,
         activeAccount: ACCOUNTS.length > 0 ? ACCOUNTS[currentAccountIndex].user : 'none',
         totalAccounts: ACCOUNTS.length,
+        activeSessions: activeSessions.size,
+        ingestion: ingestionStats,
         timestamp: new Date().toISOString()
+    });
+});
+
+app.get('/api/ingestion/status', async (req, res) => {
+    let trackPointCount = null;
+    let sessionCount = null;
+    try {
+        if (mongoose.connection.readyState === 1) {
+            trackPointCount = await TrackPoint.estimatedDocumentCount();
+            sessionCount = await FlightSession.countDocuments({ status: 'ACTIVE' });
+        }
+    } catch (_) {}
+    res.json({
+        ...ingestionStats,
+        activeSessions: activeSessions.size,
+        trackPointsInDB: trackPointCount,
+        activeSessionsInDB: sessionCount,
+        globalCachePlanes: globalPlanesCache.states?.length || 0,
+        globalCacheStale: globalPlanesCache.stale || false
     });
 });
 
@@ -682,71 +718,103 @@ async function fetchOpenSky(params = {}) {
  * [Time Series] Helper to ingest raw plane data into MongoDB
  * Standardizes format, lowercases ICAO24, and filters out corrupted coordinates.
  */
+// [v6.0] Ingestion telemetry counters
+const ingestionStats = { totalPoints: 0, totalBatches: 0, sessionsCreated: 0, sessionsClosed: 0, lastBatchSize: 0, lastBatchMs: 0 };
+
 async function ingestTrackPoints(states, timeUnix) {
     if (!states || states.length === 0) return;
 
-    // [HOTFIX] 連線狀態守衛：確保 MongoDB 已連線 (readyState === 1) 才允許寫入
     if (mongoose.connection.readyState !== 1) {
-        console.warn('⚠️ [DATABASE] Skip ingestion: MongoDB is not connected yet.');
+        console.warn('[DATABASE] Skip ingestion: MongoDB not connected.');
         return;
     }
 
     const timestamp = new Date(timeUnix * 1000);
     const now = Date.now();
     const batchTrackPoints = [];
+    const sessionCloseOps = [];   // Batched session close operations
+    const sessionCreateDocs = []; // Batched new session documents
 
     for (const p of states) {
         if (typeof p.lat !== 'number' || typeof p.lng !== 'number') continue;
-        
+
         const icao24 = p.icao24.toLowerCase();
         const callsign = (p.callsign || 'N/A').toUpperCase().trim();
         const onGround = !!p.onGround;
 
-        // [SESSION STATE MACHINE]
+        // ── SESSION STATE MACHINE (v6.0 Hardened) ────────────────────────
+        // Transitions:
+        //   1. No prior session           → CREATE
+        //   2. Callsign changed (non-N/A) → CLOSE old + CREATE
+        //   3. Airborne → Ground          → Update state (same session, plane landed)
+        //   4. Ground → Airborne          → CLOSE old + CREATE (new flight leg)
+        //   5. Inactive > 1 hour          → CLOSE old + CREATE (timeout)
+        //   6. On ground + callsign swap  → CLOSE old + CREATE (turnaround)
+
         let session = activeSessions.get(icao24);
         let needsNewSession = false;
 
         if (!session) {
+            // Case 1: First sighting
+            needsNewSession = true;
+        } else if (session && (now - session.lastSeen > 3600000)) {
+            // Case 5: Timeout — check BEFORE other transitions to avoid stale logic
+            needsNewSession = true;
+        } else if (session.onGround && !onGround) {
+            // Case 4: Takeoff — always a new flight leg
             needsNewSession = true;
         } else if (session.callsign !== callsign && callsign !== 'N/A') {
+            // Case 2 & 6: Callsign changed (airborne or ground turnaround)
             needsNewSession = true;
         } else if (!session.onGround && onGround) {
+            // Case 3: Landing — same session continues, just mark as on-ground
             session.onGround = true;
             session.lastSeen = now;
-        } else if (session.onGround && !onGround) {
-            needsNewSession = true;
-        }
-
-        if (session && (now - session.lastSeen > 3600000)) {
-            needsNewSession = true;
         }
 
         if (needsNewSession) {
+            // Close old session (batched)
             if (session) {
-                FlightSession.updateOne({ sessionId: session.sessionId }, { status: 'COMPLETED', endTime: new Date() }).catch(() => {});
+                sessionCloseOps.push({
+                    updateOne: {
+                        filter: { sessionId: session.sessionId },
+                        update: { $set: { status: 'COMPLETED', endTime: new Date() } }
+                    }
+                });
+                ingestionStats.sessionsClosed++;
             }
 
-            const newSessionId = `${icao24}_${Date.now()}`;
+            // Create new session
+            const newSessionId = `${icao24}_${now}_${Math.random().toString(36).slice(2, 6)}`;
             session = { sessionId: newSessionId, callsign, lastSeen: now, onGround };
             activeSessions.set(icao24, session);
 
-            const newSession = new FlightSession({
+            sessionCreateDocs.push({
                 sessionId: newSessionId,
                 icao24,
                 callsign: callsign !== 'N/A' ? callsign : null,
                 startTime: timestamp,
                 status: 'ACTIVE'
             });
-            newSession.save().catch(e => console.error(`❌ [SESSION DB] Save error:`, e.message));
+            ingestionStats.sessionsCreated++;
         } else if (session) {
+            // Regular update — refresh heartbeat
             session.lastSeen = now;
             session.onGround = onGround;
+
+            // Resolve unknown callsign if now available
             if (session.callsign === 'N/A' && callsign !== 'N/A') {
                 session.callsign = callsign;
-                FlightSession.updateOne({ sessionId: session.sessionId }, { callsign }).catch(() => {});
+                sessionCloseOps.push({
+                    updateOne: {
+                        filter: { sessionId: session.sessionId },
+                        update: { $set: { callsign } }
+                    }
+                });
             }
         }
 
+        // Build track point with ALL available telemetry fields
         batchTrackPoints.push({
             sessionId: session.sessionId,
             icao24,
@@ -754,21 +822,55 @@ async function ingestTrackPoints(states, timeUnix) {
             lat: p.lat,
             lng: p.lng,
             altitude: (typeof p.altitude === 'number') ? p.altitude : 0,
+            geo_altitude: (typeof p.geoAltitude === 'number') ? p.geoAltitude : null,
             velocity: p.velocity || 0,
             heading: p.heading || 0,
-            onGround: onGround
+            vertical_rate: (typeof p.vRate === 'number') ? p.vRate : null,
+            onGround,
+            squawk: p.squawk || null
         });
     }
 
     if (batchTrackPoints.length === 0) return;
 
-    try {
-        await TrackPoint.insertMany(batchTrackPoints, { ordered: false });
-    } catch (err) {
-        if (err.name !== 'MongoBulkWriteError' && err.name !== 'MongoServerError') {
-            console.error('❌ [DATABASE] Ingestion error:', err.message);
-        }
+    const batchStart = performance.now();
+
+    // Fire all DB writes concurrently — non-blocking pipeline
+    const writePromises = [];
+
+    // 1. Bulk insert track points (main payload)
+    writePromises.push(
+        TrackPoint.insertMany(batchTrackPoints, { ordered: false })
+            .catch(err => {
+                if (err.name !== 'MongoBulkWriteError' && err.name !== 'MongoServerError') {
+                    console.error('[INGEST] TrackPoint write error:', err.message);
+                }
+            })
+    );
+
+    // 2. Bulk session state transitions
+    if (sessionCloseOps.length > 0) {
+        writePromises.push(
+            FlightSession.bulkWrite(sessionCloseOps, { ordered: false })
+                .catch(err => console.error('[INGEST] Session update error:', err.message))
+        );
     }
+
+    // 3. Bulk session creation
+    if (sessionCreateDocs.length > 0) {
+        writePromises.push(
+            FlightSession.insertMany(sessionCreateDocs, { ordered: false })
+                .catch(err => console.error('[INGEST] Session create error:', err.message))
+        );
+    }
+
+    await Promise.all(writePromises);
+
+    // Update telemetry
+    ingestionStats.totalPoints += batchTrackPoints.length;
+    ingestionStats.totalBatches++;
+    ingestionStats.lastBatchSize = batchTrackPoints.length;
+    ingestionStats.lastBatchMs = Math.round(performance.now() - batchStart);
 }
 
 // 改寫原本的 fetchGlobalPlanes 為 fetchOpenSky 的封裝
@@ -825,11 +927,45 @@ async function fetchGlobalPlanes() {
     broadcastTelemetry(apiStats, 30);
 
     // [Audit Fix] Use centralized ingestion helper
-    ingestTrackPoints(globalPlanesCache.states, globalPlanesCache.time);
+    await ingestTrackPoints(globalPlanesCache.states, globalPlanesCache.time);
+
+    // Periodic ingestion health log (every 10th batch = ~5 min)
+    if (ingestionStats.totalBatches % 10 === 0 && ingestionStats.totalBatches > 0) {
+        console.log(`${getTime()} [INGEST] ${ingestionStats.totalPoints.toLocaleString()} pts | ${ingestionStats.totalBatches} batches | Last: ${ingestionStats.lastBatchSize} pts in ${ingestionStats.lastBatchMs}ms | Sessions: ${activeSessions.size} active, ${ingestionStats.sessionsCreated} created, ${ingestionStats.sessionsClosed} closed`);
+    }
 }
 
 // 啟動 30 秒全球資料輪詢機制 (配合 CACHE_TTL=30s)
 setInterval(fetchGlobalPlanes, 30000);
+
+// [v6.0] Session timeout reaper — close stale sessions every 10 minutes
+setInterval(() => {
+    const now = Date.now();
+    const staleThreshold = 3600000; // 1 hour
+    const staleIds = [];
+
+    for (const [icao24, session] of activeSessions) {
+        if (now - session.lastSeen > staleThreshold) {
+            staleIds.push({ icao24, sessionId: session.sessionId });
+        }
+    }
+
+    if (staleIds.length > 0) {
+        for (const { icao24 } of staleIds) activeSessions.delete(icao24);
+
+        const closeOps = staleIds.map(s => ({
+            updateOne: {
+                filter: { sessionId: s.sessionId },
+                update: { $set: { status: 'TIMEOUT', endTime: new Date() } }
+            }
+        }));
+
+        FlightSession.bulkWrite(closeOps, { ordered: false })
+            .then(r => console.log(`${getTime()} [SESSION REAPER] Closed ${staleIds.length} timed-out sessions.`))
+            .catch(err => console.error('[SESSION REAPER]', err.message));
+    }
+}, 600000); // Every 10 minutes
+
 // 啟動時讀取快取並初始化
 const isFreshQuota = loadQuotaCache();
 initializeAccountQuotas(isFreshQuota);
@@ -1419,6 +1555,21 @@ app.get('/api/route/:icao24', async (req, res) => {
                     source: 'spatial_inference'
                 };
                 routeCache.set(icao24, { data: inferredResult, timestamp: Date.now() });
+
+                // Persist inferred route to MongoDB for future lookups
+                if (cleanCallsign) {
+                    Route.findOneAndUpdate(
+                        { callsign: cleanCallsign },
+                        {
+                            departureAirport: nearestAp.icao,
+                            arrivalAirport: null,
+                            source: 'spatial_inference',
+                            lastUpdated: new Date()
+                        },
+                        { upsert: true }
+                    ).catch(err => console.error('[ROUTE PERSIST]', err.message));
+                }
+
                 return res.json(inferredResult);
             }
         }
@@ -1445,8 +1596,8 @@ app.get('/api/route/external', async (req, res) => {
     try {
         // --- Layer 1: MongoDB Cache (DB HIT) ---
         const dbRoute = await Route.findOne({ callsign });
-        if (dbRoute) {
-            console.log(`🎯 [DB HIT] Found persistent route for ${callsign}: ${dbRoute.departureAirport} -> ${dbRoute.arrivalAirport}`);
+        if (dbRoute && dbRoute.departureAirport && dbRoute.arrivalAirport) {
+            console.log(`🎯 [DB HIT] Found complete route for ${callsign}: ${dbRoute.departureAirport} -> ${dbRoute.arrivalAirport}`);
             return res.json({
                 callsign,
                 departureAirport: dbRoute.departureAirport,
@@ -1455,6 +1606,7 @@ app.get('/api/route/external', async (req, res) => {
                 lastUpdated: dbRoute.lastUpdated
             });
         }
+        // Partial route (e.g., spatial_inference with dep only) — continue to try enriching
 
         console.log(`⚡ [DB MISS] No data in MongoDB for ${callsign}. Escalating to API/Mock...`);
 

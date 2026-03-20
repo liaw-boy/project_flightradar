@@ -19,6 +19,15 @@ const aircraftShapeSchema = new mongoose.Schema({
     paths: {
         type: [String],
         required: true
+    },
+    scale: {
+        type: Number,
+        default: 1.0
+    },
+    category: {
+        type: String,
+        enum: ['JUMBO', 'WIDE', 'NARROW', 'REGIONAL', 'LIGHT', 'HELI', 'MILITARY', 'UNKNOWN'],
+        default: 'UNKNOWN'
     }
 }, { timestamps: false, versionKey: false });
 

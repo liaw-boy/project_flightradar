@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getPlaneExtraClass, getAirlineLogoUrl, getAirportDisplayData, getGreatCirclePath, getGreatCircleTrajectory, splitPathAtIDL, normalizeLongitude, predictPosition, getPlaneCanvasData, latLngToGlobalPixels } from '../utils/flightUtils';
-import { getAircraftIconUrl } from '../utils/aircraftIcons';
+import { getAirlineLogoUrl, normalizeLongitude, predictPosition, latLngToGlobalPixels } from '../utils/flightUtils';
+import { getAircraftIconUrl, getAircraftScale } from '../utils/aircraftIcons';
 import { trackStore } from '../store/FlightDataStore';
 import { dataManager } from '../services/dataManager';
 
@@ -60,13 +60,39 @@ const PlaneCanvasLayer = L.Layer.extend({
     getCanvas: function () { return this._canvas; }
 });
 
-// [v5.1] Pure helper — zoom-based icon size matching FR24/adsb.fi proportions.
-// Defined at module scope so it is accessible in ALL useEffect closures.
-// Formula: base 28px airborne / 20px ground, scaled by zoom. At zoom 7 → 24px, zoom 12 → 42px.
-function getDrawSize(plane, z) {
-    const t = Math.max(0.7, Math.min(1.8, (z - 2) / 8));
-    return Math.round((plane.onGround ? 20 : 28) * t);
+// ── FR24-Grade Zoom-Responsive Icon Sizing ──────────────────────────────────
+// Three rendering tiers matching FlightRadar24 behavior:
+//   Zoom <  8 : Minimal dot/micro-icon (avoid visual clutter)
+//   Zoom 8-11 : Standard aircraft silhouette, stable uniform size
+//   Zoom 12+  : Linear scale-up with proportional wingspan sizing
+//
+// `scale` is the wingspan-proportional factor from aircraftIcons (B738 = 1.0).
+// At tier 2-3, larger aircraft (B744, A380) render physically bigger.
+
+const FR24_BASE_PX = 26; // Base icon size at zoom 8-11 (before scale factor)
+
+function getDrawSize(plane, z, scale) {
+    const s = scale || 1.0;
+    if (z < 8) {
+        // Tier 1: Micro mode — tiny uniform dots, ignore wingspan
+        const micro = Math.max(4, Math.round(3 + (z - 3) * 1.2));
+        return micro;
+    }
+    if (z <= 11) {
+        // Tier 2: Standard FR24 — stable size with mild wingspan influence
+        // Clamp scale so no aircraft is absurdly large/small at overview zoom
+        const clampedScale = Math.max(0.6, Math.min(1.6, s));
+        return Math.round(FR24_BASE_PX * clampedScale);
+    }
+    // Tier 3: Detail zoom — linear growth, full wingspan proportionality
+    const growthFactor = 1.0 + (z - 11) * 0.18;
+    const clampedScale = Math.max(0.5, Math.min(2.4, s));
+    return Math.round(FR24_BASE_PX * clampedScale * growthFactor);
 }
+
+// Render mode flags for 60fps interaction optimization
+const RENDER_MODE_FULL = 0;
+const RENDER_MODE_SIMPLE = 1;
 
 /**
  * MapView — 管理 Leaflet 地圖、飛機 markers、軌跡線、機場圖層
@@ -118,6 +144,11 @@ export default function MapView({
 
     // [v3.0] Smart Tracking Interaction Refs
     const userInteractingRef = useRef(false);
+    // [v6.0] FR24 Render Mode: track active pan/zoom for simplified rendering
+    const renderModeRef = useRef(RENDER_MODE_FULL);
+    const renderModeTimeoutRef = useRef(null);
+    // [v6.0] ImageBitmap cache — pre-warmed offscreen bitmaps keyed by SVG URL
+    const bitmapCacheRef = useRef(new Map());
     const idleTimeoutRef = useRef(null);
 
     useEffect(() => {
@@ -294,7 +325,7 @@ export default function MapView({
                 const pt = map.latLngToContainerPoint([p.renderLat, normalizeLongitude(p.renderLng)]);
                 const dist = Math.hypot(pt.x - clickPt.x, pt.y - clickPt.y);
 
-                const hitRadius = getDrawSize(p, map.getZoom()) / 2 + 8;
+                const hitRadius = getDrawSize(p, map.getZoom(), getAircraftScale(p)) / 2 + 8;
                 if (dist < hitRadius) {
                     // 計算命中權重 (Weight)
                     // 基礎權重為距離反比，加上顯著的業務權重
@@ -323,12 +354,20 @@ export default function MapView({
         const handleInteractionStart = () => {
             userInteractingRef.current = true;
             if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
+            // [v6.0] Enter simplified render mode during active interaction
+            renderModeRef.current = RENDER_MODE_SIMPLE;
+            if (renderModeTimeoutRef.current) clearTimeout(renderModeTimeoutRef.current);
         };
         const handleInteractionEnd = () => {
             if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
             idleTimeoutRef.current = setTimeout(() => {
                 userInteractingRef.current = false;
             }, 10000); // Resume tracking after 10s of inactivity
+            // [v6.0] Restore full render mode after interaction settles
+            if (renderModeTimeoutRef.current) clearTimeout(renderModeTimeoutRef.current);
+            renderModeTimeoutRef.current = setTimeout(() => {
+                renderModeRef.current = RENDER_MODE_FULL;
+            }, 150);
         };
 
         // Bind directly to the map container DOM elements to catch raw user inputs
@@ -386,7 +425,7 @@ export default function MapView({
 
                 const pt = map.latLngToContainerPoint([p.renderLat, normalizeLongitude(p.renderLng)]);
                 const dist = Math.hypot(pt.x - mousePt.x, pt.y - mousePt.y);
-                const hoverRadius = getDrawSize(p, map.getZoom()) / 2 + 4;
+                const hoverRadius = getDrawSize(p, map.getZoom(), getAircraftScale(p)) / 2 + 4;
                 if (dist < hoverRadius) {
                     found = true;
                     break;
@@ -710,16 +749,25 @@ export default function MapView({
         const map = mapRef.current;
         if (!map) return;
 
-        // [v5.1] Icon image cache — only caches the HTMLImageElement, NOT size.
-        // Size is computed per-frame from zoom so all planes are consistent.
+        // [v6.0] Dual-layer icon cache: HTMLImageElement + ImageBitmap (offscreen)
+        // SVG → Image (immediate) → ImageBitmap (async, zero-decode on draw)
         const getSVGImage = (plane) => {
             const url = getAircraftIconUrl(plane);
             if (!cachedPathsRef.current.has(url)) {
                 const img = new Image();
                 img.src = url;
                 cachedPathsRef.current.set(url, img);
+                // Pre-warm ImageBitmap once the Image decodes
+                img.decode?.().then(() => {
+                    if (typeof createImageBitmap === 'function' && img.naturalWidth > 0) {
+                        createImageBitmap(img).then(bmp => {
+                            bitmapCacheRef.current.set(url, bmp);
+                        }).catch(() => {});
+                    }
+                }).catch(() => {});
             }
-            return cachedPathsRef.current.get(url);
+            // Prefer ImageBitmap (GPU-ready), fall back to HTMLImageElement
+            return bitmapCacheRef.current.get(url) || cachedPathsRef.current.get(url);
         };
 
         // [v3.4] Airline Logo Cache for Canvas
@@ -887,13 +935,16 @@ export default function MapView({
                     ctx.restore();
                 }
 
-                const showLabels = zoom >= 6;
-                const maxDraw = zoom <= 4 ? 300 : zoom <= 5 ? 800 : zoom <= 6 ? 1500 : zoom <= 7 ? 3500 : zoom <= 8 ? 6000 : 10000;
+                // [v6.0] FR24 Render Mode & Limits
+                const isSimple = renderModeRef.current === RENDER_MODE_SIMPLE;
+                const maxDraw = isSimple
+                    ? (zoom <= 6 ? 200 : 800)   // Simplified: fewer planes during interaction
+                    : (zoom <= 4 ? 300 : zoom <= 5 ? 800 : zoom <= 6 ? 1500 : zoom <= 7 ? 3500 : zoom <= 8 ? 6000 : 10000);
                 let drawnCount = 0;
 
                 ctx.textBaseline = 'middle';
 
-                // Render plane queue
+                // Build render queue
                 const renderQueue = [];
                 for (const id in currentPlanes) {
                     const plane = currentPlanes[id];
@@ -912,92 +963,125 @@ export default function MapView({
                     });
                 }
 
-                // Render loop
+                // ── FR24-Grade Plane Render Loop ─────────────────────────────
                 for (let i = 0; i < Math.min(maxDraw, renderQueue.length); i++) {
                     const plane = renderQueue[i];
 
-                    // [v4.0] Use robust Leaflet projection - always correct regardless of zoom history
                     const pt = map.latLngToContainerPoint([plane.renderLat, normalizeLongitude(plane.renderLng)]);
                     const ptX = pt.x;
                     const ptY = pt.y;
 
-                    // Frustum culling margin
+                    // Frustum culling
                     if (ptX < -100 || ptX > canvas.width + 100 || ptY < -100 || ptY > canvas.height + 100) continue;
 
                     drawnCount++;
                     const isSelected = plane.icao24 === currentSelected;
 
-                    // 透明度：資料越舊越透明
+                    // Data age → opacity
                     const dataAge = (nowMs / 1000) - (plane.lastContact || (nowMs / 1000));
                     let opacity = 1.0;
                     if (dataAge > 60) opacity = 0.4;
                     else if (dataAge > 30) opacity = 0.7;
 
+                    // ── Tier 1: Zoom < 8 — Micro dot mode ──
+                    if (zoom < 8 && !isSelected) {
+                        const dotSize = Math.max(2, Math.round(2 + (zoom - 3) * 0.6));
+                        const dotColor = plane.onGround ? '#888888' : '#F5C211';
+                        ctx.save();
+                        ctx.globalAlpha = opacity * (isSimple ? 0.6 : 0.85);
+                        ctx.fillStyle = dotColor;
+                        ctx.shadowColor = dotColor;
+                        ctx.shadowBlur = 3;
+                        ctx.beginPath();
+                        ctx.arc(ptX, ptY, dotSize, 0, 6.2832);
+                        ctx.fill();
+                        ctx.restore();
+                        continue;
+                    }
+
+                    // ── Tier 2-3: Zoom >= 8 — Full aircraft silhouette ──
+                    const scale = getAircraftScale(plane);
+                    const drawSize = getDrawSize(plane, zoom, scale);
+
                     ctx.save();
                     ctx.globalAlpha = opacity;
                     ctx.translate(ptX, ptY);
 
-                    // 發光效果
-                    const cData = getPlaneCanvasData(plane.altitude, isSelected, plane.onGround, plane.isEmergency, plane.category, colorSchemeRef.current, plane.typecode);
-                    ctx.shadowColor = cData.planeColor;
-                    ctx.shadowBlur = isSelected ? 15 : (plane.onGround ? 2 : 6);
+                    // FR24 yellow shadow glow
+                    if (isSelected) {
+                        ctx.shadowColor = '#22d3ee';
+                        ctx.shadowBlur = 15;
+                    } else if (plane.isEmergency) {
+                        ctx.shadowColor = '#ef4444';
+                        ctx.shadowBlur = 10;
+                    } else {
+                        ctx.shadowColor = plane.onGround ? 'rgba(100,100,100,0.4)' : 'rgba(245,194,17,0.5)';
+                        ctx.shadowBlur = plane.onGround ? 2 : 4;
+                    }
 
-                    // [v5.0.1] Calibration: Ensure nose points to heading
-                    // Base SVG is North-Up (0°). Canvas rotation is clockwise.
-                    // If heading 45° points wrong, adjust rotationOffset here.
-                    const rotationOffset = 0; 
-                    const finalRotationRad = (plane.heading + rotationOffset) * Math.PI / 180;
+                    // Heading rotation (SVG is North-Up)
+                    const finalRotationRad = (plane.heading || 0) * Math.PI / 180;
                     ctx.rotate(finalRotationRad);
 
+                    // Draw aircraft icon (prefer ImageBitmap → HTMLImageElement)
                     const img = getSVGImage(plane);
-                    const drawSize = getDrawSize(plane, zoom);
-                    if (img && img.complete && img.naturalHeight !== 0) {
+                    const imgReady = img && (img instanceof ImageBitmap || (img.complete && img.naturalHeight !== 0));
+                    if (imgReady) {
                         const offset = drawSize / 2;
                         ctx.drawImage(img, -offset, -offset, drawSize, drawSize);
                     }
 
                     ctx.restore();
 
-                    // [v4.0.1] Label Strategy: Only show on explicit selection (User request)
-                    // Added isEmergency as a safety fallback at high zoom levels
-                    const shouldShowLabel = isSelected || (zoom >= 10 && plane.isEmergency);
+                    // ── Label Rendering ──────────────────────────────────────
+                    // Selected: always show. Emergency: zoom >= 10. Normal: fade-in at zoom >= 12
+                    const shouldShowLabel = isSelected
+                        || (zoom >= 10 && plane.isEmergency)
+                        || (zoom >= 12 && !isSimple);
 
                     if (shouldShowLabel) {
+                        // Compute label opacity for fade-in effect at zoom 12-13
+                        let labelAlpha = opacity;
+                        if (!isSelected && !plane.isEmergency && zoom < 13) {
+                            labelAlpha *= (zoom - 11); // 0→1 fade over zoom 12-13
+                        }
+
                         ctx.save();
-                        // 1. 將原點平移至飛機中心
                         ctx.translate(ptX, ptY);
+                        ctx.globalAlpha = labelAlpha;
 
                         const logoImg = getLogoImage(plane.callsign);
                         const hasLogo = logoImg && logoImg.complete && logoImg.naturalWidth > 0;
-                        const labelText = plane.callsign || plane.icao24?.slice(0, 6) || 'UNKNOWN';
 
-                        // 2. 重新校準字體與排版比例 (放大 Logo 與間距)
+                        // Build label text: callsign + altitude at high zoom
+                        let labelText = plane.callsign || plane.icao24?.slice(0, 6) || '';
+                        if (zoom >= 13 && !plane.onGround && plane.altitude > 0) {
+                            const altFL = Math.round(plane.altitude * 3.28084 / 100);
+                            labelText += ` FL${altFL}`;
+                        }
+
                         ctx.font = 'bold 13px "JetBrains Mono", "Roboto Mono", Inter, sans-serif';
                         const textWidth = ctx.measureText(labelText).width;
 
-                        const logoWidth = hasLogo ? 40 : 0; // 放大 Logo 空間防失真
+                        const logoWidth = hasLogo ? 40 : 0;
                         const logoHeight = 14;
                         const paddingX = 10;
                         const gap = hasLogo ? 8 : 0;
 
                         const bubbleWidth = paddingX + logoWidth + gap + textWidth + paddingX;
-                        const bubbleHeight = 28; // 增加高度讓視覺有呼吸空間
+                        const bubbleHeight = 28;
                         const radius = 6;
-
-                        // 🔑 關鍵修復：將標籤大幅往右推，絕對不允許遮擋飛機圖示！
-                        const boxX = 26;
+                        const boxX = Math.round(drawSize / 2) + 6;
                         const boxY = -bubbleHeight / 2;
                         const tailWidth = 8;
                         const tailHeight = 10;
 
-                        ctx.globalAlpha = opacity;
-
-                        // 3. 戰術陰影
+                        // Shadow
                         ctx.shadowColor = isSelected ? 'rgba(34, 211, 238, 0.6)' : 'rgba(0, 0, 0, 0.6)';
                         ctx.shadowBlur = isSelected ? 10 : 5;
                         ctx.shadowOffsetY = 2;
 
-                        // 4. 深色背景面板
+                        // Background panel
                         ctx.fillStyle = isSelected ? 'rgba(15, 23, 42, 0.95)' : 'rgba(30, 41, 59, 0.9)';
                         ctx.beginPath();
                         ctx.moveTo(boxX + radius, boxY);
@@ -1008,7 +1092,7 @@ export default function MapView({
                         ctx.lineTo(boxX + radius, boxY + bubbleHeight);
                         ctx.arcTo(boxX, boxY + bubbleHeight, boxX, boxY + bubbleHeight - radius, radius);
 
-                        // 指向飛機的指針
+                        // Pointer arrow
                         ctx.lineTo(boxX, tailHeight / 2);
                         ctx.lineTo(boxX - tailWidth, 0);
                         ctx.lineTo(boxX, -tailHeight / 2);
@@ -1018,7 +1102,7 @@ export default function MapView({
                         ctx.closePath();
                         ctx.fill();
 
-                        // 5. 邊框
+                        // Border
                         ctx.lineWidth = 1.5;
                         ctx.strokeStyle = isSelected ? '#22d3ee' : (plane.isEmergency ? '#ef4444' : 'rgba(148, 163, 184, 0.4)');
                         ctx.stroke();
@@ -1026,18 +1110,16 @@ export default function MapView({
                         ctx.shadowBlur = 0;
                         ctx.shadowOffsetY = 0;
 
-                        // 6. 內容繪製
+                        // Content
                         let currentX = boxX + paddingX;
 
                         if (hasLogo) {
-                            // 🔑 關鍵修復：使用帶有圓角的優雅白底墊著 Logo，去除死板的補丁感
                             const logoBgMargin = 3;
                             ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
                             ctx.beginPath();
                             if (ctx.roundRect) {
                                 ctx.roundRect(currentX - logoBgMargin, boxY + (bubbleHeight - logoHeight) / 2 - logoBgMargin, logoWidth + logoBgMargin * 2, logoHeight + logoBgMargin * 2, 3);
                             } else {
-                                // Fallback for environments without roundRect
                                 ctx.rect(currentX - logoBgMargin, boxY + (bubbleHeight - logoHeight) / 2 - logoBgMargin, logoWidth + logoBgMargin * 2, logoHeight + logoBgMargin * 2);
                             }
                             ctx.fill();
@@ -1045,7 +1127,6 @@ export default function MapView({
                             ctx.drawImage(logoImg, currentX, boxY + (bubbleHeight - logoHeight) / 2, logoWidth, logoHeight);
                             currentX += logoWidth + gap / 2;
 
-                            // 分隔線
                             ctx.beginPath();
                             ctx.moveTo(currentX, boxY + 6);
                             ctx.lineTo(currentX, boxY + bubbleHeight - 6);
@@ -1056,7 +1137,7 @@ export default function MapView({
                             currentX += gap / 2;
                         }
 
-                        // 7. 航班號
+                        // Callsign text
                         ctx.fillStyle = isSelected ? '#ffffff' : (plane.isEmergency ? '#fca5a5' : '#e2e8f0');
                         ctx.textBaseline = 'middle';
                         ctx.fillText(labelText, currentX, 1);
