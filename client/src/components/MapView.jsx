@@ -543,7 +543,7 @@ export default function MapView({
             const isTier1 = TIER1_AIRPORTS.includes(ap.icao);
             const isTier2 = ap.iata && ap.iata.length === 3;
             let visible = isTier1 ? showTier1 : isTier2 ? showTier2 : showTier3;
-            if (visible && extBounds.contains([ap.lat, ap.lng])) {
+            if (visible && ap && ap.lat != null && ap.lng != null && extBounds.contains([ap.lat, ap.lng])) {
                 desiredKeys.add(ap.icao || ap.iata || `idx_${i}`);
             }
         }
@@ -563,6 +563,7 @@ export default function MapView({
             const isTier2 = ap.iata && ap.iata.length === 3;
             const key = ap.icao || ap.iata || `idx_${i}`;
             if (!desiredKeys.has(key) || existingMarkers.has(key)) continue;
+            if (!ap || ap.lat == null || ap.lng == null) continue;
 
             const m = L.marker([ap.lat, ap.lng], {
                 icon: createAirportIcon(isTier1 ? 'large' : isTier2 ? 'medium' : 'small'),
