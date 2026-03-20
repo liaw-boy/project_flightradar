@@ -470,7 +470,8 @@ export function useFlightData(mapRef) {
 
     // [Project AERO-SYNC] Initialize WebWorker for WebSocket Binary Stream
     useEffect(() => {
-        const worker = new Worker(new URL('../workers/FlightDataWorker.js', import.meta.url), { type: 'module' });
+        // [v7.0] Off-Thread Flight Data Engine — heavy parsing + state consolidation in Worker
+        const worker = new Worker(new URL('../workers/flightWorker.js', import.meta.url), { type: 'module' });
         workerRef.current = worker;
 
         worker.onmessage = (event) => {
@@ -484,9 +485,11 @@ export function useFlightData(mapRef) {
                 usesWebSocketRef.current = false;
                 setApiStatus('FALLBACK (Polling)');
                 setApiStatusClass('stat-warning');
-                fetchPlanes(false); // Trigger immediate fallback fetch
-            } else if (type === 'PLANES_UPDATED') {
-                const { updates = [], removed = [], globalTime } = payload;
+                fetchPlanes(false);
+            } else if (type === 'PLANES_BATCH') {
+                // Worker has already done: msgpack decode → array→object → state consolidation → debounce
+                // Main thread only: projection + trackStore + React setState (minimal work)
+                const { changed, removed = [], globalTime } = payload;
                 globalLastUpdateRef.current = globalTime;
                 setLastUpdateTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
 
@@ -494,61 +497,57 @@ export function useFlightData(mapRef) {
                 const zoom = map ? map.getZoom() : 5;
                 const now = Date.now();
 
-                // 1. [AERO-SYNC] 更新可變的即時參照 (Mutable Reference)
-                // 這是渲染循環的資料源，完全繞過 React State Diffing
-                updates.forEach(u => {
-                    const id = u[0];
-                    // Format: [icao24, lat, lng, heading, altitude, velocity, onGround, category, isEmergency, callsign, vRate, squawk, lastContact]
-                    const lat = u[1];
-                    const lng = u[2];
+                // Apply pre-assembled plane objects (no array destructuring needed)
+                const changedIds = Object.keys(changed);
+                for (let i = 0; i < changedIds.length; i++) {
+                    const id = changedIds[i];
+                    const wp = changed[id]; // worker-assembled plane object
 
-                    // 投影校正並存入 Zero-GC Store
-                    const globalPt = latLngToGlobalPixels(lat, lng, zoom, sharedPointRef.current);
-                    trackStore.addTrackPoint(id, lat, lng, globalPt.x, globalPt.y);
+                    // Projection + track store (requires main-thread map reference)
+                    const globalPt = latLngToGlobalPixels(wp.lat, wp.lng, zoom, sharedPointRef.current);
+                    trackStore.addTrackPoint(id, wp.lat, wp.lng, globalPt.x, globalPt.y);
 
-                    // 更新即時狀態 (Mutable Ref)
+                    // Merge into mutable ref (preserve render state from animate loop)
                     let p = planesDictRef.current[id];
                     if (!p) {
                         p = { icao24: id };
-                        planesDictRef.current[id] = p; // 動態加入新飛機
+                        planesDictRef.current[id] = p;
                     }
 
-                    p.lat = lat;
-                    p.lng = lng;
-                    p.heading = u[3];
-                    p.altitude = u[4];
-                    p.velocity = u[5];
-                    p.onGround = u[6];
-                    p.category = u[7];
-                    p.isEmergency = u[8];
-                    p.callsign = u[9];
-                    p.vRate = u[10];
-                    p.squawk = u[11];
-                    p.lastContact = u[12];
+                    p.lat = wp.lat;
+                    p.lng = wp.lng;
+                    p.heading = wp.heading;
+                    p.altitude = wp.altitude;
+                    p.velocity = wp.velocity;
+                    p.onGround = wp.onGround;
+                    p.category = wp.category;
+                    p.isEmergency = wp.isEmergency;
+                    p.callsign = wp.callsign;
+                    p.vRate = wp.vRate;
+                    p.squawk = wp.squawk;
+                    p.lastContact = wp.lastContact;
+                    if (wp.typecode) p.typecode = wp.typecode;
 
-                    // 渲染座標初始化/更新
-                    p.renderLat = lat;
-                    p.renderLng = lng;
-                    p.targetLat = lat;
-                    p.targetLng = lng;
+                    p.renderLat = wp.lat;
+                    p.renderLng = wp.lng;
+                    p.targetLat = wp.lat;
+                    p.targetLng = wp.lng;
                     p.targetUpdatedAt = now;
                     p.globalX = globalPt.x;
                     p.globalY = globalPt.y;
 
-                    // [v4.4.0] Trigger Enhanced Auto-Backfill (WS stream)
-                    if (!backfilledIcaosRef.current.has(id) && !p.isBackfilling) {
+                    // Auto-Backfill trigger
+                    if (wp._isNew && !backfilledIcaosRef.current.has(id) && !p.isBackfilling) {
                         p.isBackfilling = true;
                         backfillQueueRef.current.push(id);
                     }
-                });
+                }
 
-                removed.forEach(id => {
-                    delete planesDictRef.current[id];
-                    trackStore.clearTrack(id); // [v4.1.2] Synchronous GC: Kill the ghost track immediately
-                });
+                for (let i = 0; i < removed.length; i++) {
+                    delete planesDictRef.current[removed[i]];
+                    trackStore.clearTrack(removed[i]);
+                }
 
-                // 2. [AERO-SYNC] 智能節流 React State 更新
-                // 必須穩定觸發 setPlanesDict，確保 MapView 拿到最新的字典參照
                 setPlanesDict({ ...planesDictRef.current });
             } else if (type === 'TELEMETRY_UPDATED') {
                 const { totalApiHits, nextFetchIn, accounts } = payload;

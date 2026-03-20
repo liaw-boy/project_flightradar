@@ -46,9 +46,9 @@ mongoose.connect(MONGODB_URI, {
         const db = mongoose.connection.db;
         await db.command({
             collMod: 'trackpoints',
-            index: { keyPattern: { timestamp: 1 }, expireAfterSeconds: 86400 * 7 }
+            index: { keyPattern: { timestamp: 1 }, expireAfterSeconds: 172800 }
         });
-        console.log(`${getTime()} [TTL] TrackPoint TTL synced to 7 days.`);
+        console.log(`${getTime()} [TTL] TrackPoint TTL synced to 48 hours.`);
     } catch (ttlErr) {
         // NamespaceNotFound = collection doesn't exist yet (first run), safe to ignore
         if (ttlErr.codeName !== 'NamespaceNotFound' && ttlErr.codeName !== 'IndexNotFound') {
@@ -735,31 +735,62 @@ async function ingestTrackPoints(states, timeUnix) {
     const sessionCloseOps = [];   // Batched session close operations
     const sessionCreateDocs = []; // Batched new session documents
 
+    // ── Session thresholds (defined once outside the hot loop) ─────────
+    const SESSION_TIMEOUT_MS = 1200000;     // 20 minutes
+    const GROUND_IDLE_TIMEOUT_MS = 900000;  // 15 minutes
+    const GROUND_IDLE_SPEED_KTS = 10;       // knots threshold
+
     for (const p of states) {
         if (typeof p.lat !== 'number' || typeof p.lng !== 'number') continue;
 
         const icao24 = p.icao24.toLowerCase();
         const callsign = (p.callsign || 'N/A').toUpperCase().trim();
         const onGround = !!p.onGround;
+        const velocityKts = (p.velocity || 0) * 1.94384; // m/s → knots
 
-        // ── SESSION STATE MACHINE (v6.0 Hardened) ────────────────────────
+        // ── SESSION STATE MACHINE (v7.0 Commercial-Grade) ────────────────
         // Transitions:
         //   1. No prior session           → CREATE
         //   2. Callsign changed (non-N/A) → CLOSE old + CREATE
         //   3. Airborne → Ground          → Update state (same session, plane landed)
         //   4. Ground → Airborne          → CLOSE old + CREATE (new flight leg)
-        //   5. Inactive > 1 hour          → CLOSE old + CREATE (timeout)
+        //   5. Inactive > 20 minutes      → CLOSE old + CREATE (timeout)
         //   6. On ground + callsign swap  → CLOSE old + CREATE (turnaround)
+        //   7. Ground idle > 15 min (speed < 10 kts) → CLOSE session (parked)
 
         let session = activeSessions.get(icao24);
         let needsNewSession = false;
+        let closeReason = null;
 
         if (!session) {
             // Case 1: First sighting
             needsNewSession = true;
-        } else if (session && (now - session.lastSeen > 3600000)) {
+        } else if (now - session.lastSeen > SESSION_TIMEOUT_MS) {
             // Case 5: Timeout — check BEFORE other transitions to avoid stale logic
             needsNewSession = true;
+            closeReason = 'TIMEOUT';
+        } else if (onGround && velocityKts < GROUND_IDLE_SPEED_KTS) {
+            // Case 7: Ground idle tracking
+            if (!session.groundIdleSince) {
+                session.groundIdleSince = now;
+            } else if (now - session.groundIdleSince > GROUND_IDLE_TIMEOUT_MS) {
+                // Parked for 15+ min — close session, next motion opens a new one
+                closeReason = 'COMPLETED';
+                needsNewSession = false; // Don't create yet — wait for movement
+                sessionCloseOps.push({
+                    updateOne: {
+                        filter: { sessionId: session.sessionId },
+                        update: { $set: { status: 'COMPLETED', endTime: new Date() } }
+                    }
+                });
+                ingestionStats.sessionsClosed++;
+                activeSessions.delete(icao24);
+                session = null;
+            }
+            if (session) {
+                session.lastSeen = now;
+                session.onGround = true;
+            }
         } else if (session.onGround && !onGround) {
             // Case 4: Takeoff — always a new flight leg
             needsNewSession = true;
@@ -769,7 +800,11 @@ async function ingestTrackPoints(states, timeUnix) {
         } else if (!session.onGround && onGround) {
             // Case 3: Landing — same session continues, just mark as on-ground
             session.onGround = true;
+            session.groundIdleSince = now; // Start idle timer on landing
             session.lastSeen = now;
+        } else {
+            // Normal movement — reset idle timer
+            if (session.groundIdleSince) session.groundIdleSince = null;
         }
 
         if (needsNewSession) {
@@ -778,7 +813,7 @@ async function ingestTrackPoints(states, timeUnix) {
                 sessionCloseOps.push({
                     updateOne: {
                         filter: { sessionId: session.sessionId },
-                        update: { $set: { status: 'COMPLETED', endTime: new Date() } }
+                        update: { $set: { status: closeReason || 'COMPLETED', endTime: new Date() } }
                     }
                 });
                 ingestionStats.sessionsClosed++;
@@ -786,7 +821,7 @@ async function ingestTrackPoints(states, timeUnix) {
 
             // Create new session
             const newSessionId = `${icao24}_${now}_${Math.random().toString(36).slice(2, 6)}`;
-            session = { sessionId: newSessionId, callsign, lastSeen: now, onGround };
+            session = { sessionId: newSessionId, callsign, lastSeen: now, onGround, groundIdleSince: null };
             activeSessions.set(icao24, session);
 
             sessionCreateDocs.push({
@@ -813,6 +848,9 @@ async function ingestTrackPoints(states, timeUnix) {
                 });
             }
         }
+
+        // Skip track point if session was closed by ground-idle (no active session)
+        if (!session) continue;
 
         // Build track point with ALL available telemetry fields
         batchTrackPoints.push({
@@ -938,10 +976,10 @@ async function fetchGlobalPlanes() {
 // 啟動 30 秒全球資料輪詢機制 (配合 CACHE_TTL=30s)
 setInterval(fetchGlobalPlanes, 30000);
 
-// [v6.0] Session timeout reaper — close stale sessions every 10 minutes
+// [v7.0] Session timeout reaper — close stale sessions every 5 minutes
 setInterval(() => {
     const now = Date.now();
-    const staleThreshold = 3600000; // 1 hour
+    const staleThreshold = 1200000; // 20 minutes (matches SESSION_TIMEOUT_MS)
     const staleIds = [];
 
     for (const [icao24, session] of activeSessions) {
@@ -964,7 +1002,7 @@ setInterval(() => {
             .then(r => console.log(`${getTime()} [SESSION REAPER] Closed ${staleIds.length} timed-out sessions.`))
             .catch(err => console.error('[SESSION REAPER]', err.message));
     }
-}, 600000); // Every 10 minutes
+}, 300000); // Every 5 minutes
 
 // 啟動時讀取快取並初始化
 const isFreshQuota = loadQuotaCache();
@@ -1733,6 +1771,84 @@ app.get('/api/tracks', async (req, res) => {
     if (!icao24) return res.status(400).json({ error: 'Missing icao24' });
     const result = await fetchTracksInternal(icao24);
     res.json(result);
+});
+
+// ── Flight Session APIs (v7.0) ──────────────────────────────────────────
+
+/**
+ * GET /api/session/:id/track — Retrieve track for a specific session
+ * Returns the exact track points belonging to one flight leg.
+ */
+app.get('/api/session/:id/track', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const session = await FlightSession.findOne({ sessionId: id }).lean();
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+
+        const points = await TrackPoint.find({ sessionId: id }).sort({ timestamp: 1 }).lean();
+
+        res.json({
+            sessionId: id,
+            icao24: session.icao24,
+            callsign: session.callsign,
+            status: session.status,
+            startTime: session.startTime,
+            endTime: session.endTime,
+            pointCount: points.length,
+            path: points.map(pt => [
+                Math.floor(pt.timestamp.getTime() / 1000),
+                pt.lat,
+                pt.lng,
+                pt.altitude || 0,
+                pt.heading || 0,
+                pt.velocity || 0,
+                pt.onGround ? 1 : 0
+            ])
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * GET /api/sessions/:icao24 — List all flight sessions for an aircraft
+ * Returns session metadata (no track points) sorted by most recent first.
+ * Query params: ?limit=20&status=ACTIVE
+ */
+app.get('/api/sessions/:icao24', async (req, res) => {
+    const icao24 = req.params.icao24.toLowerCase();
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const filter = { icao24 };
+    if (req.query.status) filter.status = req.query.status.toUpperCase();
+
+    try {
+        const sessions = await FlightSession.find(filter)
+            .sort({ startTime: -1 })
+            .limit(limit)
+            .lean();
+
+        // Attach point count for each session (lightweight aggregate)
+        const sessionIds = sessions.map(s => s.sessionId);
+        const counts = await TrackPoint.aggregate([
+            { $match: { sessionId: { $in: sessionIds } } },
+            { $group: { _id: '$sessionId', count: { $sum: 1 } } }
+        ]);
+        const countMap = new Map(counts.map(c => [c._id, c.count]));
+
+        res.json(sessions.map(s => ({
+            sessionId: s.sessionId,
+            callsign: s.callsign,
+            status: s.status,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            pointCount: countMap.get(s.sessionId) || 0,
+            durationMin: s.endTime
+                ? Math.round((new Date(s.endTime) - new Date(s.startTime)) / 60000)
+                : null
+        })));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 

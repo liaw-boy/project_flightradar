@@ -95,7 +95,8 @@ function broadcastPlanes(states, timestamp) {
             updatesMap.set(icao24, [
                 icao24, plane.lat, plane.lng, plane.heading, plane.altitude,
                 plane.velocity, plane.onGround, plane.category, plane.isEmergency,
-                plane.callsign, plane.vRate, plane.squawk, plane.lastContact
+                plane.callsign, plane.vRate, plane.squawk, plane.lastContact,
+                plane.typecode || null
             ]);
         }
     }

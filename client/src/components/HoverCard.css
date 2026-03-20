@@ -1,0 +1,113 @@
+.hover-card {
+    position: absolute;
+    width: 200px;
+    background: rgba(32, 32, 35, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    color: white;
+    font-family: 'Inter', -apple-system, sans-serif;
+    pointer-events: none;
+    z-index: 10000;
+    overflow: hidden;
+    transition: opacity 0.15s ease-out;
+}
+
+.hover-card-photo-wrapper {
+    position: relative;
+    width: 100%;
+    height: 110px;
+    background: #111;
+}
+
+.hover-card-photo-wrapper img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.photo-credit {
+    position: absolute;
+    bottom: 5px;
+    left: 8px;
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.7);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.photo-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    font-size: 11px;
+    color: #666;
+    text-transform: uppercase;
+}
+
+.hover-card-content {
+    padding: 10px 12px;
+}
+
+.hover-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.hover-callsign {
+    font-size: 14px;
+    font-weight: 700;
+    color: #FACC15; /* Golden primary */
+}
+
+.hover-typecode {
+    font-size: 10px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #ccc;
+}
+
+.hover-route {
+    margin-bottom: 10px;
+}
+
+.route-text {
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.hover-progress-container {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.hover-progress-bar {
+    height: 100%;
+    background: #22c55e; /* Vibrant Green */
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+}
+
+.hover-stats {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #999;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding-top: 8px;
+}
+
+.stats-divider {
+    color: #444;
+}
