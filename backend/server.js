@@ -18,7 +18,11 @@ const Metar = require('./models/Metar'); // [Cache Migration]
 const FlightSession = require('./models/FlightSession'); // [Flight Sessions]
 const Airport = require('./models/Airport'); // [GIS Modernization]
 const AircraftShape = require('./models/AircraftShape'); // [SVG Shapes]
+const AircraftRegistry = require('./models/AircraftRegistry'); // [Registry Data]
 const { crawlFlightSchedules } = require('./crawler'); // [CRAWLER] Real-time schedules
+const NodeCache = require('node-cache'); // [v8.0] BFF Aggregator Cache
+const ActiveFlight = require('./models/ActiveFlight'); // [Phase 12] High-Availability DB-First Live Data
+const flightController = require('./controllers/flightController'); // [Phase 14] Ultimate Fusion Controller
 
 // ==========================================
 // [v4.4.0] Logging Helper with Tactical Timestamps
@@ -41,6 +45,10 @@ mongoose.connect(MONGODB_URI, {
     console.log(`${getTime()} 🍃 [DATABASE] Connected to Local MongoDB`);
     restoreActiveSessions();
 
+    // [Phase 16] Run OSINT Data Sync immediately after connection
+    const { initOsintData } = require('./scripts/syncOsintData');
+    initOsintData();
+
     // Sync TTL index to match schema (MongoDB won't auto-update existing TTL values)
     try {
         const db = mongoose.connection.db;
@@ -56,7 +64,7 @@ mongoose.connect(MONGODB_URI, {
         }
     }
 })
-  .catch(err => console.error('❌ [DATABASE] Connection error:', err));
+    .catch(err => console.error('❌ [DATABASE] Connection error:', err));
 
 mongoose.connection.on('error', err => {
     console.error('❌ [DATABASE] Runtime connection error:', err);
@@ -106,14 +114,222 @@ app.use(helmet({
 // Rate limiter: 200 req/min per IP（選飛機會同時觸發 metadata+route+track 3 個請求）
 const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 200,
+    max: 1000,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please wait a moment.' },
-    skip: (req) => req.path === '/api/events', // SSE exempt
+    skip: (req) => ['/api/events', '/api/flights/live', '/api/flight-details', '/api/flight/complete-details'].some(p => req.path.startsWith(p)), // High-freq & Fusion exempt
 });
 app.use('/api', apiLimiter);
 app.use(express.json());
+
+// [v9.7] Strategic API Heartbeats
+app.post('/api/viewport', (req, res) => res.json({ status: 'ok', received: true }));
+app.get('/api/planes/bbox-ping', (req, res) => res.json({ status: 'active' }));
+
+// ==========================================
+// [v8.0] High-Availability Live Data Endpoint
+// ==========================================
+app.get('/api/flights/live', async (req, res) => {
+    const { lamin, lomin, lamax, lomax } = req.query;
+    
+    // Normalize to standard JSON structure
+    const normalize = (icao24, lat, lon, alt, hdg, gs, vrate, squawk, callsign, onGround, category, typecode) => ({
+        hex: icao24?.toLowerCase() || 'unknown',
+        lat: parseFloat(lat) || 0,
+        lon: parseFloat(lon) || 0,
+        alt: Math.round(alt) || 0,
+        hdg: Math.round(hdg) || 0,
+        gs: Math.round(gs) || 0,
+        vrate: Math.round(vrate) || 0,
+        squawk: squawk || '0000',
+        callsign: (callsign || 'N/A').trim(),
+        onGround: !!onGround,
+        category: category || 0,
+        typecode: typecode || null
+    });
+
+    try {
+        // [Phase 17] Adaptive Primary Telemetry Resolver
+        const primaryUrl = process.env.PRIMARY_TELEMETRY_URL || 'https://opensky-network.org/api/states/all';
+        let rawPlanes = [];
+        let sourceName = 'primary';
+
+        if (primaryUrl.includes('opensky-network.org')) {
+            // Format 1: OpenSky Network (Uses built-in credential rotator fetcher)
+            const osData = await fetchOpenSky({ lamin, lomin, lamax, lomax });
+            rawPlanes = osData.states.map(s => normalize(
+                s.icao24, s.lat, s.lng, s.altitude, s.heading, 
+                s.velocity, s.vRate, s.squawk, s.callsign, s.onGround,
+                s.category, s.typecode
+            ));
+            sourceName = 'opensky';
+        } else {
+            // Format 2: Custom SDR JSON (Raspberry Pi readsb / tar1090)
+            const sdrRes = await fetch(primaryUrl, { signal: AbortSignal.timeout(5000) });
+            if (!sdrRes.ok) throw new Error(`Custom Telemetry Source responded with ${sdrRes.status}`);
+            const sdrData = await sdrRes.json();
+
+            // Intelligent payload detection
+            if (sdrData.aircraft) {
+                // readsb / tar1090 array
+                rawPlanes = sdrData.aircraft.map(ac => normalize(
+                    ac.hex, ac.lat, ac.lon, ac.alt_baro, ac.track,
+                    ac.gs, ac.baro_rate, ac.squawk, ac.flight, ac.alt_baro === 'ground',
+                    ac.category, ac.t
+                ));
+            } else if (sdrData.states) {
+                // Raw OpenSky-like structure without fetchOpenSky wrapping
+                rawPlanes = sdrData.states.map(s => normalize(
+                    s[0], s[6], s[5], s[7] || s[13], s[10], 
+                    s[9], s[11], s[14], s[1], s[8],
+                    s[17], null
+                ));
+            } else {
+                throw new Error("Unrecognized telemetry payload schema.");
+            }
+            
+            // Client requests bounding box, SDR usually returns full global. Filter locally.
+            const latMin = parseFloat(lamin); const latMax = parseFloat(lamax);
+            const lonMin = parseFloat(lomin); const lonMax = parseFloat(lomax);
+            rawPlanes = rawPlanes.filter(p => 
+                p.lat >= latMin && p.lat <= latMax &&
+                p.lon >= lonMin && p.lon <= lonMax
+            );
+            sourceName = 'sdr_local';
+        }
+
+        console.log(`📡 [LIVE] Primary Telemetry (${sourceName}) Success: ${rawPlanes.length} planes`);
+        return res.json({ source: sourceName, planes: rawPlanes, timestamp: Date.now() });
+
+    } catch (primaryErr) {
+        console.warn(`⚠️ [LIVE] Primary Telemetry Failed (${primaryErr.message}). Switching to fallback...`);
+        
+        try {
+            // [Fallback] Dynamic Fallback Telemetry
+            const fallbackBase = process.env.FALLBACK_TELEMETRY_URL || 'https://api.adsb.lol';
+            const lat = (parseFloat(lamin) + parseFloat(lamax)) / 2;
+            const lon = (parseFloat(lomin) + parseFloat(lomax)) / 2;
+            const dist = 250; // default 250km radius
+            
+            const fallbackRes = await fetch(`${fallbackBase}/v2/lat/${lat}/lon/${lon}/dist/${dist}`, {
+                headers: { 'User-Agent': 'AEROSTRAT/5.0' },
+                signal: AbortSignal.timeout(5000)
+            });
+            
+            if (!fallbackRes.ok) throw new Error(`Fallback status ${fallbackRes.status}`);
+            const fallbackData = await fallbackRes.json();
+            
+            const results = (fallbackData.ac || []).map(ac => normalize(
+                ac.hex, ac.lat, ac.lon, ac.alt_baro, ac.track,
+                ac.gs, ac.baro_rate, ac.squawk, ac.flight, ac.alt_baro === 'ground',
+                ac.category, ac.t
+            ));
+            
+            console.log(`✅ [LIVE] Fallback Success: ${results.length} planes`);
+            return res.json({ source: 'fallback', planes: results, timestamp: Date.now() });
+        } catch (fallbackErr) {
+            console.error(`❌ [LIVE] All telemetry sources failed:`, fallbackErr.message);
+            res.status(503).json({ error: 'Live data unavailable from all sources', details: fallbackErr.message });
+        }
+    }
+});
+
+// ==========================================
+// [v8.0] Multi-Source Flight Details Fusion
+// ==========================================
+app.get('/api/flight-details/:hex/:callsign', async (req, res) => {
+    const hex = req.params.hex.toLowerCase();
+    const callsign = req.params.callsign.toUpperCase().trim();
+    const cacheKey = `details_${hex}`;
+
+    // 1. Memory Cache Check
+    const cached = flightDetailsCache.get(cacheKey);
+    if (cached) {
+        console.log(`📦 [BFF] Details Cache Hit: ${hex}`);
+        return res.json(cached);
+    }
+
+    console.log(`📡 [BFF] Aggregating multi-source data for ${hex} / ${callsign}...`);
+
+    // 2. Convergent Parallel Fetch
+    const results = await Promise.allSettled([
+        // a. [OpenSky State] Latest telemetry
+        fetchOpenSky({ icao24: hex }).catch(() => null),
+        
+        // b. [Route Supplement] Using AeroDataBox as Route API fallback
+        fetch(`https://aerodatabox.p.rapidapi.com/flights/callsign/${callsign}`, {
+            headers: { 'X-RapidAPI-Key': process.env.AERODATABOX_API_KEY, 'X-RapidAPI-Host': 'aerodatabox.p.rapidapi.com' },
+            signal: AbortSignal.timeout(4000)
+        }).then(r => r.ok ? r.json() : null).catch(() => null),
+        
+        // c. [Static Metadata] HexDB
+        fetch(`https://hexdb.io/api/v1/aircraft/${hex}`, { signal: AbortSignal.timeout(3000) })
+            .then(r => r.ok ? r.json() : null).catch(() => null),
+            
+        // d. [Photos] Planespotters
+        fetch(`https://api.planespotters.net/pub/photos/hex/${hex}`, {
+            headers: { 'User-Agent': 'AEROSTRAT/5.0' },
+            signal: AbortSignal.timeout(4000)
+        }).then(r => r.ok ? r.json() : null).catch(() => null),
+
+        // e. [Internal Cache] Local MongoDB metadata (Phase 7 Correction Priority)
+        Aircraft.findOne({ icao24: hex }).lean().catch(() => null)
+    ]);
+
+    // 3. Data Normalization (MergedFlightData)
+    const [osRes, routeRes, hexRes, photoRes, localRes] = results.map(r => r.status === 'fulfilled' ? r.value : null);
+
+    const osState = osRes?.states?.[0] || {};
+    const routeInfo = routeRes?.[0] || {}; 
+    const aircraftInfo = hexRes || {};
+    const photoData = photoRes?.photos?.[0] || {};
+    const localInfo = localRes || {};
+
+    const mergedData = {
+        hex,
+        callsign,
+        status: {
+            alt: osState.altitude || 0,
+            gs: osState.velocity || 0,
+            track: osState.heading || 0,
+            lat: osState.lat || 0,
+            lon: osState.lng || 0,
+            squawk: osState.squawk || '0000',
+            timestamp: osState.lastContact || Math.floor(Date.now() / 1000)
+        },
+        route: {
+            origin: {
+                iata: routeInfo.departure?.airport?.iata || 'N/A',
+                name: routeInfo.departure?.airport?.name || 'Unknown Airport',
+                city: routeInfo.departure?.airport?.municipalityName || 'Location Unavailable'
+            },
+            destination: {
+                iata: routeInfo.arrival?.airport?.iata || '---',
+                name: routeInfo.arrival?.airport?.name || 'Unknown Airport',
+                city: routeInfo.arrival?.airport?.municipalityName || 'Location Unavailable'
+            }
+        },
+        aircraft: {
+            // Priority: Local Cache > HexDB
+            model: localInfo.model || aircraftInfo.typeName || aircraftInfo.type || 'Unknown Model',
+            registration: localInfo.registration || aircraftInfo.registration || 'N/A',
+            airline: localInfo.operator || aircraftInfo.operator || 'Unknown Airline',
+            typecode: localInfo.typecode || aircraftInfo.icaotype || 'Unknown'
+        },
+        photo: {
+            url: photoData.thumbnail_large?.src || photoData.thumbnail?.src || null,
+            thumbnail: photoData.thumbnail?.src || null,
+            photographer: photoData.photographer || null,
+            link: photoData.link || null
+        },
+        fusedAt: new Date().toISOString()
+    };
+
+    // 4. Persistence & Response
+    flightDetailsCache.set(cacheKey, mergedData);
+    res.json(mergedData);
+});
 
 // ==========================================
 // [v2.5.2] 資料缺失日誌系統 (Data Deficiency Logging)
@@ -175,6 +391,10 @@ app.get('/api/admin/missing-data', (req, res) => {
 const cache = new Map();
 const activeSessions = new Map(); // [Flight Sessions] icao24 -> { sessionId, callsign, lastSeen, onGround }
 
+// [v8.0] BFF Aggregator Caches
+const flightDetailsCache = new NodeCache({ stdTTL: 1800, checkperiod: 300 }); // 30 min TTL [Phase 9]
+const liveDataFallbackCache = new NodeCache({ stdTTL: 10, checkperiod: 5 }); // 10s TTL for live fallback
+
 // ==========================================
 // [SESSION HYDRATION] 伺服器重啟時的智慧記憶恢復
 // ==========================================
@@ -189,8 +409,8 @@ async function restoreActiveSessions() {
         for (const session of activeSessionsInDb) {
             // 找出這個航班在資料庫裡「最後一筆」軌跡點
             const lastPoint = await TrackPoint.findOne({ sessionId: session.sessionId })
-                                              .sort({ timestamp: -1 })
-                                              .lean();
+                .sort({ timestamp: -1 })
+                .lean();
 
             // 如果有軌跡，且最後一次更新是在 1 小時以內，代表它「現在」還在飛
             if (lastPoint && (now - lastPoint.timestamp.getTime() < STALE_THRESHOLD)) {
@@ -205,7 +425,7 @@ async function restoreActiveSessions() {
                 // 幽靈航班：伺服器關機太久，這趟飛行早就結束了。強制標記為 COMPLETED。
                 const endTime = lastPoint ? lastPoint.timestamp : new Date();
                 await FlightSession.updateOne(
-                    { sessionId: session.sessionId }, 
+                    { sessionId: session.sessionId },
                     { status: 'COMPLETED', endTime: endTime }
                 );
                 closedCount++;
@@ -238,6 +458,60 @@ function setCache(key, data) {
         const oldest = cache.keys().next().value;
         cache.delete(oldest);
     }
+}
+
+// = [v9.0] Phase 9: Ultimate Data Fusion Utilities =
+// ==========================================
+
+/**
+ * Fetch NOAA METAR data for an airport
+ */
+async function fetchMetar(icao) {
+    if (!icao || icao.length !== 4) return null;
+    try {
+        const res = await fetch(`https://tgftp.nws.noaa.gov/data/observations/metar/stations/${icao.toUpperCase()}.TXT`, {
+            signal: AbortSignal.timeout(3000)
+        });
+        if (!res.ok) return null;
+        const text = await res.text();
+        // Simple extraction of the METAR line
+        const lines = text.split('\n');
+        return lines.length > 1 ? lines[1].trim() : lines[0].trim();
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Enhanced Route Data Fetcher (AeroDataBox wrapper)
+ */
+async function fetchRouteData(callsign) {
+    if (!callsign || callsign === 'N/A') return null;
+    try {
+        const res = await fetch(`https://aerodatabox.p.rapidapi.com/flights/callsign/${callsign.trim().toUpperCase()}`, {
+            headers: { 
+                'X-RapidAPI-Key': process.env.AERODATABOX_API_KEY, 
+                'X-RapidAPI-Host': 'aerodatabox.p.rapidapi.com' 
+            },
+            signal: AbortSignal.timeout(4000)
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data) && data.length > 0) {
+                const f = data[0];
+                return {
+                    origin_iata: f.departure?.airport?.iata || 'N/A',
+                    destination_iata: f.arrival?.airport?.iata || '---',
+                    destination_icao: f.arrival?.airport?.icao || null,
+                    estimated_arrival_time: f.arrival?.scheduledTimeLocal || f.arrival?.scheduledTimeUtc || null,
+                    source: 'aerodatabox'
+                };
+            }
+        }
+    } catch (e) {
+        console.warn(`[ROUTE] fetchRouteData failed for ${callsign}:`, e.message);
+    }
+    return null;
 }
 
 // ==========================================
@@ -533,7 +807,7 @@ app.get('/api/ingestion/status', async (req, res) => {
             trackPointCount = await TrackPoint.estimatedDocumentCount();
             sessionCount = await FlightSession.countDocuments({ status: 'ACTIVE' });
         }
-    } catch (_) {}
+    } catch (_) { }
     res.json({
         ...ingestionStats,
         activeSessions: activeSessions.size,
@@ -917,11 +1191,11 @@ async function fetchGlobalPlanes() {
     isFetchingGlobal = true;
     const start = performance.now();
     const acc = ACCOUNTS[currentAccountIndex];
-    
+
     try {
         const data = await fetchOpenSky();
         const fetchLatency = Math.round(performance.now() - start);
-        
+
         let enrichedStates = data.states;
         let enrichedCount = 0;
 
@@ -930,9 +1204,9 @@ async function fetchGlobalPlanes() {
             const icaoList = data.states.map(p => p.icao24.toLowerCase());
             // Use .lean() for maximum performance and minimum memory footprint
             const metadata = await Aircraft.find({ icao24: { $in: icaoList } }, { icao24: 1, typecode: 1, model: 1 }).lean();
-            
+
             const metaMap = new Map(metadata.map(m => [m.icao24, m.typecode || m.model || '']));
-            
+
             enrichedStates = data.states.map(p => {
                 const typecode = metaMap.get(p.icao24.toLowerCase());
                 if (typecode) enrichedCount++;
@@ -943,15 +1217,43 @@ async function fetchGlobalPlanes() {
         }
 
         const totalLatency = Math.round(performance.now() - start);
-        
+
         globalPlanesCache = { states: enrichedStates, time: data.time, stale: false };
         broadcastPlanes(enrichedStates, data.time);
         lastGlobalFetchTime = Date.now();
-        
+
         console.log(`${getTime()} \x1b[32m🌏 [GLOBAL] Baseline updated | Latency: ${totalLatency}ms (Fetch: ${fetchLatency}ms) | Planes: ${data.states.length} (Enriched: ${enrichedCount}) | Acc: #${currentAccountIndex + 1} (${acc.user})\x1b[0m`);
     } catch (e) {
-        if (e.message.includes('429') || e.message.includes('timeout')) {
-            console.warn(`${getTime()} \x1b[33m⚠️ [GLOBAL WARN] ${e.message}. Freezing cache until next window.\x1b[0m`);
+        if (e.message.includes('429') || e.message.includes('timeout') || e.message.includes('failed')) {
+            console.warn(`${getTime()} \x1b[33m⚠️ [GLOBAL WARN] OpenSky failure: ${e.message}. Engaging ADSB.lol fallback...\x1b[0m`);
+            try {
+                const fallbackRes = await fetch('https://api.adsb.lol/v2/lat/23.5/lon/121.0/dist/250', { signal: AbortSignal.timeout(5000) });
+                if (fallbackRes.ok) {
+                    const fallbackData = await fallbackRes.json();
+                    if (fallbackData.ac) {
+                        const standardStates = fallbackData.ac.map(p => ({
+                            icao24: p.hex,
+                            callsign: (p.flight || '').trim(),
+                            lng: p.lon,
+                            lat: p.lat,
+                            altitude: p.alt_baro === 'ground' ? 0 : (p.alt_baro || p.alt_geom || 0),
+                            velocity: (p.gs || 0) * 0.51444, // knots to m/s
+                            heading: p.track || 0,
+                            vRate: (p.baro_rate || 0) * 0.00508, // ft/min to m/s
+                            onGround: p.alt_baro === 'ground' || false,
+                            squawk: p.squawk || null
+                        })).filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+                        
+                        globalPlanesCache = { states: standardStates, time: Math.floor(Date.now()/1000), stale: false };
+                        broadcastPlanes(standardStates, globalPlanesCache.time);
+                        lastGlobalFetchTime = Date.now();
+                        console.log(`${getTime()} \x1b[32m✅ [GLOBAL FALLBACK] Recovered ${standardStates.length} planes from ADSB.lol circuit breaker.\x1b[0m`);
+                        return; // Successfully recovered
+                    }
+                }
+            } catch (fallbackErr) {
+                console.error(`${getTime()} \x1b[31m❌ [GLOBAL FALLBACK ERROR] ${fallbackErr.message}\x1b[0m`);
+            }
             globalPlanesCache.stale = true;
         } else {
             console.error(`${getTime()} \x1b[31m❌ [GLOBAL ERROR] ${e.message}\x1b[0m`);
@@ -1053,7 +1355,7 @@ async function initializeAccountQuotas(isFreshQuota) {
 // [Surgical Patch] 極簡化 BBox 路由：整合 MongoDB 飛機情報融合
 app.get('/api/planes/bbox', async (req, res) => {
     const { lamin, lomin, lamax, lomax } = req.query;
-    
+
     if (!lamin || !lomin || !lamax || !lomax) {
         return res.status(400).json({ error: 'Missing bounding box parameters' });
     }
@@ -1066,8 +1368,8 @@ app.get('/api/planes/bbox', async (req, res) => {
     // [v4.4.0 Optimization] Ultra-fast minimalist filter
     // Enrichment is now handled in the background (fetchGlobalPlanes)
     const planesInBBox = (globalPlanesCache.states || []).filter(p => {
-        return p.lat >= minLat && p.lat <= maxLat && 
-               p.lng >= minLng && p.lng <= maxLng;
+        return p.lat >= minLat && p.lat <= maxLat &&
+            p.lng >= minLng && p.lng <= maxLng;
     });
 
     res.json({
@@ -1080,6 +1382,194 @@ app.get('/api/planes/bbox', async (req, res) => {
     });
 });
 
+// ==========================================
+// [Phase 12] High-Availability Live Data Pump & DB-First Trace
+// ==========================================
+app.get('/api/flights/live', async (req, res) => {
+    try {
+        // 1. 【快取攔截】：收到請求時，先檢查 DB 中 last_updated_at 是否在 5 秒內
+        const newestFlight = await ActiveFlight.findOne().sort({ last_updated_at: -1 }).lean();
+        if (newestFlight && (Date.now() - newestFlight.last_updated_at.getTime() < 5000)) {
+            console.log('⚡ [LIVE PUMP] DB Cache Hit (< 5s). Returning instant data from MongoDB.');
+            // 只回傳最近有更新的航班
+            const recentFlights = await ActiveFlight.find({
+                last_updated_at: { $gte: new Date(Date.now() - 300000) } // 前端可能只需最近活躍的
+            }).lean();
+            
+            const standardized = recentFlights.map(f => ({
+                hex: f.hex,
+                callsign: f.callsign,
+                lat: f.current_state?.lat,
+                lon: f.current_state?.lon,
+                alt: f.current_state?.alt,
+                hdg: f.current_state?.hdg,
+                gs: f.current_state?.gs
+            }));
+            return res.json({ source: 'mongodb_cache', states: standardized });
+        }
+
+        // 2. 【主線程 (OpenSky)】
+        console.log('🌐 [LIVE PUMP] Fetching from Primary Source (OpenSky)...');
+        let standardizedStates = [];
+        let sourceUsed = 'opensky';
+
+        try {
+            const headers = await getAuthHeaders();
+            const osRes = await fetch('https://opensky-network.org/api/states/all?lamin=20&lomin=120&lamax=26&lomax=124', {
+                headers,
+                signal: AbortSignal.timeout(3000) // 3000ms timeout
+            });
+
+            if (!osRes.ok) {
+                if (osRes.status === 429) rotateAccount();
+                throw new Error(`OpenSky failed with status ${osRes.status}`);
+            }
+            const data = await osRes.json();
+            
+            if (data.states) {
+                standardizedStates = data.states.map(p => ({
+                    hex: p[0],
+                    callsign: (p[1] || '').trim(),
+                    lon: p[5],
+                    lat: p[6],
+                    alt: p[7] || p[13] || 0,
+                    gs: p[9] || 0,
+                    hdg: p[10] || 0
+                })).filter(p => p.lat !== null && p.lon !== null && p.lat !== undefined && p.lon !== undefined);
+            }
+
+        } catch (error) {
+            // 3. 【備援切換 (ADSB.lol)】
+            console.warn(`⚠️ [CIRCUIT BREAKER] OpenSky failed (${error.message}). Switching to ADSB.lol...`);
+            sourceUsed = 'adsb_lol';
+            const fallbackRes = await fetch('https://api.adsb.lol/v2/lat/25.0330/lon/121.5654/dist/250', {
+                signal: AbortSignal.timeout(5000)
+            });
+            if (!fallbackRes.ok) throw new Error(`ADSB.lol failed with status ${fallbackRes.status}`);
+            const data = await fallbackRes.json();
+            
+            if (data.ac) {
+                standardizedStates = data.ac.map(p => ({
+                    hex: p.hex,
+                    callsign: (p.flight || '').trim(),
+                    lat: p.lat,
+                    lon: p.lon,
+                    alt: p.alt_baro || p.alt_geom || 0,
+                    gs: p.gs || 0,
+                    hdg: p.track || 0
+                })).filter(p => p.lat !== undefined && p.lon !== undefined && p.lat !== null && p.lon !== null);
+            }
+        }
+
+        // 4. 【資料正規化與寫入 DB】
+        if (standardizedStates.length > 0) {
+            const now = new Date();
+            const bulkOps = standardizedStates.map(p => ({
+                updateOne: {
+                    filter: { hex: p.hex },
+                    update: {
+                        $set: {
+                            callsign: p.callsign,
+                            current_state: {
+                                lat: p.lat,
+                                lon: p.lon,
+                                alt: p.alt,
+                                hdg: p.hdg,
+                                gs: p.gs
+                            },
+                            last_updated_at: now
+                        },
+                        $push: {
+                            trace: {
+                                $each: [{ lat: p.lat, lon: p.lon, alt: p.alt, timestamp: now }],
+                                $slice: -500 // Limit to 500 points
+                            }
+                        }
+                    },
+                    upsert: true
+                }
+            }));
+
+            // Execute bulkWrite
+            await ActiveFlight.bulkWrite(bulkOps, { ordered: false });
+            console.log(`💾 [LIVE PUMP] Upserted ${bulkOps.length} flights into MongoDB.`);
+        }
+
+        // 5. 回傳最新陣列給前端
+        res.json({ source: sourceUsed, states: standardizedStates });
+
+    } catch (err) {
+        console.error('❌ [LIVE PUMP ERROR]', err.message);
+        res.status(500).json({ error: 'Live data pump failed completely', details: err.message });
+    }
+});
+
+// 【歷史軌跡補全端點】
+app.get('/api/flight-trace/:hex', async (req, res) => {
+    const hex = req.params.hex.toLowerCase();
+    try {
+        // 1. 【DB 優先】
+        const dbFlight = await ActiveFlight.findOne({ hex }).lean();
+        
+        if (dbFlight && dbFlight.trace && dbFlight.trace.length > 20) {
+            console.log(`🎯 [TRACE] DB Hit for ${hex} (${dbFlight.trace.length} points). Instant render.`);
+            return res.json({ hex, source: 'mongodb', trace: dbFlight.trace });
+        }
+
+        // 2. 【API 補全 (ADSB.lol)】
+        console.log(`⚡ [TRACE] DB Miss or sparse trace for ${hex}. Backfilling from ADSB.lol...`);
+        const fallbackRes = await fetch(`https://api.adsb.lol/v2/trace/${hex}`, {
+            signal: AbortSignal.timeout(5000)
+        });
+
+        if (!fallbackRes.ok) {
+            if (fallbackRes.status === 404) {
+               return res.json({ hex, source: 'mongodb_sparse', trace: dbFlight ? dbFlight.trace : [] });
+            }
+            throw new Error(`ADSB.lol trace failed: ${fallbackRes.status}`);
+        }
+
+        const data = await fallbackRes.json();
+        
+        let backfilledTrace = [];
+        if (data.trace && Array.isArray(data.trace)) {
+            backfilledTrace = data.trace.map(pt => ({
+                timestamp: new Date(pt[0] * 1000),
+                lat: pt[1],
+                lon: pt[2],
+                alt: pt[3],
+                hdg: pt[4] || 0,
+                gs: pt[5] || 0
+            })).filter(pt => pt.lat !== undefined && pt.lon !== undefined && pt.lat !== null && pt.lon !== null);
+        }
+
+        // 3. 【回填 DB】
+        if (backfilledTrace.length > 0) {
+            console.log(`💾 [TRACE] Backfilling ${backfilledTrace.length} points to MongoDB for ${hex}.`);
+            await ActiveFlight.findOneAndUpdate(
+                { hex },
+                {
+                    $set: { trace: backfilledTrace.slice(-500) },
+                    $setOnInsert: { last_updated_at: new Date() }
+                },
+                { upsert: true }
+            );
+        }
+
+        // 4. 回傳完整的軌跡陣列給前端
+        res.json({ hex, source: 'adsb_lol', trace: backfilledTrace });
+
+    } catch (err) {
+        console.error(`❌ [TRACE ERROR] ${hex}:`, err.message);
+        const backup = await ActiveFlight.findOne({ hex }).lean();
+        res.json({ hex, source: 'error_fallback', trace: backup && backup.trace ? backup.trace : [], error: err.message });
+    }
+});
+
+// ==========================================
+// [Phase 14] Ultimate Data Fusion Controller
+// ==========================================
+app.get('/api/flight/complete-details/:hex/:callsign', flightController.getCompleteDetails);
 
 // ==========================================
 // 飛機 Metadata（機型/製造商/註冊號）— 永久快取與靜態字典
@@ -1302,7 +1792,7 @@ async function buildAirportListCache() {
     try {
         // [Surgical Patch] GIS 快取升級：捨棄舊的 JSON，改由 MongoDB 撈取
         const airports = await Airport.find({}, { icao: 1, iata: 1, name: 1, city: 1, country: 1, location: 1 }).lean();
-        
+
         if (airports.length === 0) {
             console.warn('⚠️ [GIS] MongoDB airports collection is empty! Map markers might be missing.');
         }
@@ -1316,7 +1806,7 @@ async function buildAirportListCache() {
             lat: a.location ? a.location.coordinates[1] : null,
             lng: a.location ? a.location.coordinates[0] : null
         }));
-        
+
         // 保留 W/ 前綴與生成邏輯
         _cachedAirportListETag = 'W/"' + _cachedAirportList.length + '-' + Date.now() + '"';
         console.log(`✅ [GIS] Airport cache built from MongoDB: ${_cachedAirportList.length} airports.`);
@@ -1380,27 +1870,60 @@ app.get('/api/airports/list', async (req, res) => {
 app.get('/api/airport/:code', async (req, res) => {
     const code = req.params.code.toUpperCase();
 
-    // Check Global Database first
-    if (globalAirportsDB[code]) {
-        return res.json(globalAirportsDB[code]);
-    }
-
-    // Check METAR collection (Fallback) [Phase 15 Migration]
     try {
-        const metarAirport = await Metar.findOne({ $or: [{ icaoId: code }, { iataId: code }] }).lean();
-        if (metarAirport) {
-            return res.json({
-                icao: metarAirport.icaoId,
-                iata: metarAirport.iataId,
-                name: metarAirport.name,
-                city: metarAirport.city,
-                country: metarAirport.country,
-                lat: metarAirport.lat,
-                lon: metarAirport.lon,
-                source: 'metar_db'
-            });
+        // 1. Prioritize MongoDB (GIS Modernization)
+        if (mongoose.connection.readyState === 1) {
+            const dbAirport = await Airport.findOne({
+                $or: [{ icao: code }, { iata: code }]
+            }).lean();
+            if (dbAirport) {
+                return res.json({
+                    icao: dbAirport.icao,
+                    iata: dbAirport.iata,
+                    name: dbAirport.name,
+                    city: dbAirport.city,
+                    country: dbAirport.country,
+                    lat: dbAirport.location ? dbAirport.location.coordinates[1] : null,
+                    lng: dbAirport.location ? dbAirport.location.coordinates[0] : null,
+                    timezone: dbAirport.timezone,
+                    source: 'mongodb'
+                });
+            }
         }
-    } catch (e) { /* ignore fallback errors */ }
+
+        // 2. Check Global Database (Fast Key Lookup)
+        if (globalAirportsDB[code]) {
+            return res.json({ ...globalAirportsDB[code], source: 'global_json_key' });
+        }
+
+        // 3. Deep Scan Global Database (Fallback for missing keys)
+        // Optimization: only scan if code looks like IATA (3 chars) or ICAO (4 chars)
+        if (code.length === 3 || code.length === 4) {
+            const deepMatch = Object.values(globalAirportsDB).find(ap => ap.icao === code || ap.iata === code);
+            if (deepMatch) {
+                return res.json({ ...deepMatch, source: 'global_json_deep' });
+            }
+        }
+
+        // 4. Check METAR collection (Legacy Fallback)
+        if (mongoose.connection.readyState === 1) {
+            const metarAirport = await Metar.findOne({ $or: [{ icaoId: code }, { iataId: code }] }).lean();
+            if (metarAirport) {
+                return res.json({
+                    icao: metarAirport.icaoId,
+                    iata: metarAirport.iataId,
+                    name: metarAirport.name,
+                    city: metarAirport.city,
+                    country: metarAirport.country,
+                    lat: metarAirport.lat,
+                    lng: metarAirport.lon,
+                    source: 'metar_db'
+                });
+            }
+        }
+    } catch (e) {
+        console.warn(`⚠️ [AIRPORT API] Resolution error for ${code}:`, e.message);
+    }
 
     return res.status(404).json({ error: 'Airport not found' });
 });
@@ -1468,8 +1991,8 @@ app.get('/api/photos/:icao24', async (req, res) => {
             const p = photos[0];
             Aircraft.findOneAndUpdate(
                 { icao24: icao24.toLowerCase() },
-                { 
-                    $set: { 
+                {
+                    $set: {
                         'photoData.url': p.thumbnail_large?.src || p.thumbnail?.src,
                         'photoData.thumbnail': p.thumbnail?.src,
                         'photoData.photographer': p.photographer,
@@ -1486,6 +2009,139 @@ app.get('/api/photos/:icao24', async (req, res) => {
     } catch (err) {
         console.error('[PHOTOS] Proxy error:', err.message);
         res.status(500).json({ error: 'Photo fetch failed' });
+    }
+});
+
+// ==========================================
+// Airline Info Endpoint
+// ==========================================
+app.get('/api/airline/:callsign', (req, res) => {
+    const callsign = (req.params.callsign || '').toUpperCase().trim();
+    if (!callsign) return res.status(400).json({ error: 'Callsign required' });
+
+    // Extract ICAO prefix (first 2-3 letters before digits)
+    const match = callsign.match(/^([A-Z]{2,3})/);
+    const prefix = match ? match[1] : callsign;
+
+    const airline = globalAirlinesDB[prefix];
+    if (airline) {
+        const iata = airline.iata || null;
+        return res.json({
+            name: airline.name || 'Unknown',
+            iata: iata,
+            icao: airline.icao || prefix,
+            logo: iata ? `https://pics.avs.io/200/80/${iata}.png` : null,
+        });
+    }
+
+    res.json({ name: null, iata: null, icao: prefix, logo: null });
+});
+
+// ==========================================
+// 飛機詳細資訊 API (整合 OpenSky & AircraftRegistry)
+// ==========================================
+// ==========================================
+// 飛機詳細資訊 API (專業級多源融合：adsb.fi > OpenSky > Internal)
+// ==========================================
+app.get('/api/aircraft/:icao24', async (req, res) => {
+    const icao24 = req.params.icao24.toLowerCase();
+
+    try {
+        // [DB CACHE] 1. 優先從 MongoDB 讀取
+        let [aircraft, registry] = await Promise.all([
+            Aircraft.findOne({ icao24 }).lean(),
+            AircraftRegistry.findOne({ icao24 }).lean().catch(() => null)
+        ]);
+
+        // [v9.6] Professional Stale Check: Refresh if no typecode (1 day) or if record > 1 day old (instead of 30)
+        const isStale = !aircraft || (
+            (aircraft.noData && (new Date() - aircraft.lastUpdated > 3600000)) ||
+            (!aircraft.typecode && (new Date() - aircraft.lastUpdated > 43200000)) ||
+            (new Date() - aircraft.lastUpdated > 86400000)
+        );
+
+        // 如果資料存在且有效（有機型代碼且未過期），直接回傳
+        if (aircraft && !aircraft.noData && !isStale && aircraft.typecode) {
+            return res.json({
+                ...aircraft,
+                age: registry?.age || null,
+                engineType: registry?.engineType || null,
+                source: 'mongodb_cache'
+            });
+        }
+
+        console.log(`📡 [FUSION] Resolving metadata for ${icao24}...`);
+
+        // --- Tier 2: adsb.fi (Fast, Open Data, Good for Typecode/Registration) ---
+        let fusionData = null;
+        try {
+            const fiRes = await fetch(`https://opendata.adsb.fi/api/v2/hex/${icao24}`, { signal: AbortSignal.timeout(3000) });
+            if (fiRes.ok) {
+                const fiData = await fiRes.json();
+                if (fiData.ac && fiData.ac.length > 0) {
+                    const ac = fiData.ac[0];
+                    console.log(`✅ [FUSION] adsb.fi solved ${icao24}: ${ac.r} (${ac.t})`);
+                    fusionData = {
+                        registration: ac.r || '',
+                        typecode: ac.t || '',
+                        model: ac.type || '',
+                        operatorCallsign: ac.flight || '',
+                        source: 'adsb.fi'
+                    };
+                }
+            }
+        } catch (e) { console.warn(`⚠️ [FUSION] adsb.fi failed for ${icao24}: ${e.message}`); }
+
+        // --- Tier 3: OpenSky Network (Detailed, but slow/rate-limited) ---
+        if (!fusionData || !fusionData.typecode) {
+            try {
+                const osRes = await fetch(`https://opensky-network.org/api/metadata/aircraft/icao/${icao24}`, { signal: AbortSignal.timeout(5000) });
+                if (osRes.ok) {
+                    const osData = await osRes.json();
+                    console.log(`✅ [FUSION] OpenSky solved ${icao24}: ${osData.registration} (${osData.typecode})`);
+                    fusionData = {
+                        registration: osData.registration || fusionData?.registration || '',
+                        manufacturerName: osData.manufacturerName || '',
+                        model: osData.model || fusionData?.model || '',
+                        typecode: osData.typecode || fusionData?.typecode || '',
+                        owner: osData.owner || '',
+                        operatorCallsign: osData.operatorCallsign || fusionData?.operatorCallsign || '',
+                        categoryDescription: osData.categoryDescription || '',
+                        source: 'opensky'
+                    };
+                }
+            } catch (e) { console.warn(`⚠️ [FUSION] OpenSky failed for ${icao24}: ${e.message}`); }
+        }
+
+        // --- Finalize & Save ---
+        if (fusionData) {
+            const metadata = {
+                icao24,
+                ...fusionData,
+                noData: false,
+                lastUpdated: new Date()
+            };
+            const updated = await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true, new: true }).lean();
+            return res.json({
+                ...updated,
+                age: registry?.age || null,
+                source: `live_fusion_${fusionData.source}`
+            });
+        }
+
+        // Both failed, mark as noData but keep registry info if available
+        await Aircraft.findOneAndUpdate({ icao24 }, { icao24, noData: true, lastUpdated: new Date() }, { upsert: true });
+        return res.json({ 
+            icao24, 
+            registration: registry?.registration || aircraft?.registration || null, 
+            model: aircraft?.model || null,
+            noData: true,
+            source: 'none'
+        });
+
+    } catch (err) {
+        console.error(`❌ [FUSION ERROR] ${err.message}`);
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -1535,7 +2191,7 @@ app.get('/api/route/:icao24', async (req, res) => {
             matchSource = 'local_dict';
             break;
         }
-        
+
         // 從 MongoDB 檢查快取
         const dbRoute = await Route.findOne({ callsign: cs }).lean();
         if (dbRoute) {
@@ -1728,40 +2384,93 @@ const trackCache = new Map();
 const TRACK_CACHE_TTL = 30000; // 30 秒快取
 
 /**
- * [OPT 1.3] 內部 track 取得函式，不透過 HTTP 迴環
- * 供 /api/route 的空間推測直接呼叫
+ * [Phase 7] Official OpenSky Track Integration & Fusion
+ * Fetch tracks from official API and merge with local database points.
  */
 async function fetchTracksInternal(icao24) {
     if (mongoose.connection.readyState !== 1) {
         return { icao24, path: [], error: 'Database not connected' };
     }
+    
+    // Check short-term memory cache
     const cached = trackCache.get(icao24);
     if (cached && (Date.now() - cached.timestamp < TRACK_CACHE_TTL)) {
         return cached.data;
     }
+
     try {
         const icao = icao24.toLowerCase();
-        // 尋找當前航班的 Session
+        // 1. Get current local session
         const session = await FlightSession.findOne({ icao24: icao }).sort({ startTime: -1 }).lean();
         if (!session) return { icao24, path: [] };
 
-        // 使用 sessionId 來撈取專屬軌跡
-        const points = await TrackPoint.find({ sessionId: session.sessionId }).sort({ timestamp: 1 }).lean();
-
-        const path = points.map(pt => [
+        // 2. Load local points
+        const localPoints = await TrackPoint.find({ sessionId: session.sessionId }).sort({ timestamp: 1 }).lean();
+        
+        // 3. Trigger Official OpenSky Fetch if local data is sparse (less than 60 points / 1 min of data)
+        // Or if the session just started and the starting point is far from the current position.
+        let mergedPath = localPoints.map(pt => [
             Math.floor(pt.timestamp.getTime() / 1000),
-            pt.lat,
-            pt.lng,
-            pt.altitude || 0,
-            pt.heading || 0,
-            pt.velocity || 0,
-            pt.onGround ? 1 : 0
+            pt.lat, pt.lng, pt.altitude || 0, pt.heading || 0, pt.velocity || 0, pt.onGround ? 1 : 0
         ]);
 
-        const result = { icao24, path };
+        if (localPoints.length < 60) {
+            console.log(`📡 [TRACK FUSION] Fetching official OpenSky track for ${icao24}...`);
+            try {
+                const headers = await getAuthHeaders();
+                const osRes = await fetch(`https://opensky-network.org/api/tracks/all?icao24=${icao}&time=0`, {
+                    headers,
+                    signal: AbortSignal.timeout(8000)
+                });
+
+                if (osRes.ok) {
+                    const osTrack = await osRes.json();
+                    if (osTrack.path && osTrack.path.length > 0) {
+                        // OpenSky path format: [time, lat, lng, altitude, heading, onground]
+                        // We need to merge these with our local points, favoring local for the overlapping most-recent parts
+                        const osPathFormatted = osTrack.path.map(p => [
+                            p[0], p[1], p[2], p[3] || 0, p[4] || 0, 0, p[5] ? 1 : 0
+                        ]);
+
+                        // Simple Time-based Merge (Favor Local for recent)
+                        const localStart = mergedPath.length > 0 ? mergedPath[0][0] : Infinity;
+                        const historicalPart = osPathFormatted.filter(p => p[0] < localStart);
+                        
+                        console.log(`✅ [TRACK FUSION] Merged ${historicalPart.length} historical points with ${mergedPath.length} local points.`);
+                        mergedPath = [...historicalPart, ...mergedPath];
+
+                        // Trigger Background Save for merged historical points (so we don't fetch from OS again)
+                        // This prevents rate limiting by populating our DB with the full track once.
+                        if (historicalPart.length > 0) {
+                            (async () => {
+                                const newDocs = historicalPart.map(p => ({
+                                    sessionId: session.sessionId,
+                                    icao24: icao,
+                                    timestamp: new Date(p[0] * 1000),
+                                    lat: p[1],
+                                    lng: p[2],
+                                    altitude: p[3],
+                                    heading: p[4],
+                                    velocity: p[5],
+                                    onGround: p[6] === 1
+                                }));
+                                // Insert unique points only (ignore errors for duplicates)
+                                try {
+                                    await TrackPoint.insertMany(newDocs, { ordered: false });
+                                } catch (e) { /* ignore duplicate errors */ }
+                            })();
+                        }
+                    }
+                }
+            } catch (e) { console.warn(`⚠️ [TRACK FUSION] Official fetch failed for ${icao24}: ${e.message}`); }
+        }
+
+        const result = { icao24, path: mergedPath };
         trackCache.set(icao24, { data: result, timestamp: Date.now() });
         return result;
+
     } catch (e) {
+        console.error(`❌ [TRACK ERROR] ${e.message}`);
         return { icao24, path: [], noData: true, error: e.message };
     }
 }
@@ -1882,24 +2591,24 @@ async function fetchMetarData() {
         if (!response.ok) throw new Error(`METAR API error: ${response.status}`);
 
         const data = await response.json();
-        
+
         // 批次更新 MongoDB
         const operations = data.map(info => {
             const lng = parseFloat(info.lon);
             const lat = parseFloat(info.lat);
-            
+
             return {
                 updateOne: {
                     filter: { icaoId: info.icaoId.toUpperCase() },
-                    update: { 
-                        $set: { 
-                            ...info, 
+                    update: {
+                        $set: {
+                            ...info,
                             location: {
                                 type: 'Point',
                                 coordinates: [lng, lat]
                             },
-                            lastUpdated: new Date() 
-                        } 
+                            lastUpdated: new Date()
+                        }
                     },
                     upsert: true
                 }
@@ -1941,6 +2650,161 @@ app.get('/api/metar', async (req, res) => {
     }
 });
 // [API 404 防火牆]
+// ==========================================
+// [v9.0] Ultimate Data Fusion Endpoint (DB-First)
+// ==========================================
+app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
+    const hex = req.params.hex.toLowerCase();
+    const callsign = req.params.callsign.toUpperCase().trim();
+    const cacheKey = `complete_${hex}_${callsign}`;
+
+    try {
+        // 1. Memory Cache Check (Fastest)
+        const cached = flightDetailsCache.get(cacheKey);
+        if (cached) return res.json({ ...cached, source: 'memory_cache' });
+
+        // 2. [DB READ-THROUGH] Local Knowledge Base
+        let [dbAircraft, dbRoute] = await Promise.all([
+            Aircraft.findOne({ $or: [{ icao24: hex }, { hex: hex }] }).lean().catch(() => null),
+            Route.findOne({ callsign }).lean().catch(() => null)
+        ]);
+        
+        const AIRCRAFT_TTL = 30 * 24 * 60 * 60 * 1000; // 30 Days
+        const ROUTE_TTL = 24 * 60 * 60 * 1000;       // 24 Hours
+        
+        const isAircraftFresh = dbAircraft && (Date.now() - new Date(dbAircraft.lastUpdated).getTime() < AIRCRAFT_TTL);
+        const isRouteFresh = dbRoute && (Date.now() - new Date(dbRoute.lastUpdated).getTime() < ROUTE_TTL);
+        
+        // --- Step 2: [ABSOLUTE PRIMARY SOURCE] Mandatory OpenSky Status ---
+        // We always fetch live state to ensure the plane is active, even if metadata is cached.
+        console.log(`📡 [FUSION] Fetching Mandatory State for ${hex}...`);
+        const osRes = await fetchOpenSky({ icao24: hex }).catch(e => {
+            console.error(`❌ [PRIMARY FAIL] OpenSky Unresponsive: ${e.message}`);
+            return null;
+        });
+
+        if (!osRes || !osRes.states || osRes.states.length === 0) {
+            return res.status(500).json({ 
+                error: 'PRIMARY_SOURCE_UNAVAILABLE', 
+                message: 'OpenSky Network (Primary Source) failed to provide live status. Request aborted to ensure data integrity.' 
+            });
+        }
+        const liveState = osRes.states[0];
+
+        // If both Aircraft and Route are fresh in DB, we skip enrichment but STILL use the latest OpenSky state
+        if (isAircraftFresh && isRouteFresh) {
+            console.log(`🎯 [DB HIT] Serving cached knowledge for ${hex}/${callsign}`);
+            const fused = await finalizeProfile(dbAircraft, dbRoute, liveState);
+            flightDetailsCache.set(cacheKey, fused);
+            return res.json({ ...fused, source: 'db_knowledge_base' });
+        }
+
+        console.log(`⚡ [ENRICHMENT] DB Stale or Missing. Fusing external sources...`);
+        // --- Step 3: [RESILIENT ENRICHMENT] Multi-Source Parallel Fetch ---
+        const enrichment = await Promise.allSettled([
+            // a. HexDB (Static Specs)
+            fetch(`https://hexdb.io/api/v1/aircraft/${hex}`, { signal: AbortSignal.timeout(3000) }).then(r => r.ok ? r.json() : null).catch(() => null),
+            // b. Planespotters (Visuals)
+            fetch(`https://api.planespotters.net/pub/photos/hex/${hex}`, { headers: { 'User-Agent': 'AEROSTRAT/5.0' }, signal: AbortSignal.timeout(4000) }).then(r => r.ok ? r.json() : null).catch(() => null),
+            // c. Route API (Flights/Schedules)
+            fetchRouteData(callsign)
+        ]);
+ 
+        const [hexRes, photoRes, routeRes] = enrichment.map(r => r.status === 'fulfilled' ? r.value : null);
+        
+        // --- Step 4: [PERSISTENCE] Smart Normalization & Upsert ---
+        // Aircraft Metadata (Manual mapping to standardized fields)
+        const aircraftUpdate = {
+            hex,
+            icao24: hex,
+            type: hexRes?.typeName || hexRes?.type || dbAircraft?.type || dbAircraft?.model || 'Unknown',
+            model: hexRes?.typeName || hexRes?.type || dbAircraft?.model || 'Unknown',
+            manufacturer: hexRes?.icaotype || dbAircraft?.manufacturer || 'Unknown',
+            registration: hexRes?.registration || dbAircraft?.registration || 'N/A',
+            airline: hexRes?.operator || dbAircraft?.airline || dbAircraft?.registered_owner || 'Unknown Airline',
+            registered_owner: hexRes?.operator || dbAircraft?.registered_owner || 'Unknown Airline',
+            photo_url: photoRes?.photos?.[0]?.thumbnail_large?.src || dbAircraft?.photo_url || dbAircraft?.photoData?.url || null,
+            lastUpdated: new Date()
+        };
+        const updatedAircraft = await Aircraft.findOneAndUpdate({ $or: [{ icao24: hex }, { hex: hex }] }, { $set: aircraftUpdate }, { upsert: true, new: true }).lean();
+ 
+        // Flight Route Info
+        const routeUpdate = {
+            callsign,
+            origin_iata: routeRes?.origin_iata || dbRoute?.origin_iata || 'N/A',
+            destination_iata: routeRes?.destination_iata || dbRoute?.destination_iata || '---',
+            estimated_arrival_time: routeRes?.estimated_arrival_time || dbRoute?.estimated_arrival_time || null,
+            departureAirport: routeRes?.origin_iata || dbRoute?.departureAirport,
+            arrivalAirport: routeRes?.destination_iata || dbRoute?.arrivalAirport,
+            lastUpdated: new Date()
+        };
+        const updatedRoute = await Route.findOneAndUpdate({ callsign }, { $set: routeUpdate }, { upsert: true, new: true }).lean();
+ 
+        // --- Step 5: [FINAL ASSEMBLY] Profile Serialization & Caching ---
+        const finalProfile = await finalizeProfile(updatedAircraft, updatedRoute, liveState);
+        flightDetailsCache.set(cacheKey, finalProfile);
+        res.json({ ...finalProfile, source: 'api_fusion_complete' });
+
+    } catch (err) {
+        console.error(`❌ [ULIMATE FUSION] Critical Failure for ${hex}:`, err.message);
+        res.status(500).json({ error: 'Fusion endpoint failed', details: err.message });
+    }
+});
+
+/**
+ * Helper to finalize the profile object and inject weather
+ */
+async function finalizeProfile(aircraft, route, liveState = null) {
+    // Inject METAR if arrival is known
+    let weather = null;
+    const destIata = route.destination_iata || route.arrivalAirport;
+    if (destIata && destIata !== '---' && destIata !== 'N/A') {
+        try {
+            const airport = await Airport.findOne({ $or: [{ iata: destIata }, { icao: destIata }] }).lean();
+            if (airport && airport.icao) {
+                weather = await fetchMetar(airport.icao);
+                
+                // If we got weather, non-blocking update to Route to cache it
+                if (weather && route.callsign) {
+                    Route.updateOne({ callsign: route.callsign }, { $set: { destination_weather: weather } }).catch(() => null);
+                }
+            }
+        } catch (e) {}
+    }
+
+    return {
+        hex: aircraft.hex || aircraft.icao24,
+        callsign: route.callsign,
+        status: {
+            alt: liveState?.altitude || 0,
+            gs: liveState?.velocity || 0,
+            track: liveState?.heading || 0,
+            lat: liveState?.lat || 0,
+            lon: liveState?.lng || 0,
+            squawk: liveState?.squawk || '0000',
+            onGround: !!liveState?.onGround,
+            timestamp: liveState?.lastContact || Math.floor(Date.now() / 1000)
+        },
+        route: {
+            origin: { iata: route.origin_iata || 'N/A' },
+            destination: { iata: route.destination_iata || '---' },
+            arrival: route.estimated_arrival_time,
+            weather: weather || route.destination_weather || null
+        },
+        aircraft: {
+            type: aircraft.type || aircraft.model,
+            model: aircraft.model,
+            registration: aircraft.registration,
+            airline: aircraft.airline || aircraft.registered_owner,
+            manufacturer: aircraft.manufacturer,
+            photo_url: aircraft.photo_url || aircraft.photoData?.url || null
+        },
+        last_updated: aircraft.lastUpdated
+    };
+}
+
+
+
 app.use('/api', (req, res) => {
     res.status(404).json({ error: 'API endpoint not found' });
 });
@@ -1999,6 +2863,12 @@ cron.schedule('*/15 * * * *', () => {
 // 啟動伺服器
 const server = http.createServer(app);
 initWebSocketServer(server);
+
+// [v9.8] API Catch-all 404 (Must return JSON to avoid frontend parse errors)
+app.use('/api', (req, res) => {
+    res.status(404).json({ error: 'Endpoint not found', path: req.originalUrl });
+});
+
 
 server.listen(PORT, () => {
     const readyTime = new Date().toLocaleTimeString();

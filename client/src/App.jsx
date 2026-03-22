@@ -186,26 +186,48 @@ export default function App() {
         async (icao24, plane) => {
             logToServer(`Selected plane: ${plane.callsign || 'N/A'} (ICAO: ${icao24})`, 'info', { callsign: plane.callsign, icao24 });
             setSelectedIcao24(icao24);
-            setTrackPoints([]); // Clear previous tracks immediately to prevent "ghost lines"
+            setTrackPoints([]); 
             setSelectedMetadata(null);
             setSelectedRoute(null);
-            setPlaybackTime(null); // [v3.1] always start in LIVE mode when selecting a new plane
-            setTrackMode(true); // 自動開啟追蹤模式
+            setPlaybackTime(null);
+            setTrackMode(true);
 
-            // 取得軌跡
-            const points = await fetchTrack(icao24, plane.lastContact);
-            setTrackPoints(points);
+            // Fetch track immediately (blocks slightly but necessary for visual sync)
+            try {
+                const points = await fetchTrack(icao24, plane.lastContact);
+                setTrackPoints(points || []);
+            } catch (e) {
+                setTrackPoints([]);
+            }
 
-            // 背景取得 metadata + route (不阻塞 UI)
-            dataManager.getMetadata(icao24).then(data => {
-                if (!data.noData) setSelectedMetadata(data);
-                else logToServer(`Metadata missing for ${icao24}`, 'warn');
-            }).catch(e => { logToServer(`Metadata fetch error for ${icao24}: ${e.message}`, 'error'); });
+            // [AERO-SYNC] Helper for Fetch with Timeout
+            const fetchWithTimeout = (promise, ms = 5000) => {
+                const timeout = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('TIMEOUT')), ms);
+                });
+                return Promise.race([promise, timeout]);
+            };
 
-            dataManager.getRoute(icao24, plane.callsign).then(data => {
-                if (data.noData) logToServer(`Route missing for ${plane.callsign || icao24}`, 'warn');
-                setSelectedRoute(data);
-            }).catch(e => { logToServer(`Route fetch error for ${plane.callsign || icao24}: ${e.message}`, 'error'); });
+            // Background Metadata + Route (Non-blocking with 5s Timeout)
+            fetchWithTimeout(dataManager.getMetadata(icao24))
+                .then(data => {
+                    if (data && !data.noData) setSelectedMetadata(data);
+                    else setSelectedMetadata({ noData: true });
+                })
+                .catch(e => {
+                    console.warn(`[App] Metadata timeout/error for ${icao24}:`, e.message);
+                    setSelectedMetadata({ noData: true });
+                });
+
+            fetchWithTimeout(dataManager.getRoute(icao24, plane.callsign))
+                .then(data => {
+                    if (data && !data.noData) setSelectedRoute(data);
+                    else setSelectedRoute({ noData: true });
+                })
+                .catch(e => {
+                    console.warn(`[App] Route timeout/error for ${plane.callsign}:`, e.message);
+                    setSelectedRoute({ noData: true });
+                });
 
             // Update URL
             const url = new URL(window.location);

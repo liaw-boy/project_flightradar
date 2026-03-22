@@ -16,7 +16,12 @@ const RouteSchema = new mongoose.Schema({
         type: String,
         default: null
     },
-    // [AI EVOLUTION] 紀錄航線來源：'manual', 'aerodatabox', 'ai_learned'
+    // [v9.0] Phase 9 DB-First alignment
+    origin_iata: { type: String, default: null },
+    destination_iata: { type: String, default: null },
+    estimated_arrival_time: { type: String, default: null },
+    // [v11] DB-First Professional Fields
+    destination_weather: { type: Object, default: null }, // Stores METAR/Temp
     source: {
         type: String,
         default: 'manual'
@@ -24,6 +29,11 @@ const RouteSchema = new mongoose.Schema({
     lastUpdated: {
         type: Date,
         default: Date.now
+    },
+    updatedAt: {
+        type: Date,
+        default: Date.now,
+        index: { expires: '24h' }
     }
 });
 

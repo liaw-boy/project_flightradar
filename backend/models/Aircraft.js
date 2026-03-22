@@ -16,6 +16,14 @@ const AircraftSchema = new mongoose.Schema({
     operatorCallsign: { type: String, default: '' },
     built: { type: String, default: '' },
     categoryDescription: { type: String, default: '' },
+    // [v11] DB-First Professional Fields
+    hex: { type: String, index: true }, // Alias for icao24
+    type: { type: String, default: '' }, // Alias for model/typecode
+    manufacturer: { type: String, default: '' },
+    registration: { type: String, default: '' },
+    airline: { type: String, default: '' },
+    photo_url: { type: String, default: null },
+    
     photoData: {
         url: { type: String, default: null },
         thumbnail: { type: String, default: null },
@@ -27,7 +35,9 @@ const AircraftSchema = new mongoose.Schema({
         engines: { type: String, default: '' },
         capacity: { type: Number, default: 0 }
     },
-    lastUpdated: { type: Date, default: Date.now }
+    registered_owner: { type: String, default: '' }, 
+    lastUpdated: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now, index: { expires: '30d' } }
 });
 
 

@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getAirlineLogoUrl, normalizeLongitude, predictPosition, latLngToGlobalPixels } from '../utils/flightUtils';
+import { getAirlineLogoUrl, normalizeLongitude, predictPosition } from '../utils/flightUtils';
 import { getAircraftIconUrl, getAircraftScale, getAltitudeColor } from '../utils/aircraftIcons';
-import { trackStore } from '../store/FlightDataStore';
 import { dataManager } from '../services/dataManager';
 import HoverCard from './HoverCard';
 
@@ -77,29 +76,37 @@ const TRAIL_MIN_DIST_SQ = 0.000004; // ~2m² — skip duplicate trail points
 function getDrawSize(plane, z, scale) {
     const s = Math.max(scale || 1.0, 0.2);
 
+    // [Phase 23 Fix] Direct scale passthrough.
+    // The previous logic heavily compressed scales (Math.pow(s, 0.15)) and hard-clamped 
+    // to a max of 1.4x, which completely muted our 2.8x B737/A320 Padding Up-Scales.
+    // Now we linearly respect `getAircraftScale` as the absolute source of truth.
+    const basePaddedSize = FR24_BASE_PX * s;
+
     if (z <= 9) {
-        // PlaneFinder: nearly uniform at wide zoom — max ~1.2x ratio
-        const compressed = Math.pow(s, 0.15);
-        const clamped = Math.max(0.9, Math.min(1.1, compressed));
-        return Math.round(FR24_BASE_PX * clamped);
+        // At low zooms, uniformly shrink slightly to prevent map overlap clutter
+        return Math.round(basePaddedSize * 0.85);
     }
-
+    
     if (z <= 11) {
-        // Subtle differentiation emerges — max ~1.6x ratio
-        const t = (z - 9) / 2; // 0→1 across z10-z11
-        const exponent = 0.15 + t * 0.15;
-        const compressed = Math.pow(s, exponent);
-        const minC = 0.9 - t * 0.1;
-        const maxC = 1.1 + t * 0.15;
-        const clamped = Math.max(minC, Math.min(maxC, compressed));
-        return Math.round(FR24_BASE_PX * clamped);
+        // Linearly glide scale from 0.85 to 1.0 over zoom levels 10 and 11
+        const t = (z - 9) / 2;
+        return Math.round(basePaddedSize * (0.85 + (0.15 * t)));
     }
 
-    // z >= 12: full detail with zoom growth — max ~2x ratio
+    // z >= 12: Grow progressively larger with the map at high street-level zooms
     const growthFactor = Math.pow(1.12, z - 11);
-    const compressed = Math.pow(s, 0.35);
-    const clamped = Math.max(0.7, Math.min(1.4, compressed));
-    return Math.round(FR24_BASE_PX * clamped * growthFactor);
+    return Math.round(basePaddedSize * growthFactor);
+}
+
+// ─── Haversine distance helper (km) ──────────────────────────────────────────
+function haversineKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 // Render mode flags for 60fps interaction optimization
@@ -132,15 +139,12 @@ export default function MapView({
 }) {
     const [hoveredPlane, setHoveredPlane] = useState(null);
     const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
-    const [selectedFlightPath, setSelectedFlightPath] = useState(null); // Full session track for selected plane
 
     const mapContainerRef = useRef(null);
     const mapRef = useRef(null);
     const canvasLayerRef = useRef(null);
     const cachedPathsRef = useRef(new Map()); // Cache Path2D objects
     const routeLineRef = useRef(null);
-    const flightPathAbortRef = useRef(null); // AbortController for session track fetch
-    const selectedFlightPathRef = useRef(null); // Ref for animation loop access
 
     const predictiveLineRef = useRef(null);
     const animFrameRef = useRef(null);
@@ -168,6 +172,7 @@ export default function MapView({
     // [v6.0] ImageBitmap cache — pre-warmed offscreen bitmaps keyed by SVG URL
     const bitmapCacheRef = useRef(new Map());
     const idleTimeoutRef = useRef(null);
+    const syncTimeoutRef = useRef(null);
 
     useEffect(() => {
         trackModeRef.current = trackMode;
@@ -182,37 +187,6 @@ export default function MapView({
     useEffect(() => { onUsageUpdateRef.current = onUsageUpdate; }, [onUsageUpdate]);
     useEffect(() => { colorSchemeRef.current = colorScheme; }, [colorScheme]);
     useEffect(() => { filtersRef.current = filters; }, [filters]);
-
-    // ==========================================
-    // 💧 軌跡自動注水 (Track Hydration Pipeline) [v4.2.1]
-    // ==========================================
-    useEffect(() => {
-        // 確保有選中飛機，且歷史軌跡資料已載入
-        if (!selectedIcao24 || !trackPoints || trackPoints.length === 0) return;
-        if (!mapRef.current) return;
-
-        console.log(`💧 [HYDRATION] Injecting ${trackPoints.length} historical points for ${selectedIcao24}`);
-
-        // 1. 清空該飛機在繪圖引擎中的舊軌跡緩衝，避免殘影
-        trackStore.clearTrack(selectedIcao24);
-
-        const zoom = mapRef.current.getZoom();
-
-        // 2. 投影並批次注入歷史軌跡點
-        // 注意：trackPoints 格式為 [time, lat, lng, altitude, heading, velocity]
-        trackPoints.forEach(point => {
-            const [time, lat, lng] = point;
-
-            // 投影轉換為繪圖引擎看得懂的全局像素座標
-            const pixelPos = latLngToGlobalPixels(lat, lng, zoom);
-
-            // 注入高效率繪圖引擎
-            trackStore.addTrackPoint(selectedIcao24, lat, lng, pixelPos.x, pixelPos.y);
-        });
-
-        console.log(`✅ [HYDRATION] Track reconstruction complete for ${selectedIcao24}.`);
-
-    }, [selectedIcao24, trackPoints]);
 
     const [airports, setAirports] = useState([]);
     const airportsRef = useRef([]);
@@ -411,13 +385,16 @@ export default function MapView({
             updateAirportVisibility(map);
             onMapMove?.();
 
-            // [Project AERO-SYNC] Viewport-Driven Sync
-            syncViewport?.({
-                lamin: currentBounds.getSouth(),
-                lomin: currentBounds.getWest(),
-                lamax: currentBounds.getNorth(),
-                lomax: currentBounds.getEast()
-            });
+            // [Project AERO-SYNC] Viewport-Driven Sync (Debounced to avoid 429)
+            if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+            syncTimeoutRef.current = setTimeout(() => {
+                syncViewport?.({
+                    lamin: currentBounds.getSouth(),
+                    lomin: currentBounds.getWest(),
+                    lamax: currentBounds.getNorth(),
+                    lomax: currentBounds.getEast()
+                });
+            }, 1000);
         });
 
         // [AERO-SYNC] 僅在縮放結束時更新全局投影快取
@@ -426,12 +403,15 @@ export default function MapView({
             updateAirportVisibility(map);
 
             const currentBounds = map.getBounds();
-            syncViewport?.({
-                lamin: currentBounds.getSouth(),
-                lomin: currentBounds.getWest(),
-                lamax: currentBounds.getNorth(),
-                lomax: currentBounds.getEast()
-            });
+            if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+            syncTimeoutRef.current = setTimeout(() => {
+                syncViewport?.({
+                    lamin: currentBounds.getSouth(),
+                    lomin: currentBounds.getWest(),
+                    lamax: currentBounds.getNorth(),
+                    lomax: currentBounds.getEast()
+                });
+            }, 1000);
         });
 
         // [AERO-SYNC] 動態懸停游標 (Dynamic Hover Pointer)
@@ -614,6 +594,51 @@ export default function MapView({
         }
     }, [mapLayer]);
 
+    const weatherLayerRef = useRef(null);
+    // [Phase 16] Tactical OSINT Weather Radar Layer
+    useEffect(() => {
+        if (!mapRef.current) return;
+        const map = mapRef.current;
+        let weatherInterval;
+
+        const fetchWeather = async () => {
+            try {
+                const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+                if (!res.ok) return;
+                const data = await res.json();
+                const past = data.radar.past;
+                if (!past || past.length === 0) return;
+                
+                const timestamp = past[past.length - 1].time;
+                
+                if (weatherLayerRef.current) {
+                    map.removeLayer(weatherLayerRef.current);
+                }
+
+                weatherLayerRef.current = L.tileLayer(`https://tilecache.rainviewer.com/v2/radar/${timestamp}/256/{z}/{x}/{y}/2/1_1.png`, {
+                    opacity: 0.4,
+                    zIndex: 2, // Right above basemap
+                    maxZoom: 19,
+                    className: 'osint-weather-layer'
+                }).addTo(map);
+            } catch (e) {
+                console.warn("[OSINT] Failed to fetch weather radar tile:", e);
+            }
+        };
+
+        // Wait a brief moment to ensure map is fully painted before adding radar
+        setTimeout(fetchWeather, 1000);
+        weatherInterval = setInterval(fetchWeather, 5 * 60 * 1000); // Update every 5 minutes
+
+        return () => {
+            clearInterval(weatherInterval);
+            if (weatherLayerRef.current && map) {
+                map.removeLayer(weatherLayerRef.current);
+                weatherLayerRef.current = null;
+            }
+        };
+    }, []);
+
     // [v3.0] Track mode: update ref so animation loop sees latest value
     useEffect(() => {
         trackModeRef.current = trackMode;
@@ -654,8 +679,6 @@ export default function MapView({
             return outPoint;
         };
 
-        trackStore.updateProjectionCache(pureMathProjector);
-
         // [Project AERO-SYNC] 同步更新所有即時飛機的全域座標 (In-place)
         const currentPlanes = planesDictRef.current;
         for (const id in currentPlanes) {
@@ -677,22 +700,7 @@ export default function MapView({
             // [v3.1] Airline Fleet Focus Mode
             if (filters.fleetFocus && (!plane.callsign || !plane.callsign.startsWith(filters.fleetFocus))) return false;
 
-            // [v4.0] Use live map bounds - never stale
-            const liveMap = mapRef.current;
-            if (liveMap) {
-                const liveBounds = liveMap.getBounds();
-                if (liveBounds) {
-                    const lat = parseFloat(plane.lat);
-                    const lng = parseFloat(plane.lng);
-                    // Add extra 20% padding to avoid clipping planes near edges
-                    const latPad = (liveBounds.getNorth() - liveBounds.getSouth()) * 0.2;
-                    const lngPad = (liveBounds.getEast() - liveBounds.getWest()) * 0.2;
-                    if (lat < liveBounds.getSouth() - latPad || lat > liveBounds.getNorth() + latPad ||
-                        lng < liveBounds.getWest() - lngPad || lng > liveBounds.getEast() + lngPad) {
-                        return false;
-                    }
-                }
-            }
+            // [v9.8] Redundant spatial culling removed (now handled in animate() loop for 60fps)
 
             // [v2.3.6] 動態密度過濾器 (Deterministic Hash)
             const map = mapRef.current;
@@ -747,55 +755,6 @@ export default function MapView({
     const shouldShowPlaneRef = useRef(shouldShowPlane);
     useEffect(() => { shouldShowPlaneRef.current = shouldShowPlane; }, [shouldShowPlane]);
 
-    // ── Full Session Track Fetch ──────────────────────────────────────
-    // When a plane is selected, fetch its ACTIVE session's full track from the API.
-    // On deselect, abort any pending fetch and clear the path.
-    useEffect(() => {
-        // Abort previous fetch
-        if (flightPathAbortRef.current) {
-            flightPathAbortRef.current.abort();
-            flightPathAbortRef.current = null;
-        }
-
-        if (!selectedIcao24) {
-            setSelectedFlightPath(null);
-            selectedFlightPathRef.current = null;
-            return;
-        }
-
-        const controller = new AbortController();
-        flightPathAbortRef.current = controller;
-
-        (async () => {
-            try {
-                // 1. Find the active session for this aircraft
-                const sessRes = await fetch(`/api/sessions/${selectedIcao24}?status=ACTIVE&limit=1`, { signal: controller.signal });
-                if (!sessRes.ok) return;
-                const sessions = await sessRes.json();
-                if (!sessions.length) return;
-
-                const sessionId = sessions[0].sessionId;
-
-                // 2. Fetch full track for this session
-                const trackRes = await fetch(`/api/session/${sessionId}/track`, { signal: controller.signal });
-                if (!trackRes.ok) return;
-                const data = await trackRes.json();
-
-                if (data.path && data.path.length > 1) {
-                    // path format: [[timestamp, lat, lng, altitude, heading, velocity, onGround], ...]
-                    selectedFlightPathRef.current = data.path;
-                    setSelectedFlightPath(data.path);
-                }
-            } catch (err) {
-                if (err.name !== 'AbortError') {
-                    console.warn('[FlightPath] Failed to fetch session track:', err.message);
-                }
-            }
-        })();
-
-        return () => controller.abort();
-    }, [selectedIcao24]);
-
     // [v4.1.2] Unified Selection & Camera Focus Effect
     useEffect(() => {
         if (selectedIcao24) {
@@ -831,10 +790,9 @@ export default function MapView({
         const map = mapRef.current;
         if (!map) return;
 
-        // [v6.0] Dual-layer icon cache: HTMLImageElement + ImageBitmap (offscreen)
-        // SVG → Image (immediate) → ImageBitmap (async, zero-decode on draw)
-        const getSVGImage = (plane) => {
-            const url = getAircraftIconUrl(plane);
+        // [v8.0] Dual-layer icon cache aware of selection state
+        const getSVGImage = (plane, isSelected) => {
+            const url = getAircraftIconUrl(plane, isSelected);
             if (!cachedPathsRef.current.has(url)) {
                 const img = new Image();
                 img.src = url;
@@ -844,9 +802,9 @@ export default function MapView({
                     if (typeof createImageBitmap === 'function' && img.naturalWidth > 0) {
                         createImageBitmap(img).then(bmp => {
                             bitmapCacheRef.current.set(url, bmp);
-                        }).catch(() => {});
+                        }).catch(() => { });
                     }
-                }).catch(() => {});
+                }).catch(() => { });
             }
             // Prefer ImageBitmap (GPU-ready), fall back to HTMLImageElement
             return bitmapCacheRef.current.get(url) || cachedPathsRef.current.get(url);
@@ -991,120 +949,89 @@ export default function MapView({
 
                 const zoom = map.getZoom();
 
-                // [v4.0] 獲取當前即時相機邊界原點 (Dynamic Camera Tracking)
-                // 使用 getPixelBounds().min 取代 getPixelOrigin()，解決拖曳時的殘影與位移
-                const pixelBounds = map.getPixelBounds();
-                const ox = pixelBounds.min.x;
-                const oy = pixelBounds.min.y;
-
-                // --- [Phase 8] Batch Track Rendering Phase (Spline Version) ---
-                if (zoom >= 6) {
-                    ctx.save();
-                    ctx.lineWidth = 2.5;
-                    ctx.lineCap = 'round';
-                    ctx.lineJoin = 'round';
-
-                    trackStore.forEachTrack((icao24, getPoints) => {
-                        const plane = currentPlanes[icao24];
-                        if (icao24 !== selectedIcao24Ref.current || !plane) return;
-
-                        ctx.beginPath();
-                        ctx.strokeStyle = '#22d3ee'; // Tactician Cyan
-
-                        let points = [];
-                        getPoints((lat, lng, gx, gy) => {
-                            points.push({ x: gx - ox, y: gy - oy });
-                        });
-
-                        if (points.length < 2) return;
-
-                        // [Phase 8] Quadratic Bezier Spline 繪製
-                        // 使用中點作為控制點，達成 C1 連續性 (滑順轉彎)
-                        ctx.moveTo(points[0].x, points[0].y);
-
-                        let i;
-                        for (i = 1; i < points.length - 1; i++) {
-                            // 檢查是否跨越經度線 (Antimeridian protection)
-                            if (Math.abs(points[i].x - points[i - 1].x) > canvas.width / 2) {
-                                ctx.stroke();
-                                ctx.beginPath();
-                                ctx.moveTo(points[i].x, points[i].y);
-                                continue;
-                            }
-
-                            const xc = (points[i].x + points[i + 1].x) / 2;
-                            const yc = (points[i].y + points[i + 1].y) / 2;
-                            ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
-                        }
-                        // 畫最後一條線段到飛機當前預估位置 (renderLat/Lng)
-                        const lastP = points[points.length - 1]; // [Fix 8.1] 確保抓到最後一點
-                        const planePt = latLngToGlobalPixels(plane.renderLat, plane.renderLng, zoom);
-                        const px = planePt.x - ox;
-                        const py = planePt.y - oy;
-
-                        if (Math.abs(px - lastP.x) < canvas.width / 2) {
-                            ctx.lineTo(px, py);
-                        }
-
-                        ctx.stroke();
-
-                    });
-                    ctx.restore();
-                }
-
-                // ── Full Session Flight Path (Altitude-Colored) ──────────────
-                // Draw the complete historical track for the selected plane's active session.
-                // Each segment is individually colored by average altitude of its two endpoints.
-                const flightPath = selectedFlightPathRef.current;
+                // ── [v8.0] Professional Altitude-Colored Track with Outline ──
+                const flightPath = trackPointsRef.current;
                 if (flightPath && flightPath.length > 1 && currentSelected) {
+                    // [Phase 18] Dynamic Track Stitching
+                    // Append actual backend heartbeat coordinates to the historical trace to prevent the gap
+                    const livePlane = currentPlanes[currentSelected];
+                    if (livePlane && livePlane.lat != null && livePlane.lng != null) {
+                        const lastSeg = flightPath[flightPath.length - 1];
+                        const dLat = Math.abs(lastSeg[1] - livePlane.lat);
+                        const dLng = Math.abs(lastSeg[2] - livePlane.lng);
+                        if (dLat > 0.0001 || dLng > 0.0001) {
+                            flightPath.push([
+                                Date.now() / 1000,
+                                livePlane.lat,
+                                livePlane.lng,
+                                livePlane.altitude || lastSeg[3],
+                                livePlane.heading !== undefined ? livePlane.heading : lastSeg[4],
+                                livePlane.velocity !== undefined ? livePlane.velocity : lastSeg[5]
+                            ]);
+                        }
+                    }
+
                     ctx.save();
-                    ctx.lineWidth = zoom >= 12 ? 3 : 2;
                     ctx.lineCap = 'round';
                     ctx.lineJoin = 'round';
-                    ctx.globalAlpha = 0.85;
 
-                    // Pre-project all points to container coordinates
-                    // path format: [timestamp, lat, lng, altitude, heading, velocity, onGround]
-                    let prevPt = null;
-                    let prevAlt = 0;
+                    // trackPoints format: [timestamp, lat, lng, altitude, heading, velocity]
+                    const drawTrack = (isOutline) => {
+                        ctx.lineWidth = isOutline
+                            ? (zoom >= 12 ? 5 : 4)
+                            : (zoom >= 12 ? 2.5 : 2);
+                        ctx.strokeStyle = isOutline ? 'rgba(0,0,0,0.8)' : '#ffffff';
+                        ctx.globalAlpha = isOutline ? 0.8 : 1.0;
 
-                    for (let pi = 0; pi < flightPath.length; pi++) {
-                        const seg = flightPath[pi];
-                        const lat = seg[1];
-                        const lng = seg[2];
-                        const alt = seg[3] || 0;
+                        let prevPt = null;
+                        let prevSeg = null;
 
-                        const pt = map.latLngToContainerPoint([lat, normalizeLongitude(lng)]);
+                        for (let pi = 0; pi < flightPath.length; pi++) {
+                            const seg = flightPath[pi];
+                            const lat = seg[1];
+                            const lng = seg[2];
+                            const pt = map.latLngToContainerPoint([lat, normalizeLongitude(lng)]);
 
-                        if (prevPt) {
-                            // Skip antimeridian jumps
-                            if (Math.abs(pt.x - prevPt.x) < canvas.width / 2) {
-                                const avgAlt = (prevAlt + alt) / 2;
-                                ctx.strokeStyle = getAltitudeColor(avgAlt);
+                            if (prevPt && prevSeg) {
+                                const dist = haversineKm(prevSeg[1], prevSeg[2], lat, lng);
+                                const isAntimeridian = Math.abs(pt.x - prevPt.x) > canvas.width / 2;
+
+                                if (dist < 50 && !isAntimeridian) {
+                                    if (!isOutline) {
+                                        const avgAlt = (prevSeg[3] + seg[3]) / 2;
+                                        ctx.strokeStyle = getAltitudeColor(avgAlt);
+                                    }
+                                    ctx.beginPath();
+                                    ctx.moveTo(prevPt.x, prevPt.y);
+                                    ctx.lineTo(pt.x, pt.y);
+                                    ctx.stroke();
+                                }
+                            }
+                            prevPt = pt;
+                            prevSeg = seg;
+                        }
+
+                        // Final segment to live position
+                        const livePlane = currentPlanes[currentSelected];
+                        if (prevPt && livePlane && livePlane.renderLat && prevSeg) {
+                            const livePt = map.latLngToContainerPoint([livePlane.renderLat, normalizeLongitude(livePlane.renderLng)]);
+                            const dist = haversineKm(prevSeg[1], prevSeg[2], livePlane.renderLat, livePlane.renderLng);
+                            if (Math.abs(livePt.x - prevPt.x) < canvas.width / 2 && dist < 50) {
+                                if (!isOutline) {
+                                    const liveAlt = livePlane.altitude || prevSeg[3];
+                                    ctx.strokeStyle = getAltitudeColor((prevSeg[3] + liveAlt) / 2);
+                                }
                                 ctx.beginPath();
                                 ctx.moveTo(prevPt.x, prevPt.y);
-                                ctx.lineTo(pt.x, pt.y);
+                                ctx.lineTo(livePt.x, livePt.y);
                                 ctx.stroke();
                             }
                         }
+                    };
 
-                        prevPt = pt;
-                        prevAlt = alt;
-                    }
-
-                    // Draw final segment to the plane's current live position
-                    const livePlane = currentPlanes[currentSelected];
-                    if (prevPt && livePlane && livePlane.renderLat) {
-                        const livePt = map.latLngToContainerPoint([livePlane.renderLat, normalizeLongitude(livePlane.renderLng)]);
-                        if (Math.abs(livePt.x - prevPt.x) < canvas.width / 2) {
-                            const liveAlt = livePlane.altitude || prevAlt;
-                            ctx.strokeStyle = getAltitudeColor((prevAlt + liveAlt) / 2);
-                            ctx.beginPath();
-                            ctx.moveTo(prevPt.x, prevPt.y);
-                            ctx.lineTo(livePt.x, livePt.y);
-                            ctx.stroke();
-                        }
-                    }
+                    // Two passes for crisp layering
+                    drawTrack(true);  // Outline pass
+                    drawTrack(false); // Colored pass
 
                     ctx.restore();
                 }
@@ -1128,25 +1055,25 @@ export default function MapView({
 
                 // Build render queue
                 const renderQueue = [];
+                const shouldShow = shouldShowPlaneRef.current;
+
                 for (const id in currentPlanes) {
                     const plane = currentPlanes[id];
                     if (!plane.renderLat || !plane.renderLng) continue;
+
                     // Fast lat/lng frustum cull — skip projection entirely for off-screen planes
                     const pLat = plane.renderLat;
                     const pLng = plane.renderLng;
                     if (pLat < cullS || pLat > cullN || pLng < cullW || pLng > cullE) continue;
-                    if (!shouldShowPlaneRef.current(plane, 1.0)) continue;
+
+                    // Filter check (excludes redundant culling)
+                    if (shouldShow && !shouldShow(plane, 1.0)) continue;
+
                     renderQueue.push(plane);
                 }
 
-                if (renderQueue.length > maxDraw) {
-                    renderQueue.sort((a, b) => {
-                        if (a.icao24 === currentSelected) return -1;
-                        if (b.icao24 === currentSelected) return 1;
-                        if (a.isEmergency && !b.isEmergency) return -1;
-                        if (!a.onGround && b.onGround) return -1;
-                        return 0;
-                    });
+                if (drawnCount === 0 && renderQueue.length > 0 && Math.random() < 0.05) {
+                    console.log(`[MapView] Queue size: ${renderQueue.length}, currentPlanes: ${Object.keys(currentPlanes).length}`);
                 }
 
                 // ── Label Collision Grid ──────────────────────────────────
@@ -1197,42 +1124,14 @@ export default function MapView({
                     if (dataAge > 60) opacity = 0.4;
                     else if (dataAge > 30) opacity = 0.7;
 
-                    // ── Gradient Trail ──────────────────────────────────
-                    if (plane._trailCount > 1 && !plane.onGround && !isSimple) {
-                        const tc = plane._trailCount;
-                        const head = plane._trailHead;
-                        const trail = plane._trail;
-                        const trailColor = getAltitudeColor(plane.altitude);
-
-                        ctx.save();
-                        ctx.lineCap = 'round';
-                        ctx.lineJoin = 'round';
-                        ctx.lineWidth = zoom >= 12 ? 2.5 : 1.8;
-                        ctx.shadowColor = trailColor;
-                        ctx.shadowBlur = 3;
-
-                        // Walk from oldest → newest, drawing segments with increasing alpha
-                        for (let ti = 0; ti < tc - 1; ti++) {
-                            const fromIdx = ((head - tc + ti + TRAIL_LEN) % TRAIL_LEN) * 2;
-                            const toIdx = ((head - tc + ti + 1 + TRAIL_LEN) % TRAIL_LEN) * 2;
-
-                            const fromPt = map.latLngToContainerPoint([trail[fromIdx], normalizeLongitude(trail[fromIdx + 1])]);
-                            const toPt = map.latLngToContainerPoint([trail[toIdx], normalizeLongitude(trail[toIdx + 1])]);
-
-                            // Skip antimeridian jumps
-                            if (Math.abs(toPt.x - fromPt.x) > canvas.width / 2) continue;
-
-                            const segAlpha = opacity * ((ti + 1) / tc) * 0.7;
-                            ctx.globalAlpha = segAlpha;
-                            ctx.strokeStyle = trailColor;
-                            ctx.beginPath();
-                            ctx.moveTo(fromPt.x, fromPt.y);
-                            ctx.lineTo(toPt.x, toPt.y);
-                            ctx.stroke();
-                        }
-
-                        ctx.restore();
+                    // [Phase 15] Focus Mode Dimming
+                    if (currentSelected && !isSelected) {
+                        opacity = 0.3;
                     }
+
+                    // [Phase 17] Legacy local _trail drawing loop removed.
+                    // The robust historical 'trackPoints' now handles all trace rendering, 
+                    // eliminating the "dual overlapping traces" and pan/zoom jitter bug.
 
                     // ── Aircraft Silhouette (All Zoom Levels) ──
                     const scale = getAircraftScale(plane);
@@ -1242,16 +1141,14 @@ export default function MapView({
                     ctx.globalAlpha = opacity;
                     ctx.translate(ptX, ptY);
 
-                    // FR24 yellow shadow glow
+                    // [v8.0] Clean icon silhouette without glowing shadows
                     if (isSelected) {
-                        ctx.shadowColor = '#22d3ee';
-                        ctx.shadowBlur = 15;
+                        // Cyan highlight for selection
                     } else if (plane.isEmergency) {
                         ctx.shadowColor = '#ef4444';
                         ctx.shadowBlur = 10;
                     } else {
-                        ctx.shadowColor = plane.onGround ? 'rgba(100,100,100,0.4)' : 'rgba(245,194,17,0.5)';
-                        ctx.shadowBlur = plane.onGround ? 2 : 4;
+                        // Standard shadows removed for professional look
                     }
 
                     // Heading rotation (SVG is North-Up)
@@ -1259,7 +1156,7 @@ export default function MapView({
                     ctx.rotate(finalRotationRad);
 
                     // Draw aircraft icon (prefer ImageBitmap → HTMLImageElement)
-                    const img = getSVGImage(plane);
+                    const img = getSVGImage(plane, isSelected);
                     const imgReady = img && (img instanceof ImageBitmap || (img.complete && img.naturalHeight !== 0));
                     if (imgReady) {
                         const offset = drawSize / 2;
@@ -1315,79 +1212,79 @@ export default function MapView({
                             ? (labelFits(labelAbsX, labelAbsY, bubbleWidth, bubbleHeight), true)
                             : labelFits(labelAbsX, labelAbsY, bubbleWidth, bubbleHeight);
 
-                    if (canDraw) {
-                        ctx.save();
-                        ctx.translate(ptX, ptY);
-                        ctx.globalAlpha = labelAlpha;
+                        if (canDraw) {
+                            ctx.save();
+                            ctx.translate(ptX, ptY);
+                            ctx.globalAlpha = labelAlpha;
 
-                        // Shadow
-                        ctx.shadowColor = isSelected ? 'rgba(34, 211, 238, 0.6)' : 'rgba(0, 0, 0, 0.6)';
-                        ctx.shadowBlur = isSelected ? 10 : 5;
-                        ctx.shadowOffsetY = 2;
+                            // Shadow
+                            ctx.shadowColor = isSelected ? 'rgba(34, 211, 238, 0.6)' : 'rgba(0, 0, 0, 0.6)';
+                            ctx.shadowBlur = isSelected ? 10 : 5;
+                            ctx.shadowOffsetY = 2;
 
-                        // Background panel
-                        ctx.fillStyle = isSelected ? 'rgba(15, 23, 42, 0.95)' : 'rgba(30, 41, 59, 0.9)';
-                        ctx.beginPath();
-                        ctx.moveTo(boxX + radius, boxY);
-                        ctx.lineTo(boxX + bubbleWidth - radius, boxY);
-                        ctx.arcTo(boxX + bubbleWidth, boxY, boxX + bubbleWidth, boxY + radius, radius);
-                        ctx.lineTo(boxX + bubbleWidth, boxY + bubbleHeight - radius);
-                        ctx.arcTo(boxX + bubbleWidth, boxY + bubbleHeight, boxX + bubbleWidth - radius, boxY + bubbleHeight, radius);
-                        ctx.lineTo(boxX + radius, boxY + bubbleHeight);
-                        ctx.arcTo(boxX, boxY + bubbleHeight, boxX, boxY + bubbleHeight - radius, radius);
-
-                        // Pointer arrow
-                        ctx.lineTo(boxX, tailHeight / 2);
-                        ctx.lineTo(boxX - tailWidth, 0);
-                        ctx.lineTo(boxX, -tailHeight / 2);
-
-                        ctx.lineTo(boxX, boxY + radius);
-                        ctx.arcTo(boxX, boxY, boxX + radius, boxY, radius);
-                        ctx.closePath();
-                        ctx.fill();
-
-                        // Border
-                        ctx.lineWidth = 1.5;
-                        ctx.strokeStyle = isSelected ? '#22d3ee' : (plane.isEmergency ? '#ef4444' : 'rgba(148, 163, 184, 0.4)');
-                        ctx.stroke();
-
-                        ctx.shadowBlur = 0;
-                        ctx.shadowOffsetY = 0;
-
-                        // Content
-                        let currentX = boxX + paddingX;
-
-                        if (hasLogo) {
-                            const logoBgMargin = 3;
-                            ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+                            // Background panel
+                            ctx.fillStyle = isSelected ? 'rgba(15, 23, 42, 0.95)' : 'rgba(30, 41, 59, 0.9)';
                             ctx.beginPath();
-                            if (ctx.roundRect) {
-                                ctx.roundRect(currentX - logoBgMargin, boxY + (bubbleHeight - logoHeight) / 2 - logoBgMargin, logoWidth + logoBgMargin * 2, logoHeight + logoBgMargin * 2, 3);
-                            } else {
-                                ctx.rect(currentX - logoBgMargin, boxY + (bubbleHeight - logoHeight) / 2 - logoBgMargin, logoWidth + logoBgMargin * 2, logoHeight + logoBgMargin * 2);
-                            }
+                            ctx.moveTo(boxX + radius, boxY);
+                            ctx.lineTo(boxX + bubbleWidth - radius, boxY);
+                            ctx.arcTo(boxX + bubbleWidth, boxY, boxX + bubbleWidth, boxY + radius, radius);
+                            ctx.lineTo(boxX + bubbleWidth, boxY + bubbleHeight - radius);
+                            ctx.arcTo(boxX + bubbleWidth, boxY + bubbleHeight, boxX + bubbleWidth - radius, boxY + bubbleHeight, radius);
+                            ctx.lineTo(boxX + radius, boxY + bubbleHeight);
+                            ctx.arcTo(boxX, boxY + bubbleHeight, boxX, boxY + bubbleHeight - radius, radius);
+
+                            // Pointer arrow
+                            ctx.lineTo(boxX, tailHeight / 2);
+                            ctx.lineTo(boxX - tailWidth, 0);
+                            ctx.lineTo(boxX, -tailHeight / 2);
+
+                            ctx.lineTo(boxX, boxY + radius);
+                            ctx.arcTo(boxX, boxY, boxX + radius, boxY, radius);
+                            ctx.closePath();
                             ctx.fill();
 
-                            ctx.drawImage(logoImg, currentX, boxY + (bubbleHeight - logoHeight) / 2, logoWidth, logoHeight);
-                            currentX += logoWidth + gap / 2;
-
-                            ctx.beginPath();
-                            ctx.moveTo(currentX, boxY + 6);
-                            ctx.lineTo(currentX, boxY + bubbleHeight - 6);
-                            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-                            ctx.lineWidth = 1;
+                            // Border
+                            ctx.lineWidth = 1.5;
+                            ctx.strokeStyle = isSelected ? '#22d3ee' : (plane.isEmergency ? '#ef4444' : 'rgba(148, 163, 184, 0.4)');
                             ctx.stroke();
 
-                            currentX += gap / 2;
-                        }
+                            ctx.shadowBlur = 0;
+                            ctx.shadowOffsetY = 0;
 
-                        // Callsign text
-                        ctx.fillStyle = isSelected ? '#ffffff' : (plane.isEmergency ? '#fca5a5' : '#e2e8f0');
-                        ctx.textBaseline = 'middle';
-                        ctx.fillText(labelText, currentX, 1);
+                            // Content
+                            let currentX = boxX + paddingX;
 
-                        ctx.restore();
-                    } // canDraw
+                            if (hasLogo) {
+                                const logoBgMargin = 3;
+                                ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+                                ctx.beginPath();
+                                if (ctx.roundRect) {
+                                    ctx.roundRect(currentX - logoBgMargin, boxY + (bubbleHeight - logoHeight) / 2 - logoBgMargin, logoWidth + logoBgMargin * 2, logoHeight + logoBgMargin * 2, 3);
+                                } else {
+                                    ctx.rect(currentX - logoBgMargin, boxY + (bubbleHeight - logoHeight) / 2 - logoBgMargin, logoWidth + logoBgMargin * 2, logoHeight + logoBgMargin * 2);
+                                }
+                                ctx.fill();
+
+                                ctx.drawImage(logoImg, currentX, boxY + (bubbleHeight - logoHeight) / 2, logoWidth, logoHeight);
+                                currentX += logoWidth + gap / 2;
+
+                                ctx.beginPath();
+                                ctx.moveTo(currentX, boxY + 6);
+                                ctx.lineTo(currentX, boxY + bubbleHeight - 6);
+                                ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                                ctx.lineWidth = 1;
+                                ctx.stroke();
+
+                                currentX += gap / 2;
+                            }
+
+                            // Callsign text
+                            ctx.fillStyle = isSelected ? '#ffffff' : (plane.isEmergency ? '#fca5a5' : '#e2e8f0');
+                            ctx.textBaseline = 'middle';
+                            ctx.fillText(labelText, currentX, 1);
+
+                            ctx.restore();
+                        } // canDraw
                     } // shouldShowLabel
                 }
 

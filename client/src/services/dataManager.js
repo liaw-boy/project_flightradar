@@ -176,7 +176,8 @@ export const dataManager = {
         if (cached) return cached;
 
         try {
-            const res = await fetch(`/api/aircraft/${icao24}`);
+            // [v9.9] Force-refresh metadata to bypass IndexedDB/Browser cache for verification
+            const res = await fetch(`/api/aircraft/${icao24}?v=${Date.now()}`);
             if (!res.ok) throw new Error('Registry API error');
             const data = await res.json();
 
@@ -215,12 +216,14 @@ export const dataManager = {
      * 策略：使用 L2 快取，減少頻繁切換飛機時對第三方 API 的請求壓力。
      */
     async getPhotos(icao24, registration) {
-        const cacheKey = `photos_${icao24 || registration}`;
+        // Include registration in cache key so re-fetch with real reg finds fresh data
+        const hasReg = registration && registration !== 'N/A';
+        const cacheKey = hasReg ? `photos_${icao24}_${registration}` : `photos_${icao24}`;
         const cached = lruCache.get(cacheKey);
         if (cached) return cached;
 
         try {
-            const regParam = registration && registration !== 'N/A' ? `?reg=${encodeURIComponent(registration)}` : '';
+            const regParam = hasReg ? `?reg=${encodeURIComponent(registration)}` : '';
             const res = await fetch(`/api/photos/${icao24}${regParam}`);
             if (!res.ok) throw new Error('Photos API error');
             const results = await res.json();
