@@ -525,6 +525,23 @@ const _ghPending = new Map(); // tc → Promise (dedup in-flight requests)
 // Use local backend to serve SVGs — avoids GitHub CDN 404s and rate limits
 const _GH_BASE   = '/api/svg/';
 
+// Persist known-missing typecodes in localStorage so they are never re-requested
+// after a page refresh. Key includes a version stamp to auto-invalidate on SVG repo updates.
+const _SVG_MISS_KEY = 'aerostrat_svg_miss_v1';
+try {
+    const stored = JSON.parse(localStorage.getItem(_SVG_MISS_KEY) || '[]');
+    stored.forEach(tc => exactImageCache.set(tc, null));
+} catch (_) {}
+function _persistMiss(tc) {
+    try {
+        const stored = JSON.parse(localStorage.getItem(_SVG_MISS_KEY) || '[]');
+        if (!stored.includes(tc)) {
+            stored.push(tc);
+            localStorage.setItem(_SVG_MISS_KEY, JSON.stringify(stored));
+        }
+    } catch (_) {}
+}
+
 function _buildGhImage(svgText, color, isSelected = false) {
     // Strip any existing fill/stroke attributes (except fill="none" for outlines)
     // then inject a CSS rule that forces all fill to our desired color.
@@ -571,7 +588,8 @@ export function prewarmExactSvg(typecode) {
         })
         .then(text => {
             if (!text || text.length < 80 || /<Error|<!DOCTYPE/i.test(text)) {
-                exactImageCache.set(tc, null); // mark as unavailable — no retry
+                exactImageCache.set(tc, null);
+                _persistMiss(tc); // remember across page refreshes
                 return;
             }
             exactImageCache.set(tc, {
@@ -579,7 +597,7 @@ export function prewarmExactSvg(typecode) {
                 selected: _buildGhImage(text, '#00ffff', true),
             });
         })
-        .catch(() => { clearTimeout(timeout); exactImageCache.set(tc, null); })
+        .catch(() => { clearTimeout(timeout); exactImageCache.set(tc, null); _persistMiss(tc); })
         .finally(() => _ghPending.delete(tc));
 
     _ghPending.set(tc, p);

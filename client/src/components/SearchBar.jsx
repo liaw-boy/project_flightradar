@@ -100,8 +100,8 @@ export default function SearchBar({ planesDict, onSelectPlane }) {
                         >
                             <span className="sr-callsign">{plane.callsign || id.toUpperCase()}</span>
                             <span className="sr-meta">
-                                {plane.aircraftType && <span className="sr-type">{plane.aircraftType}</span>}
-                                {plane.registration && <span className="sr-reg">{plane.registration}</span>}
+                                {plane.aircraftType && plane.aircraftType !== 'Unknown' && <span className="sr-type">{plane.aircraftType}</span>}
+                                {plane.registration && plane.registration !== 'N/A' && plane.registration !== 'Unknown' && <span className="sr-reg">{plane.registration}</span>}
                                 {plane.onGround
                                     ? <span className="sr-ground">GND</span>
                                     : <span className="sr-alt">{plane.altitude ? `${Math.round(plane.altitude / 100) * 100}m` : ''}</span>

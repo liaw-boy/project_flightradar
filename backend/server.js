@@ -62,6 +62,12 @@ mongoose.connect(MONGODB_URI, {
         logger.warn('MICTRONICS', `Sync failed (non-fatal): ${err.message}`)
     );
 
+    // Purge poisoned spatial_inference routes — these are mid-flight position guesses,
+    // not actual flight plans. They cause trans-oceanic flights to show wrong departure airports.
+    Route.deleteMany({ source: 'spatial_inference' })
+        .then(r => { if (r.deletedCount > 0) logger.info('ROUTE', `Purged ${r.deletedCount} spatial_inference route(s) from DB`); })
+        .catch(() => null);
+
     // Sync TTL index to match schema (MongoDB won't auto-update existing TTL values)
     try {
         const db = mongoose.connection.db;
@@ -1098,11 +1104,43 @@ async function fetchAirplanesLive(type = 'all', params = {}) {
         onGround: p.alt_baro === 'ground' || false,
         squawk: p.squawk || null,
         typecode: p.t || p.type || null,
+        registration: p.r || null,
+        operator: p.ownOp || null,
         category: p.category || null,
-        isMil: !!(p.mil || p.dbFlags === 1) // Store military flag
+        isMil: !!(p.mil || p.dbFlags === 1)
     })).filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
 
     return { states: standardStates, time: Math.floor(data.now || Date.now() / 1000) };
+}
+
+/**
+ * adsb.fi open data API — ADSBexchange v2 compatible, no auth required.
+ * Public rate limit: 1 req/sec. Used as fallback when Airplanes.Live fails.
+ */
+async function fetchAdsbFi(lat, lon, dist = 250) {
+    const response = await fetch(
+        `https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${dist}`,
+        { headers: { 'User-Agent': 'AEROSTRAT/5.0' }, signal: AbortSignal.timeout(8000) }
+    );
+    if (!response.ok) throw new Error(`adsb.fi Error: ${response.status}`);
+    const data = await response.json();
+    const standardStates = (data.aircraft || []).map(p => ({
+        icao24: p.hex?.toLowerCase(),
+        callsign: (p.flight || '').trim(),
+        lng: p.lon,
+        lat: p.lat,
+        altitude: p.alt_baro === 'ground' ? 0 : (p.alt_baro || p.alt_geom || 0),
+        velocity: (p.gs || 0) * 0.51444,
+        heading: p.track || 0,
+        vRate: (p.baro_rate || 0) * 0.00508,
+        onGround: p.alt_baro === 'ground' || false,
+        squawk: p.squawk || null,
+        typecode: p.t || null,
+        registration: p.r || null,
+        operator: p.ownOp || null,
+        isMil: !!(p.mil || p.dbFlags === 1)
+    })).filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+    return { states: standardStates };
 }
 
 /**
@@ -1335,25 +1373,69 @@ async function fetchGlobalPlanes() {
     isFetchingGlobal = true;
     const start = performance.now();
     syncCycleCount++;
-    const isOpenSkyCycle = syncCycleCount % 3 === 0 || lastOpenSkyFetchTime === 0;
-    logger.debug('SYNC', `Cycle #${syncCycleCount} started | source: ${isOpenSkyCycle ? 'OpenSky (full fetch)' : 'Cache (tactical only)'} | cached: ${(globalPlanesCache.states || []).length} planes`);
+    // OpenSky every 45s (every 4-5th cycle of 10s) = ~1920 calls/day.
+    // With 5 accounts (5×400=2000/day) this stays within quota with safe headroom.
+    // adsb.lol supplements when OpenSky is rate-limited (its /v2/all is unreliable, used opportunistically).
+    const isGlobalCycle = syncCycleCount % 5 === 0 || lastOpenSkyFetchTime === 0; // ~every 50s
+    logger.debug('SYNC', `Cycle #${syncCycleCount} started | cached: ${(globalPlanesCache.states || []).length} planes`);
 
     try {
         let mergedStates = [];
         let sourceTags = [];
         const now = Date.now();
 
-        // ── Phase A: GLOBAL BASELINE (Every 3rd cycle = 30s) ───────────
-        if (isOpenSkyCycle) {
+        // ── Phase A: GLOBAL BASELINE (every ~50s) ─────────────────────
+        if (isGlobalCycle) {
+            let gotGlobal = false;
+
+            // Opportunistically try adsb.lol first — richer data, no hard daily quota.
+            // If unavailable (503/429), fall through to OpenSky immediately.
             try {
-                const osData = await fetchOpenSky();
-                mergedStates = osData.states;
-                lastOpenSkyFetchTime = now;
-                sourceTags.push('OpenSky');
-                logger.info('SYNC', `OpenSky fetch OK — ${mergedStates.length} planes | ${Math.round(performance.now() - start)}ms`);
-            } catch (osErr) {
-                logger.warn('SYNC', `OpenSky failed (${osErr.message}) — keeping stale baseline (${(globalPlanesCache.states || []).length} planes)`);
+                const res = await fetch('https://api.adsb.lol/v2/all', {
+                    headers: { 'User-Agent': 'AEROSTRAT/5.0' },
+                    signal: AbortSignal.timeout(8000)
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    mergedStates = (data.aircraft || []).map(p => ({
+                        icao24: p.hex?.toLowerCase(),
+                        callsign: (p.flight || '').trim(),
+                        lng: p.lon, lat: p.lat,
+                        altitude: p.alt_baro === 'ground' ? 0 : (p.alt_baro || p.alt_geom || 0),
+                        velocity: (p.gs || 0) * 0.51444,
+                        heading: p.track || 0,
+                        vRate: (p.baro_rate || 0) * 0.00508,
+                        onGround: p.alt_baro === 'ground' || false,
+                        squawk: p.squawk || null,
+                        typecode: p.t || null,
+                        registration: p.r || null,
+                        operator: p.ownOp || null,
+                        isMil: !!(p.mil || p.dbFlags === 1)
+                    })).filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+                    lastOpenSkyFetchTime = now;
+                    sourceTags.push('adsb.lol');
+                    gotGlobal = true;
+                    logger.info('SYNC', `adsb.lol fetch OK — ${mergedStates.length} planes | ${Math.round(performance.now() - start)}ms`);
+                }
+            } catch (_) { /* fall through to OpenSky */ }
+
+            // OpenSky — primary global source, always tried when adsb.lol is unavailable
+            if (!gotGlobal) {
+                try {
+                    const osData = await fetchOpenSky();
+                    mergedStates = osData.states;
+                    lastOpenSkyFetchTime = now;
+                    sourceTags.push('OpenSky');
+                    gotGlobal = true;
+                    logger.info('SYNC', `OpenSky fetch OK — ${mergedStates.length} planes | ${Math.round(performance.now() - start)}ms`);
+                } catch (osErr) {
+                    logger.warn('SYNC', `OpenSky failed (${osErr.message}) — keeping stale baseline`);
+                }
+            }
+
+            if (!gotGlobal) {
                 mergedStates = globalPlanesCache.states || [];
+                sourceTags.push('Cache');
             }
         } else {
             mergedStates = [...(globalPlanesCache.states || [])];
@@ -1361,43 +1443,55 @@ async function fetchGlobalPlanes() {
         }
 
         // ── Phase B: TACTICAL OVERLAY (Every cycle = 10s) ───────────────
+        // Circuit breaker: if a source returns 429, back off for 5 minutes before retrying.
         const stateMap = new Map(mergedStates.map(p => [p.icao24, p]));
+        const CB_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
+        if (!fetchGlobalPlanes._cb) fetchGlobalPlanes._cb = {};
+        const cb = fetchGlobalPlanes._cb;
+        const cbOpen = (key) => cb[key] && (Date.now() - cb[key] < CB_BACKOFF_MS);
+        const cbTrip = (key) => { cb[key] = Date.now(); };
 
         // 1. Airplanes.Live Military Feed
-        try {
-            const milData = await fetchAirplanesLive('mil');
-            milData.states.forEach(p => stateMap.set(p.icao24, p));
-            sourceTags.push('AL-Mil');
-        } catch (milErr) {
-            logger.warn('SYNC', `AL-Mil failed: ${milErr.message}`);
+        if (!cbOpen('al_mil')) {
+            try {
+                const milData = await fetchAirplanesLive('mil');
+                milData.states.forEach(p => stateMap.set(p.icao24, p));
+                sourceTags.push('AL-Mil');
+                delete cb['al_mil']; // reset on success
+            } catch (milErr) {
+                if (milErr.message.includes('429')) cbTrip('al_mil');
+                logger.warn('SYNC', `AL-Mil failed: ${milErr.message}`);
+            }
         }
 
-        // 2. Airplanes.Live Viewport Sensing
+        // 2. Viewport / Home point query — only 1 viewport to halve request rate
         const viewports = getActiveViewports();
-        if (viewports.length > 0) {
-            logger.debug('SYNC', `Viewport overlay: ${viewports.length} active client(s)`);
-            const uniqPorts = viewports.slice(0, 2);
-            for (const vp of uniqPorts) {
-                const centerLat = (vp.lamin + vp.lamax) / 2;
-                const centerLon = (vp.lomin + vp.lomax) / 2;
-                try {
-                    const regional = await fetchAirplanesLive('point', { lat: centerLat, lon: centerLon, dist: 250 });
-                    regional.states.forEach(p => stateMap.set(p.icao24, p));
-                    sourceTags.push(`AL-Point(${centerLat.toFixed(1)})`);
-                    logger.debug('SYNC', `AL-Point OK lat=${centerLat.toFixed(2)} lon=${centerLon.toFixed(2)} → ${regional.states.length} planes`);
-                    await new Promise(r => setTimeout(r, 1100));
-                } catch (regErr) {
-                    logger.warn('SYNC', `AL-Point failed: ${regErr.message}`);
-                }
-            }
-        } else {
+        const vp = viewports.length > 0 ? viewports[0] : null;
+        const centerLat = vp ? (vp.lamin + vp.lamax) / 2 : 25.07;
+        const centerLon = vp ? (vp.lomin + vp.lomax) / 2 : 121.23;
+        const pointLabel = vp ? 'AL-Point' : 'AL-Home';
+        const cbKeyAL = vp ? 'al_point' : 'al_home';
+        const cbKeyFi = vp ? 'fi_point' : 'fi_home';
+
+        if (!cbOpen(cbKeyAL)) {
             try {
-                const regional = await fetchAirplanesLive('point', { lat: 25.07, lon: 121.23, dist: 250 });
+                const regional = await fetchAirplanesLive('point', { lat: centerLat, lon: centerLon, dist: 250 });
                 regional.states.forEach(p => stateMap.set(p.icao24, p));
-                sourceTags.push('AL-Home');
-                logger.debug('SYNC', `AL-Home (no active viewport) → ${regional.states.length} planes`);
-            } catch (hErr) {
-                logger.warn('SYNC', `AL-Home fallback failed: ${hErr.message}`);
+                sourceTags.push(`${pointLabel}(${centerLat.toFixed(1)})`);
+                delete cb[cbKeyAL];
+                delete cb[cbKeyFi]; // AL back → adsb.fi circuit also reset
+            } catch (regErr) {
+                if (regErr.message.includes('429')) cbTrip(cbKeyAL);
+                if (!cbOpen(cbKeyFi)) {
+                    try {
+                        const regional = await fetchAdsbFi(centerLat, centerLon, 250);
+                        regional.states.forEach(p => stateMap.set(p.icao24, p));
+                        sourceTags.push(`ADSBFI(${centerLat.toFixed(1)})`);
+                        delete cb[cbKeyFi];
+                    } catch (fiErr) {
+                        if (fiErr.message.includes('429')) cbTrip(cbKeyFi);
+                    }
+                }
             }
         }
 
@@ -1406,6 +1500,30 @@ async function fetchGlobalPlanes() {
         logger.debug('SYNC', `Merge complete — ${finalStates.length} total planes | fetch: ${fetchLatency}ms`);
 
         // ── Phase C: Metadata Enrichment ──────────────────────────────
+        // Write-back: states that came from Airplanes.Live / adsb.fi already carry
+        // registration (r) and operator (ownOp). Persist them to Aircraft DB in bulk
+        // so future lookups are served locally without hitting external APIs.
+        const enrichWriteback = finalStates.filter(p => p.registration || p.operator || p.typecode);
+        if (enrichWriteback.length > 0) {
+            const writebackOps = enrichWriteback.map(p => ({
+                updateOne: {
+                    filter: { $or: [{ icao24: p.icao24 }, { hex: p.icao24 }] },
+                    update: {
+                        $set: Object.fromEntries([
+                            ['icao24', p.icao24], ['hex', p.icao24],
+                            p.registration && ['registration', p.registration],
+                            p.typecode     && ['typecode', p.typecode],
+                            p.typecode     && ['type_code', p.typecode],
+                            p.operator     && ['operator', p.operator],
+                            p.operator     && ['airline', p.operator],
+                        ].filter(Boolean))
+                    },
+                    upsert: true
+                }
+            }));
+            Aircraft.bulkWrite(writebackOps, { ordered: false }).catch(() => null);
+        }
+
         let enrichedCount = 0;
         try {
             const icaoList = finalStates.map(p => p.icao24);
@@ -1414,13 +1532,11 @@ async function fetchGlobalPlanes() {
 
             finalStates.forEach(p => {
                 const lowerIcao = p.icao24.toLowerCase();
-                let tc = metaMap.get(lowerIcao);
+                let tc = p.typecode || metaMap.get(lowerIcao);
 
                 // [v11.0] Instant Index Fallback
                 if (!tc && aircraftMetadataIndex.has(lowerIcao)) {
                     tc = aircraftMetadataIndex.get(lowerIcao);
-                    // Also trigger background DB persistence for this new aircraft if it's missing
-                    // We don't await this to keep the broadcast loop fast
                     if (p.callsign && p.callsign !== 'UNKNOWN') {
                         triggerBackgroundResolution(lowerIcao, p.callsign);
                     }
@@ -2427,9 +2543,9 @@ app.get('/api/route/:icao24', async (req, res) => {
             break;
         }
 
-        // 從 MongoDB 檢查快取
+        // MongoDB cache — skip spatial_inference entries (they are position-guesses, not real routes)
         const dbRoute = await Route.findOne({ callsign: cs }).lean();
-        if (dbRoute) {
+        if (dbRoute && dbRoute.source !== 'spatial_inference' && dbRoute.departureAirport && dbRoute.arrivalAirport) {
             route = { dep: dbRoute.departureAirport, arr: dbRoute.arrivalAirport };
             matchSource = 'mongodb_cache';
             break;
@@ -2450,60 +2566,73 @@ app.get('/api/route/:icao24', async (req, res) => {
         });
     }
 
-    // 2. 檢查記憶體動態快取
+    // 2. In-memory short-term cache
     const cached = routeCache.get(icao24);
     if (cached && (Date.now() - cached.timestamp < ROUTE_CACHE_TTL)) {
         return res.json(cached.data);
     }
 
     try {
-        // --- Layer 3: Spatial Reverse-Geocoding (物理足跡推測) ---
-        console.log(`🔍 [SPATIAL] Attempting inference for ${cleanCallsign} (${icao24})...`);
-
-        // [OPT 1.3] 直接呼叫內部函式取得 track，不再透過 localhost HTTP 請求
-        const trackData = await fetchTracksInternal(icao24);
-
-        if (trackData && trackData.path && trackData.path.length > 0) {
-            resolveMissingData(icao24, 'route'); // [v2.5.2]
-            const startPoint = trackData.path[0];
-            const startLat = startPoint[1];
-            const startLng = startPoint[2];
-
-            // [OPT 1.2] 使用空間索引 O(k) 取代 O(n) 全量搜尋 (~1000x 加速)
-            // [v4.4.0] 擴大半徑至 20km，覆蓋更大範圍的離場活動
-            const nearestAp = findNearestAirport(startLat, startLng, 20);
-
-            if (nearestAp) {
-                console.log(`✅ [SPATIAL] Inferred Departure: ${nearestAp.icao} (${nearestAp.name}) for ${cleanCallsign}`);
-                const inferredResult = {
+        // --- Layer 3: AeroDataBox real-time route lookup ---
+        // Must come before spatial inference — provides the actual flight plan, not a position guess.
+        if (cleanCallsign) {
+            const externalRoute = await fetchRouteData(cleanCallsign);
+            if (externalRoute && externalRoute.origin_iata && externalRoute.destination_iata &&
+                externalRoute.destination_iata !== '---') {
+                console.log(`✅ [AERODATABOX] Route for ${cleanCallsign}: ${externalRoute.origin_iata} → ${externalRoute.destination_iata}`);
+                const result = {
                     icao24,
                     callsign: cleanCallsign,
-                    departureAirport: nearestAp.icao,
-                    arrivalAirport: null,
-                    isInferred: true,
-                    source: 'spatial_inference'
+                    departureAirport: externalRoute.origin_iata,
+                    arrivalAirport: externalRoute.destination_iata,
+                    source: 'aerodatabox'
                 };
-                routeCache.set(icao24, { data: inferredResult, timestamp: Date.now() });
-
-                // Persist inferred route to MongoDB for future lookups
-                if (cleanCallsign) {
-                    Route.findOneAndUpdate(
-                        { callsign: cleanCallsign },
-                        {
-                            departureAirport: nearestAp.icao,
-                            arrivalAirport: null,
-                            source: 'spatial_inference',
-                            lastUpdated: new Date()
-                        },
-                        { upsert: true }
-                    ).catch(err => console.error('[ROUTE PERSIST]', err.message));
-                }
-
-                return res.json(inferredResult);
+                routeCache.set(icao24, { data: result, timestamp: Date.now() });
+                Route.findOneAndUpdate(
+                    { callsign: cleanCallsign },
+                    { $set: { departureAirport: externalRoute.origin_iata, arrivalAirport: externalRoute.destination_iata,
+                        origin_iata: externalRoute.origin_iata, destination_iata: externalRoute.destination_iata,
+                        source: 'aerodatabox', lastUpdated: new Date() } },
+                    { upsert: true }
+                ).catch(() => null);
+                return res.json(result);
             }
         }
 
-        console.log(`⚠️ [ROUTE] ${cleanCallsign} not found in Local/Cache/Spatial. Returning noData.`);
+        // --- Layer 4: Spatial inference — ONLY for low-altitude aircraft (just departed / about to land) ---
+        // Trans-oceanic/en-route aircraft must NOT use this — their first tracked point is mid-ocean.
+        const trackData = await fetchTracksInternal(icao24);
+
+        if (trackData && trackData.path && trackData.path.length > 0) {
+            const startPoint = trackData.path[0];
+            const startAlt = startPoint[3] || 0; // metres barometric altitude
+
+            // Only infer if the first tracked point is below 3000m (≈10,000ft) — aircraft near an airport
+            if (startAlt < 3000) {
+                const startLat = startPoint[1];
+                const startLng = startPoint[2];
+                const nearestAp = findNearestAirport(startLat, startLng, 20);
+
+                if (nearestAp) {
+                    console.log(`✅ [SPATIAL] Low-altitude inference: ${nearestAp.icao} for ${cleanCallsign} (alt=${startAlt}m)`);
+                    const inferredResult = {
+                        icao24,
+                        callsign: cleanCallsign,
+                        departureAirport: nearestAp.icao,
+                        arrivalAirport: null,
+                        isInferred: true,
+                        source: 'spatial_inference'
+                    };
+                    routeCache.set(icao24, { data: inferredResult, timestamp: Date.now() });
+                    // Do NOT persist spatial_inference to MongoDB — avoids poisoning the route cache
+                    return res.json(inferredResult);
+                }
+            } else {
+                console.log(`⚠️ [SPATIAL] Skipped for ${cleanCallsign} — first point is at ${startAlt}m (en-route)`);
+            }
+        }
+
+        console.log(`⚠️ [ROUTE] ${cleanCallsign} not found. Returning noData.`);
         const noDataResult = { icao24, callsign: cleanCallsign, noData: true, source: 'none' };
         routeCache.set(icao24, { data: noDataResult, timestamp: Date.now() });
         return res.json(noDataResult);
@@ -2619,8 +2748,8 @@ const trackCache = new Map();
 const TRACK_CACHE_TTL = 30000; // 30 秒快取
 
 /**
- * [Phase 7] Official OpenSky Track Integration & Fusion
- * Fetch tracks from official API and merge with local database points.
+ * Fetch track for an aircraft using only locally stored TrackPoint data.
+ * Points are keyed by FlightSession.sessionId to ensure current-flight isolation.
  */
 async function fetchTracksInternal(icao24) {
     if (mongoose.connection.readyState !== 1) {
@@ -2643,79 +2772,34 @@ async function fetchTracksInternal(icao24) {
             localPoints = await TrackPoint.find({ sessionId: session.sessionId }).sort({ timestamp: 1 }).lean();
         }
 
-        // [v10.5 Redesign] Robustness: If no session or sparse data, search by icao24 directly (last 12h)
+        // [v10.6] Sparse-session fallback — bounded by session.startTime to prevent
+        // cross-flight contamination (previous landed flight trail showing on current flight).
+        // If no session exists, use a 2-hour window as a reasonable upper bound.
         if (localPoints.length < 5) {
-            const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
-            const fallbackPoints = await TrackPoint.find({ 
-                icao24: icao, 
-                timestamp: { $gt: twelveHoursAgo } 
+            // Use session start as the hard lower-bound so we never pull in a previous flight's points.
+            const flightStartBound = session
+                ? session.startTime
+                : new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+            const fallbackPoints = await TrackPoint.find({
+                icao24: icao,
+                timestamp: { $gte: flightStartBound }
             }).sort({ timestamp: 1 }).limit(15000).lean();
-            
+
             if (fallbackPoints.length > localPoints.length) {
-                console.log(`📡 [TRACK FALLBACK] Found ${fallbackPoints.length} points for ${icao24} outside of session tracking.`);
+                console.log(`📡 [TRACK FALLBACK] ${icao24}: ${fallbackPoints.length} pts since session start (${flightStartBound.toISOString()})`);
                 localPoints = fallbackPoints;
             }
         }
         
-        // 3. Trigger Official OpenSky Fetch if local data is still sparse
-        // Or if the session just started and the starting point is far from the current position.
-        let mergedPath = localPoints.map(pt => [
+        // Build path from local TrackPoints only — continuous 30s polling provides
+        // sufficient density; no external API call needed.
+        const path = localPoints.map(pt => [
             Math.floor(pt.timestamp.getTime() / 1000),
             pt.lat, pt.lng, pt.altitude || 0, pt.heading || 0, pt.velocity || 0, pt.onGround ? 1 : 0
         ]);
 
-        if (localPoints.length < 60) {
-            console.log(`📡 [TRACK FUSION] Fetching official OpenSky track for ${icao24}...`);
-            try {
-                const headers = await getAuthHeaders();
-                const osRes = await fetch(`https://opensky-network.org/api/tracks/all?icao24=${icao}&time=0`, {
-                    headers,
-                    signal: AbortSignal.timeout(8000)
-                });
-
-                if (osRes.ok) {
-                    const osTrack = await osRes.json();
-                    if (osTrack.path && osTrack.path.length > 0) {
-                        // OpenSky path format: [time, lat, lng, altitude, heading, onground]
-                        // We need to merge these with our local points, favoring local for the overlapping most-recent parts
-                        const osPathFormatted = osTrack.path.map(p => [
-                            p[0], p[1], p[2], p[3] || 0, p[4] || 0, 0, p[5] ? 1 : 0
-                        ]);
-
-                        // Simple Time-based Merge (Favor Local for recent)
-                        const localStart = mergedPath.length > 0 ? mergedPath[0][0] : Infinity;
-                        const historicalPart = osPathFormatted.filter(p => p[0] < localStart);
-                        
-                        console.log(`✅ [TRACK FUSION] Merged ${historicalPart.length} historical points with ${mergedPath.length} local points.`);
-                        mergedPath = [...historicalPart, ...mergedPath];
-
-                        // Trigger Background Save for merged historical points (so we don't fetch from OS again)
-                        // This prevents rate limiting by populating our DB with the full track once.
-                        if (historicalPart.length > 0) {
-                            (async () => {
-                                const newDocs = historicalPart.map(p => ({
-                                    sessionId: session.sessionId,
-                                    icao24: icao,
-                                    timestamp: new Date(p[0] * 1000),
-                                    lat: p[1],
-                                    lng: p[2],
-                                    altitude: p[3],
-                                    heading: p[4],
-                                    velocity: p[5],
-                                    onGround: p[6] === 1
-                                }));
-                                // Insert unique points only (ignore errors for duplicates)
-                                try {
-                                    await TrackPoint.insertMany(newDocs, { ordered: false });
-                                } catch (e) { /* ignore duplicate errors */ }
-                            })();
-                        }
-                    }
-                }
-            } catch (e) { console.warn(`⚠️ [TRACK FUSION] Official fetch failed for ${icao24}: ${e.message}`); }
-        }
-
-        const result = { icao24, path: mergedPath };
+        const result = { icao24, path };
         trackCache.set(icao24, { data: result, timestamp: Date.now() });
         return result;
 
@@ -2920,29 +3004,39 @@ app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
         ]);
         
         const AIRCRAFT_TTL = 30 * 24 * 60 * 60 * 1000; // 30 Days
-        const ROUTE_TTL = 24 * 60 * 60 * 1000;       // 24 Hours
-        
+        const ROUTE_TTL = 4 * 60 * 60 * 1000;         // 4 Hours — cargo/charter airlines swap legs frequently
+
         const isAircraftFresh = dbAircraft && (Date.now() - new Date(dbAircraft.lastUpdated).getTime() < AIRCRAFT_TTL);
         const isRouteFresh = dbRoute && (Date.now() - new Date(dbRoute.lastUpdated).getTime() < ROUTE_TTL);
-        
-        // --- Step 2: [ABSOLUTE PRIMARY SOURCE] Mandatory OpenSky Status ---
-        // We always fetch live state to ensure the plane is active, even if metadata is cached.
-        console.log(`📡 [FUSION] Fetching Mandatory State for ${hex}...`);
-        const osRes = await fetchOpenSky({ icao24: hex }).catch(e => {
-            console.error(`❌ [PRIMARY FAIL] OpenSky Unresponsive: ${e.message}`);
-            return null;
-        });
 
-        if (!osRes || !osRes.states || osRes.states.length === 0) {
-            return res.status(500).json({ 
-                error: 'PRIMARY_SOURCE_UNAVAILABLE', 
-                message: 'OpenSky Network (Primary Source) failed to provide live status. Request aborted to ensure data integrity.' 
-            });
+        // --- Step 2: Live state from in-memory cache (no extra API call) ---
+        // globalPlanesCache is refreshed every 10s. Avoids burning OpenSky quota
+        // for individual per-aircraft queries on every sidebar click.
+        const liveState = (globalPlanesCache.states || []).find(p => p.icao24 === hex) || null;
+
+        if (!liveState) {
+            // Aircraft not in live cache (landed / left coverage) — return static DB data if available
+            if (dbAircraft) {
+                return res.json({
+                    hex, callsign,
+                    aircraft: { registration: dbAircraft.registration, model: dbAircraft.model, typecode: dbAircraft.typecode, operator: dbAircraft.operator },
+                    route: { origin: { iata: dbRoute?.origin_iata || 'N/A' }, destination: { iata: dbRoute?.destination_iata || '---' } },
+                    status: null,
+                    source: 'db_static_only'
+                });
+            }
+            return res.status(404).json({ error: 'AIRCRAFT_NOT_IN_CACHE' });
         }
-        const liveState = osRes.states[0];
 
-        // If both Aircraft and Route are fresh in DB, we skip enrichment but STILL use the latest OpenSky state
-        if (isAircraftFresh && isRouteFresh) {
+        // Route cache is only valid when the plane is on the ground — an airborne aircraft
+        // may be on a different leg than the one previously cached for this callsign.
+        const isOnGround = liveState.onGround === true;
+        const isRouteTrusted = isRouteFresh && isOnGround;
+
+        // Local DB has full data — skip all external enrichment API calls
+        const hasLocalAircraftData = isAircraftFresh && dbAircraft?.registration && dbAircraft.registration !== 'N/A'
+            && (dbAircraft.typecode || dbAircraft.type_code);
+        if (hasLocalAircraftData && isRouteTrusted) {
             console.log(`🎯 [DB HIT] Serving cached knowledge for ${hex}/${callsign}`);
             const fused = await finalizeProfile(dbAircraft, dbRoute, liveState);
             flightDetailsCache.set(cacheKey, fused);
@@ -2950,29 +3044,49 @@ app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
         }
 
         console.log(`⚡ [ENRICHMENT] DB Stale or Missing. Fusing external sources...`);
-        // --- Step 3: [RESILIENT ENRICHMENT] Multi-Source Parallel Fetch ---
+        // --- Step 3: [RESILIENT ENRICHMENT] ---
+        // Skip hexdb + planespotters if local DB already has registration & typecode
+        // (populated by Mictronics sync or Airplanes.Live write-back). Only fetch what's missing.
+        const needsAircraftMeta = !hasLocalAircraftData;
         const enrichment = await Promise.allSettled([
-            // a. HexDB (Static Specs)
-            fetch(`https://hexdb.io/api/v1/aircraft/${hex}`, { signal: AbortSignal.timeout(3000) }).then(r => r.ok ? r.json() : null).catch(() => null),
-            // b. Planespotters (Visuals)
-            fetch(`https://api.planespotters.net/pub/photos/hex/${hex}`, { headers: { 'User-Agent': 'AEROSTRAT/5.0' }, signal: AbortSignal.timeout(4000) }).then(r => r.ok ? r.json() : null).catch(() => null),
-            // c. Route API (Flights/Schedules)
-            fetchRouteData(callsign)
+            // a. HexDB — only if local DB doesn't already have the aircraft specs
+            needsAircraftMeta
+                ? fetch(`https://hexdb.io/api/v1/aircraft/${hex}`, { signal: AbortSignal.timeout(3000) }).then(r => r.ok ? r.json() : null).catch(() => null)
+                : Promise.resolve(null),
+            // b. Planespotters — only if we don't already have a photo cached
+            (!dbAircraft?.photo_url && !dbAircraft?.photoData?.url)
+                ? fetch(`https://api.planespotters.net/pub/photos/hex/${hex}`, { headers: { 'User-Agent': 'AEROSTRAT/5.0' }, signal: AbortSignal.timeout(4000) }).then(r => r.ok ? r.json() : null).catch(() => null)
+                : Promise.resolve(null),
+            // c. Route — only if airborne (grounded aircraft route doesn't matter) and not recently cached
+            (!isOnGround && !isRouteFresh)
+                ? fetchRouteData(callsign)
+                : Promise.resolve(null),
+            // d. adsb.fi — skip if local DB already has full data
+            needsAircraftMeta
+                ? fetch(`https://opendata.adsb.fi/api/v2/hex/${hex}`, { headers: { 'User-Agent': 'AEROSTRAT/5.0' }, signal: AbortSignal.timeout(4000) })
+                    .then(r => r.ok ? r.json() : null)
+                    .then(d => (d?.aircraft?.[0] || null))
+                    .catch(() => null)
+                : Promise.resolve(null)
         ]);
- 
-        const [hexRes, photoRes, routeRes] = enrichment.map(r => r.status === 'fulfilled' ? r.value : null);
-        
+
+        const [hexRes, photoRes, routeRes, adsbfiRes] = enrichment.map(r => r.status === 'fulfilled' ? r.value : null);
+        if (adsbfiRes) console.log(`✈️ [ADSB.FI] ${hex}: r=${adsbfiRes.r} t=${adsbfiRes.t} op=${adsbfiRes.ownOp}`);
+
         // --- Step 4: [PERSISTENCE] Smart Normalization & Upsert ---
-        // Aircraft Metadata (Manual mapping to standardized fields)
+        // Priority: adsb.fi (live enriched) > hexdb.io (static) > local DB
         const aircraftUpdate = {
             hex,
             icao24: hex,
-            type: hexRes?.typeName || hexRes?.type || dbAircraft?.type || dbAircraft?.model || 'Unknown',
-            model: hexRes?.typeName || hexRes?.type || dbAircraft?.model || 'Unknown',
+            type: adsbfiRes?.t || hexRes?.typeName || hexRes?.type || dbAircraft?.type || dbAircraft?.model || 'Unknown',
+            model: adsbfiRes?.desc || hexRes?.typeName || hexRes?.type || dbAircraft?.model || 'Unknown',
+            type_code: adsbfiRes?.t || hexRes?.type || dbAircraft?.type_code || null,
+            typecode: adsbfiRes?.t || hexRes?.type || dbAircraft?.typecode || null,
             manufacturer: hexRes?.icaotype || dbAircraft?.manufacturer || 'Unknown',
-            registration: hexRes?.registration || dbAircraft?.registration || 'N/A',
-            airline: hexRes?.operator || dbAircraft?.airline || dbAircraft?.registered_owner || 'Unknown Airline',
-            registered_owner: hexRes?.operator || dbAircraft?.registered_owner || 'Unknown Airline',
+            registration: adsbfiRes?.r || hexRes?.registration || dbAircraft?.registration || 'N/A',
+            airline: adsbfiRes?.ownOp || hexRes?.operator || dbAircraft?.airline || dbAircraft?.registered_owner || 'Unknown Airline',
+            operator: adsbfiRes?.ownOp || hexRes?.operator || dbAircraft?.operator || 'Unknown Airline',
+            registered_owner: adsbfiRes?.ownOp || hexRes?.operator || dbAircraft?.registered_owner || 'Unknown Airline',
             photo_url: photoRes?.photos?.[0]?.thumbnail_large?.src || dbAircraft?.photo_url || dbAircraft?.photoData?.url || null,
             lastUpdated: new Date()
         };

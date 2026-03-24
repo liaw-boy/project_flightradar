@@ -72,27 +72,35 @@ function downloadFile(url, dest) {
 }
 
 // ── Parse a single aircraft_db JSON entry ────────────────────────────────────
-// Mictronics format: { "r": "N1234", "t": "B738", "f": "A0", "d": "United Airlines" }
+// Mictronics aircraft_db value format:
+//   { "r": "N1234", "t": "B738", "f": "A0", "d": "United Airlines", "desc": "Boeing 737-800" }
+//   `d`    = airline / operator name
+//   `desc` = human-readable aircraft model name (e.g. "Eurocopter EC145 C-2") — may be absent
+//
+// Mictronics aircraft_types format: { "B738": { "desc": "L2J", "wtc": "M" } }
+//   aircraft_types `desc` = ICAO type classification code ("L2J" = Land,2engines,Jet) — NOT a model name
+//   Only `wtc` is used from aircraft_types.
 function parseDbEntry(hex, entry, typesMap) {
-    const typecode   = (entry.t || '').trim().toUpperCase() || null;
-    const typeInfo   = typecode && typesMap[typecode] ? typesMap[typecode] : null;
-    const wtc        = typeInfo ? typeInfo.wtc : null;
-    const iconType   = wtcToIconType(wtc, typecode);
+    const typecode = (entry.t || '').trim().toUpperCase() || null;
+    const typeInfo = typecode && typesMap[typecode] ? typesMap[typecode] : null;
+    const wtc      = typeInfo ? typeInfo.wtc : null;
+    const iconType = wtcToIconType(wtc, typecode);
+    const operator = (entry.d || '').trim() || null;
+    // `desc` in the aircraft_db entry is the human-readable model name
+    const modelDesc = (entry.desc || '').trim() || null;
 
     return {
-        hex: hex.toLowerCase(),
-        icao24: hex.toLowerCase(),
+        hex:          hex.toLowerCase(),
+        icao24:       hex.toLowerCase(),
         registration: (entry.r || '').trim() || null,
-        type_code: typecode,
-        typecode: typecode,
-        operator: (entry.d || '').trim() || null,
-        airline: (entry.d || '').trim() || null,
-        // model description from aircraft_types (e.g. "Boeing 737-800")
-        model: typeInfo ? typeInfo.desc : null,
-        manufacturerName: typeInfo ? typeInfo.desc.split(' ')[0] : null,
-        icon_type: iconType,
-        source: MICTRONICS_SOURCE_TAG,
-        lastUpdated: new Date()
+        type_code:    typecode,
+        typecode:     typecode,
+        operator:     operator,
+        airline:      operator,
+        model:        modelDesc,
+        icon_type:    iconType,
+        source:       MICTRONICS_SOURCE_TAG,
+        lastUpdated:  new Date()
     };
 }
 
@@ -122,50 +130,75 @@ async function importAircraftDb(zipPath, typesMap, logger) {
             continue;
         }
 
+        // Mictronics dump1090-fa format: shard file "a0.json" contains keys that are
+        // the last 4 hex chars. Prepend the 2-char filename prefix to build full ICAO24.
+        // Some shards may use full 6-char keys directly — handle both.
+        const shardPrefix = entry.name.replace(/\.json$/i, '').toLowerCase(); // e.g. "a0"
+
         const hexKeys = Object.keys(shard);
         let bulkOps = [];
 
-        for (const hex of hexKeys) {
-            const parsed = parseDbEntry(hex, shard[hex], typesMap);
+        for (const rawKey of hexKeys) {
+            const key = rawKey.toLowerCase();
+            // Build full 6-char ICAO24 hex.
+            // Rule: shardPrefix + key must equal exactly 6 valid hex chars.
+            // Prefix length varies: 1-char ("a"), 2-char ("a0"), or 3-char ("406").
+            let hex;
+            const expectedKeyLen = 6 - shardPrefix.length;
+            if (key.length === expectedKeyLen && /^[0-9a-f]+$/.test(key)) {
+                hex = shardPrefix + key;      // normal case: concatenate prefix + suffix
+            } else if (key.length === 6 && /^[0-9a-f]{6}$/.test(key)) {
+                hex = key;                    // shard already stores full 6-char hex
+            } else {
+                continue;                     // skip malformed entries
+            }
+
+            const parsed = parseDbEntry(hex, shard[rawKey], typesMap);
 
             // Only set fields that are non-null to avoid overwriting richer data
-            const setFields = {};
-            if (parsed.registration)  setFields.registration  = parsed.registration;
-            if (parsed.type_code)     setFields.type_code     = parsed.type_code;
-            if (parsed.type_code)     setFields.typecode      = parsed.type_code;
-            if (parsed.operator)      setFields.operator      = parsed.operator;
-            if (parsed.operator)      setFields.airline       = parsed.operator;
-            if (parsed.model)         setFields.model         = parsed.model;
-            if (parsed.manufacturerName) setFields.manufacturerName = parsed.manufacturerName;
-            setFields.icon_type    = parsed.icon_type;
-            setFields.source       = MICTRONICS_SOURCE_TAG;
-            setFields.lastUpdated  = parsed.lastUpdated;
+            const setFields = {
+                // icao24 must be in $set (not just $setOnInsert) so the required constraint
+                // is satisfied on new inserts without triggering duplicate-key on updates.
+                // Both hex and icao24 hold the same lowercase ICAO24 value.
+                icao24: parsed.hex,
+                hex:    parsed.hex,
+                icon_type:   parsed.icon_type,
+                source:      MICTRONICS_SOURCE_TAG,
+                lastUpdated: parsed.lastUpdated,
+            };
+            if (parsed.registration) setFields.registration = parsed.registration;
+            if (parsed.type_code)    setFields.type_code    = parsed.type_code;
+            if (parsed.type_code)    setFields.typecode     = parsed.type_code;
+            if (parsed.operator)     setFields.operator     = parsed.operator;
+            if (parsed.operator)     setFields.airline      = parsed.operator;
+            if (parsed.model)        setFields.model        = parsed.model;
 
             bulkOps.push({
                 updateOne: {
-                    filter: { hex: parsed.hex },
-                    update: { $set: setFields, $setOnInsert: { icao24: parsed.hex } },
+                    // Match by hex OR icao24 to handle both index formats in existing docs
+                    filter: { $or: [{ hex: parsed.hex }, { icao24: parsed.hex }] },
+                    update: { $set: setFields },
                     upsert: true
                 }
             });
 
             if (bulkOps.length >= BATCH_SIZE) {
                 const result = await Aircraft.bulkWrite(bulkOps, { ordered: false });
-                totalUpdated   += result.upsertedCount + result.modifiedCount;
+                totalUpdated   += (result.upsertedCount || 0) + (result.modifiedCount || 0);
                 totalProcessed += bulkOps.length;
-                logger(`[Mictronics] Progress: ${totalProcessed.toLocaleString()} records processed...`);
+                logger(`[Mictronics] Progress: ${totalProcessed.toLocaleString()} queued | ${totalUpdated.toLocaleString()} written`);
                 bulkOps = [];
             }
         }
 
         if (bulkOps.length > 0) {
             const result = await Aircraft.bulkWrite(bulkOps, { ordered: false });
-            totalUpdated   += result.upsertedCount + result.modifiedCount;
+            totalUpdated   += (result.upsertedCount || 0) + (result.modifiedCount || 0);
             totalProcessed += bulkOps.length;
         }
     }
 
-    logger(`[Mictronics] Aircraft DB import complete: ${totalProcessed.toLocaleString()} processed, ${totalUpdated.toLocaleString()} upserted/updated`);
+    logger(`[Mictronics] Aircraft DB import complete: ${totalProcessed.toLocaleString()} queued, ${totalUpdated.toLocaleString()} written to DB`);
     return totalProcessed;
 }
 

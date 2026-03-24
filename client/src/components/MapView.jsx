@@ -972,8 +972,12 @@ export default function MapView({
                                 const isAntimeridian = Math.abs(pt.x - prevPt.x) > canvas.width / 2;
                                 const isLiveStitch = (pi === renderPath.length - 1) && livePlane?.renderLat;
                                 const distThreshold = isLiveStitch ? 300 : 50;
+                                // Time-gap guard: if consecutive points are > 30 min apart,
+                                // treat as a different flight leg and break the line.
+                                const timeDeltaMin = seg[0] && prevSeg[0] ? (seg[0] - prevSeg[0]) / 60 : 0;
+                                const isFlightGap = timeDeltaMin > 30;
 
-                                if (dist < distThreshold && !isAntimeridian) {
+                                if (dist < distThreshold && !isAntimeridian && !isFlightGap) {
                                     // [v11.0] Redesign: Permanent Visibility (Zero-Truncation Plan)
                                     // Removed time-based fading. Trajectories stay at 100% opacity throughout the session.
                                     const currentOpacity = isOutline ? 0.8 : 1.0;
