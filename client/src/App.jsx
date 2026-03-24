@@ -10,9 +10,10 @@ import TimePlayer from './components/TimePlayer';
 import PerformanceMonitor from './components/PerformanceMonitor';
 import { useFlightData } from './hooks/useFlightData';
 import { useI18n } from './hooks/useI18n';
-import { logToServer } from './utils/logger';
+import { logToServer, logger } from './utils/logger';
 import { dataManager } from './services/dataManager';
 import { initAircraftShapes } from './utils/aircraftIcons';
+import { trackStore } from './store/FlightDataStore';
 import './App.css';
 
 // URL Parsing Utility
@@ -176,7 +177,7 @@ export default function App() {
 
         if (moveTimeoutRef.current) clearTimeout(moveTimeoutRef.current);
         moveTimeoutRef.current = setTimeout(() => {
-            console.log('Map movement settled - pulling new BBox planes');
+            logger.debug('UI', 'Map movement settled — pulling new BBox planes');
             fetchPlanes();
         }, 1500); // 1.5 秒內沒有新移動才抓取
     }, [fetchPlanes]);
@@ -185,12 +186,17 @@ export default function App() {
     const handleSelectPlane = useCallback(
         async (icao24, plane) => {
             logToServer(`Selected plane: ${plane.callsign || 'N/A'} (ICAO: ${icao24})`, 'info', { callsign: plane.callsign, icao24 });
+            if (selectedIcao24 !== icao24) {
+                setTrackPoints([]); 
+                setSelectedMetadata(null);
+                setSelectedRoute(null);
+                setPlaybackTime(null);
+            }
             setSelectedIcao24(icao24);
-            setTrackPoints([]); 
-            setSelectedMetadata(null);
-            setSelectedRoute(null);
-            setPlaybackTime(null);
             setTrackMode(true);
+            
+            // [v11.0] Activate High-Res Zero-Truncation Buffer
+            trackStore.setSelected(icao24);
 
             // Fetch track immediately (blocks slightly but necessary for visual sync)
             try {
@@ -215,7 +221,7 @@ export default function App() {
                     else setSelectedMetadata({ noData: true });
                 })
                 .catch(e => {
-                    console.warn(`[App] Metadata timeout/error for ${icao24}:`, e.message);
+                    logger.warn('UI', `Metadata fetch failed for ${icao24}: ${e.message}`);
                     setSelectedMetadata({ noData: true });
                 });
 
@@ -225,7 +231,7 @@ export default function App() {
                     else setSelectedRoute({ noData: true });
                 })
                 .catch(e => {
-                    console.warn(`[App] Route timeout/error for ${plane.callsign}:`, e.message);
+                    logger.warn('UI', `Route fetch failed for ${plane.callsign}: ${e.message}`);
                     setSelectedRoute({ noData: true });
                 });
 
@@ -245,6 +251,9 @@ export default function App() {
         setSelectedRoute(null);
         setTrackMode(false); // 取消追蹤模式
         setPlaybackTime(null); // [v3.1] clear playback on deselect
+        
+        // [v11.0] Deactivate High-Res Buffer
+        trackStore.setSelected(null);
 
         // Remove ICAO from URL
         const url = new URL(window.location);
@@ -269,14 +278,41 @@ export default function App() {
     // 當前選中的飛機資料
     const selectedPlane = selectedIcao24 ? planesDict[selectedIcao24] : null;
 
-    // Check URL for ICAO auto-select once planesDict is populated
-    // [v4.1.0] Auto-Deselection Guard: 如果選中的飛機消失在數據流中，自動取消選取
+    // [Fix] Periodic track refresh — keeps the historical trail growing as the plane flies.
+    // Uses a ref for planesDict to avoid stale closures inside the interval callback.
+    const planesDictRef = useRef(planesDict);
+    useEffect(() => { planesDictRef.current = planesDict; }, [planesDict]);
+
     useEffect(() => {
-        if (selectedIcao24 && !planesDict[selectedIcao24]) {
-            console.log(`🧹 [AUTO-DESELECT] Plane ${selectedIcao24} vanished. Clearing state.`);
+        if (!selectedIcao24) return;
+        const timer = setInterval(async () => {
+            const plane = planesDictRef.current[selectedIcao24];
+            if (!plane) return;
+            try {
+                const newPoints = await fetchTrack(selectedIcao24, plane.lastContact, true); // bypass LRU
+                if (!newPoints || newPoints.length === 0) return;
+                setTrackPoints(prev => {
+                    if (!prev || prev.length === 0) return newPoints;
+                    // Immutable merge: keep all existing points, append only truly new ones
+                    const latestTime = prev[prev.length - 1][0];
+                    const fresh = newPoints.filter(p => p[0] > latestTime);
+                    return fresh.length > 0 ? [...prev, ...fresh] : prev;
+                });
+            } catch (_) {}
+        }, 30000); // every 30 s — matches backend TrackPoint ingest cycle
+        return () => clearInterval(timer);
+    }, [selectedIcao24, fetchTrack]);
+
+    // [v4.1.0] Auto-Deselection Guard: 如果選中的飛機消失在數據流中，自動取消選取
+    // [Fix] When trackMode is active the selected plane may legitimately move outside
+    // the current BBox (e.g., mid-pan) — do NOT clear the track in that case.
+    // We only auto-deselect when the user has NOT pinned the plane (trackMode=false).
+    useEffect(() => {
+        if (selectedIcao24 && !planesDict[selectedIcao24] && !trackMode) {
+            logger.info('UI', `Auto-deselect: ${selectedIcao24} left BBox (trackMode off)`);
             handleDeselectPlane();
         }
-    }, [planesDict, selectedIcao24, handleDeselectPlane]);
+    }, [planesDict, selectedIcao24, trackMode, handleDeselectPlane]);
 
     return (
         <div className="app">

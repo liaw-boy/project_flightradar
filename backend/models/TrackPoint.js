@@ -17,8 +17,8 @@ const trackPointSchema = new mongoose.Schema({
     },
     timestamp: {
         type: Date,
-        required: true,
-        index: true
+        required: true
+        // No index: true here — timeField is auto-indexed by MongoDB time-series engine
     },
     lat: {
         type: Number,
@@ -65,8 +65,8 @@ const trackPointSchema = new mongoose.Schema({
     }
 });
 
-// TTL index: auto-expire old track points to prevent disk exhaustion.
-// 48 hours = 172800s. At ~5000 planes × 2 points/min × 2 days ≈ 28M docs (~3GB).
-trackPointSchema.index({ timestamp: 1 }, { expireAfterSeconds: 172800 });
+// TTL for time-series collections is controlled by expireAfterSeconds in the timeseries
+// options above (set at collection creation), NOT via schema.index(). Do not add a TTL
+// index here — it will cause duplicate index warnings and MongoDB will reject it.
 
 module.exports = mongoose.model('TrackPoint', trackPointSchema);

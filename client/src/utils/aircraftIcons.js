@@ -268,7 +268,8 @@ export function initAircraftIcons() {
         normal: createCachedImage(DEFAULT_ENTRY, '#ffce00'),
         selected: createCachedImage(DEFAULT_ENTRY, '#00ffff')
     };
-    console.log(`[AircraftIcons V13] ${count} per-type silhouettes cached.`);
+    // eslint-disable-next-line no-console
+    console.log(`%c[INIT] AircraftIcons V13: ${count} silhouettes cached`, 'color:#4CAF50;font-weight:bold');
 }
 
 /**
@@ -291,23 +292,54 @@ function detectCategory(type) {
  */
 function getBestLocalMatch(type) {
     if (!type) return null;
-    
+
     // 1. Exact Match
     if (AIRCRAFT_CATALOG[type]) return type;
 
-    // 2. Family Prefix Match (e.g. AT76 -> AT75, A20N -> A320)
-    // Strip trailing digits/letters and find a neighbor
+    // 2. Family Prefix Match (3-char)
     const prefix = type.slice(0, 3);
     if (prefix === 'AT7') return 'AT75';
     if (prefix === 'AT4') return 'AT45';
     if (prefix === 'A20') return 'A320';
     if (prefix === 'A21') return 'A321';
+    if (prefix === 'A19') return 'A320'; // A19N neo
     if (prefix === 'B38' || prefix === 'B37') return 'B738';
     if (prefix === 'B39') return 'B739';
+    if (prefix === 'B35') return 'B350'; // B350 turboprop
+    if (prefix === 'CRJ') return 'CRJ9'; // CRJ family default
+    if (prefix === 'E17') return 'E170';
+    if (prefix === 'E19') return 'E190';
+    if (prefix === 'DH8') return 'DH8D'; // DHC-8 → latest variant
+    if (prefix === 'C17' || prefix === 'C18' || prefix === 'C15') return 'C172';
+    if (prefix === 'PA4') return 'PA46';
+    if (prefix === 'PA2' || prefix === 'PA3') return 'C172';
+    if (prefix === 'TBM') return 'PC12';  // TBM family → PC-12
+    if (prefix === 'GL5' || prefix === 'GL6' || prefix === 'GL7') return 'GL5T';
+    if (prefix === 'GLF') return 'GL5T';  // Gulfstream G-series
+    if (prefix === 'G65') return 'G650';
+    if (prefix === 'FA2') return 'FA7X';  // Falcon 2000
+    if (prefix === 'FA5') return 'FA7X';  // Falcon 50
+    if (prefix === 'CL6') return 'CRJ7';  // Challenger/Canadair 600
+    if (prefix === 'CL3') return 'CRJ2';  // Canadair CRJ-100/200
+    if (prefix === 'C25') return 'C25B';  // Citation CJ family
+    if (prefix === 'C50') return 'C25B';  // Citation I/II
+    if (prefix === 'EC3') return 'EC35';  // Eurocopter EC-3xx
+    if (prefix === 'EC1') return 'EC35';  // Eurocopter EC-1xx
 
+    // 3. 2-char prefix fallbacks
     const shortPrefix = type.slice(0, 2);
-    if (shortPrefix === 'A3') return 'A320'; // Default Airbus Narrow
-    if (shortPrefix === 'B7') return 'B738'; // Default Boeing Narrow
+    if (shortPrefix === 'A3') return 'A320'; // Airbus Narrow
+    if (shortPrefix === 'A2') return 'A320'; // Airbus (A220 family)
+    if (shortPrefix === 'B7') return 'B738'; // Boeing Narrow
+    if (shortPrefix === 'B6') return 'B738'; // B737-600
+    if (shortPrefix === 'SR') return 'C172'; // Cirrus SR-series
+    if (shortPrefix === 'DA') return 'C172'; // Diamond aircraft
+    if (shortPrefix === 'TB') return 'C172'; // SOCATA
+    if (shortPrefix === 'AS') return 'EC35'; // Aérospatiale helicopter
+    if (shortPrefix === 'EC') return 'EC35'; // Eurocopter
+    if (shortPrefix === 'AW') return 'EC35'; // AgustaWestland
+    if (shortPrefix === 'SA') return 'EC35'; // Sikorsky-Airbus
+    if (shortPrefix === 'R4' || shortPrefix === 'R2') return 'R44'; // Robinson
 
     return null;
 }
@@ -368,7 +400,8 @@ export function getAircraftImage(typecode, category, isSelected = false) {
  * Legacy compatibility shim.
  */
 export function initAircraftShapes() {
-    console.log("[AircraftIcons] Legacy shapes init skipped (V13 engine active).");
+    // eslint-disable-next-line no-console
+    console.log('%c[INIT] AircraftIcons: legacy initAircraftShapes() skipped (V13 active)', 'color:#607D8B');
 }
 
 // Pre-warm on load
@@ -420,18 +453,22 @@ export function getAircraftScale(plane) {
  * `typeScale` is the wingspan-proportional factor (B738 = 1.0, A380 ≈ 1.35).
  */
 export function getDrawSize(_plane, zoom, typeScale = 1.0) {
+    // adsb.fi / tar1090 calibrated size curve:
+    // zoom ≤ 5  → tactical dots (small, no silhouette detail needed)
+    // zoom 6–9  → small silhouettes (wings visible, compact)
+    // zoom 10+  → full silhouettes with wingspan proportionality
     let base;
-    if      (zoom <= 4)  base = 4;   // tactical dot — render loop uses arc()
-    else if (zoom <= 5)  base = 8;
-    else if (zoom <= 6)  base = 14;
-    else if (zoom <= 7)  base = 20;
-    else if (zoom <= 8)  base = 26;
-    else if (zoom <= 9)  base = 30;
-    else if (zoom <= 10) base = 34;
-    else if (zoom <= 11) base = 38;
-    else if (zoom <= 12) base = 42;
-    else if (zoom <= 13) base = 48;
-    else                 base = Math.min(60, 48 + (zoom - 13) * 5);
+    if      (zoom <= 4)  base = 4;   // Tactical dot
+    else if (zoom <= 5)  base = 5;   // Micro dot (borderline)
+    else if (zoom <= 6)  base = 10;  // First silhouette tier
+    else if (zoom <= 7)  base = 14;
+    else if (zoom <= 8)  base = 18;
+    else if (zoom <= 9)  base = 23;
+    else if (zoom <= 10) base = 28;
+    else if (zoom <= 11) base = 34;
+    else if (zoom <= 12) base = 40;
+    else if (zoom <= 13) base = 46;
+    else                 base = Math.min(60, 46 + (zoom - 13) * 6);
     return Math.round(base * typeScale);
 }
 
@@ -445,18 +482,29 @@ export function getDrawSize(_plane, zoom, typeScale = 1.0) {
 //   1. prewarmExactSvg(typecode)  ← call when typecode first becomes known
 //   2. getDynamicImage(tc, sel)   ← sync getter inside animate loop
 //
-const _ghCache   = new Map(); // tc → { normal: Image, selected: Image } | null
+const exactImageCache = new Map(); // tc → { normal: Image, selected: Image } | null
 const _ghPending = new Map(); // tc → Promise (dedup in-flight requests)
-const _GH_BASE   = 'https://raw.githubusercontent.com/RexKramer1/AircraftShapesSVG/main/svg/';
+// Use local backend to serve SVGs — avoids GitHub CDN 404s and rate limits
+const _GH_BASE   = '/api/svg/';
 
-function _buildGhImage(svgText, color) {
+function _buildGhImage(svgText, color, isSelected = false) {
     // Strip any existing fill/stroke attributes (except fill="none" for outlines)
     // then inject a CSS rule that forces all fill to our desired color.
+    // adsb.fi style: white outline with drop-shadow for visibility on dark maps.
     const stripped = svgText
-        .replace(/\s(?:fill|stroke)="(?!none)[^"]*"/gi, '');
+        .replace(/\s(?:fill|stroke|stroke-width|paint-order)="(?!none)[^"]*"/gi, '');
+    const strokeColor = isSelected ? '#00ffff' : 'rgba(255,255,255,0.92)';
     const styled = stripped.replace(
         '</svg>',
-        `<style>path,polygon,circle,rect,polyline,ellipse{fill:${color} !important;stroke:#111;stroke-width:0.4}</style></svg>`
+        `<style>
+            path,polygon,circle,rect,polyline,ellipse{
+                fill:${color} !important;
+                stroke:${strokeColor};
+                stroke-width:1.4;
+                stroke-linejoin:round;
+                paint-order:stroke fill;
+            }
+        </style></svg>`
     );
     const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(styled)}`;
     const img = new Image();
@@ -472,7 +520,7 @@ function _buildGhImage(svgText, color) {
 export function prewarmExactSvg(typecode) {
     if (!typecode) return;
     const tc = typecode.toUpperCase();
-    if (_ghCache.has(tc) || _ghPending.has(tc)) return;
+    if (exactImageCache.has(tc) || _ghPending.has(tc)) return;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
@@ -480,22 +528,20 @@ export function prewarmExactSvg(typecode) {
     const p = fetch(`${_GH_BASE}${tc}.svg`, { signal: controller.signal })
         .then(r => {
             clearTimeout(timeout);
-            // GitHub returns 200 with HTML "404" page or XML error for missing files
-            const ct = r.headers.get('content-type') || '';
-            if (!r.ok || (!ct.includes('svg') && !ct.includes('octet'))) return null;
+            if (!r.ok) return null;
             return r.text();
         })
         .then(text => {
             if (!text || text.length < 80 || /<Error|<!DOCTYPE/i.test(text)) {
-                _ghCache.set(tc, null); // mark as unavailable — no retry
+                exactImageCache.set(tc, null); // mark as unavailable — no retry
                 return;
             }
-            _ghCache.set(tc, {
-                normal:   _buildGhImage(text, '#ffce00'),
-                selected: _buildGhImage(text, '#00ffff'),
+            exactImageCache.set(tc, {
+                normal:   _buildGhImage(text, '#ffce00', false),
+                selected: _buildGhImage(text, '#00ffff', true),
             });
         })
-        .catch(() => { clearTimeout(timeout); _ghCache.set(tc, null); })
+        .catch(() => { clearTimeout(timeout); exactImageCache.set(tc, null); })
         .finally(() => _ghPending.delete(tc));
 
     _ghPending.set(tc, p);
@@ -508,9 +554,19 @@ export function prewarmExactSvg(typecode) {
  */
 export function getDynamicImage(typecode, isSelected = false) {
     if (!typecode) return null;
-    const entry = _ghCache.get(typecode.toUpperCase());
+    const entry = exactImageCache.get(typecode.toUpperCase());
     if (!entry) return null;
     return isSelected ? entry.selected : entry.normal;
+}
+
+/**
+ * Returns true if the SVG was fetched but does NOT exist in the RexKramer1 repo.
+ * Distinguishes "not tried yet / still loading" (undefined) from "tried and missing" (null).
+ */
+export function isSvgUnavailable(typecode) {
+    if (!typecode) return true;
+    const tc = typecode.toUpperCase();
+    return exactImageCache.has(tc) && exactImageCache.get(tc) === null;
 }
 
 export { AIRCRAFT_CATALOG as paths };

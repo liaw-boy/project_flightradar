@@ -149,16 +149,23 @@ function handleDecodedMessage(msg) {
     }
 }
 
+// ── Inline Logger (Workers cannot import browser logger module) ───────────────
+function wLog(level, msg) {
+    const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const fn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+    fn(`[${ts}][WS-WORKER] ${msg}`);
+}
+
 // ── WebSocket Connection ─────────────────────────────────────────────────────
 function connectWebSocket(baseUrl) {
     const wsUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
-    console.log(`[FlightWorker] Connecting: ${wsUrl}`);
+    wLog('info', `Connecting to ${wsUrl}`);
 
     ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
-        console.log('[FlightWorker] WebSocket connected.');
+        wLog('info', '✅ Connected');
         reconnectDelay = 1000;
         postMessage({ type: 'WS_CONNECTED', payload: null });
     };
@@ -170,13 +177,13 @@ function connectWebSocket(baseUrl) {
                 handleDecodedMessage(decoded);
             }
         } catch (err) {
-            console.error('[FlightWorker] Decode error:', err);
+            wLog('error', `Decode error: ${err.message}`);
             postMessage({ type: 'WS_ERROR', payload: 'Decode failed' });
         }
     };
 
     ws.onclose = () => {
-        console.log(`[FlightWorker] Disconnected. Reconnect in ${reconnectDelay}ms`);
+        wLog('warn', `Disconnected — reconnect in ${reconnectDelay}ms`);
         postMessage({ type: 'WS_DISCONNECTED', payload: null });
         scheduleReconnect(baseUrl);
     };

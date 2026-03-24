@@ -121,8 +121,17 @@ async function syncRoutes() {
             if (batch.length === 0) return;
             const ops = batch.map(row => {
                 const callsign = row['Callsign'] || row['Route'];
-                const origin = row['From'];
-                const dest = row['To'];
+                // VRS standing-data format: AirportCodes = "ORIG-DEST" (ICAO codes)
+                // Fallback to legacy From/To column names for other sources
+                let origin = row['From'];
+                let dest = row['To'];
+                if (!origin || !dest) {
+                    const codes = (row['AirportCodes'] || '').split('-');
+                    if (codes.length >= 2) {
+                        origin = codes[0];
+                        dest = codes[codes.length - 1];
+                    }
+                }
 
                 if (!callsign || !origin || !dest) return null;
 
@@ -154,9 +163,15 @@ async function syncRoutes() {
             }
         };
 
+        let firstRowLogged = false;
         const readStream = fs.createReadStream(TEMP_ROUTES_CSV);
-        readStream.pipe(csv())
+        // mapHeaders: strip BOM (\uFEFF) and whitespace from column headers
+        readStream.pipe(csv({ mapHeaders: ({ header }) => header.replace(/^\uFEFF/, '').trim() }))
             .on('data', async (row) => {
+                if (!firstRowLogged) {
+                    firstRowLogged = true;
+                    console.log(`[OSINT] Routes CSV columns: ${Object.keys(row).join(', ')}`);
+                }
                 batch.push(row);
                 if (batch.length >= BATCH_SIZE) {
                     readStream.pause();

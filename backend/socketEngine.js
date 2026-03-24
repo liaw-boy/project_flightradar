@@ -1,8 +1,10 @@
 const WebSocket = require('ws');
 const msgpack = require('msgpack-lite');
+const logger = require('./logger');
 
 let wss;
 const prevStates = new Map(); // icao24 -> state for delta encoding
+let broadcastCount = 0; // [LOG] rolling counter for throttled log output
 
 /**
  * Initialize WebSocket Server
@@ -11,7 +13,7 @@ function initWebSocketServer(server) {
     wss = new WebSocket.Server({ server, path: '/ws' });
 
     wss.on('connection', (ws) => {
-        console.log(`🔌 [WS] Client connected. Total: ${wss.clients.size}`);
+        logger.info('WS', `Client connected — total: ${wss.clients.size}`);
 
         // Default BBox: Global (very inclusive)
         ws.bbox = null;
@@ -24,22 +26,20 @@ function initWebSocketServer(server) {
             try {
                 const msg = msgpack.decode(new Uint8Array(data));
                 if (msg.type === 'SET_VIEWPORT') {
-                    // payload: { lamin, lomin, lamax, lomax }
                     ws.bbox = msg.payload;
-                    console.log(`🎯 [WS] Client viewport updated: ${JSON.stringify(ws.bbox)}`);
+                    logger.debug('WS', `Viewport set: lamin=${ws.bbox.lamin?.toFixed(2)} lamax=${ws.bbox.lamax?.toFixed(2)} lomin=${ws.bbox.lomin?.toFixed(2)} lomax=${ws.bbox.lomax?.toFixed(2)}`);
                 }
             } catch (err) {
-                console.error(`❌ [WS] Message handling error: ${err.message}`);
+                logger.error('WS', `Message handling error: ${err.message}`);
             }
         });
 
         ws.on('close', () => {
-            console.log(`🔌 [WS] Client disconnected. Total: ${wss.clients.size}`);
+            logger.info('WS', `Client disconnected — total: ${wss.clients.size}`);
         });
 
-        // Handle error to prevent crashing
         ws.on('error', (err) => {
-            console.error(`❌ [WS] Connection error: ${err.message}`);
+            logger.error('WS', `Connection error: ${err.message}`);
         });
     });
 }
@@ -145,6 +145,15 @@ function broadcastPlanes(states, timestamp) {
             try { client.send(payload); } catch (_) { /* client disconnected mid-send */ }
         }
     });
+
+    broadcastCount++;
+    // Log broadcast stats every 30 cycles (~5 min at 10s interval)
+    if (broadcastCount % 30 === 1) {
+        const totalChanged = updatesMap.size;
+        const totalRemoved = removed.length;
+        const clients = wss.clients.size;
+        logger.info('WS', `Broadcast #${broadcastCount} — changed: ${totalChanged}, removed: ${totalRemoved}, clients: ${clients}, total tracked: ${prevStates.size}`);
+    }
 }
 
 /**

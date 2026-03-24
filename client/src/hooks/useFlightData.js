@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { parseOpenSkyData, latLngToGlobalPixels } from '../utils/flightUtils';
 import { trackStore } from '../store/FlightDataStore';
 import { dataManager } from '../services/dataManager';
+import { logger } from '../utils/logger';
 
 /**
  * 飛行資料管理 Hook
@@ -36,6 +37,7 @@ export function useFlightData(mapRef) {
     // [v4.3.6] Auto-Backfill Queue for Cold Starts
     const backfillQueueRef = useRef([]);
     const backfilledIcaosRef = useRef(new Set());
+    const wsBatchCountRef = useRef(0); // [LOG] WS batch counter for throttled debug output
 
     // [Project AERO-SYNC] Zero-GC Projection Helper
     const sharedPointRef = useRef({ x: 0, y: 0 });
@@ -141,10 +143,12 @@ export function useFlightData(mapRef) {
                 setApiStatusClass(data.stale ? 'stat-warning' : '');
                 setApiErrorDetail('');
                 setLastUpdateTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
+                logger.info('FETCH', `✅ Poll OK — ${parsedPlanes.length} planes | ${elapsed}ms${data.stale ? ' [STALE]' : ''}`);
             } else {
                 setApiStatus('NO DATA');
                 setApiStatusClass('stat-warning');
                 setApiErrorDetail('API reached successfully but returned 0 planes.');
+                logger.warn('FETCH', `⚠️ Poll returned 0 planes | ${elapsed}ms`);
             }
 
             // 如果是自動刷新觸發的，就設定下一預約更新時間並排程
@@ -160,7 +164,7 @@ export function useFlightData(mapRef) {
             isFetchingRef.current = false;
             return; // 成功結束
         } catch (error) {
-            console.warn('❌ API Error:', error.message);
+            logger.error('FETCH', `❌ Poll failed — ${error.message}`);
             setApiStatusClass('stat-error');
 
             // 失敗後同樣釋放鎖
@@ -295,19 +299,14 @@ export function useFlightData(mapRef) {
         return R * c;
     };
 
-    const fetchTrack = useCallback(async (icao24, lastContact) => {
+    const fetchTrack = useCallback(async (icao24, lastContact, forceRefresh = false) => {
         try {
-            const data = await dataManager.getTrack(icao24, lastContact);
+            const data = await dataManager.getTrack(icao24, lastContact, forceRefresh);
 
             if (data.path && data.path.length > 0) {
-                // 如果沒有傳入 lastContact，才 fallback 到當前時間
-                const limitTime = lastContact || Math.floor(Date.now() / 1000);
-
-                // path 格式: [time, lat, lng, altitude, heading, onGround]
-                // 只保留時間戳 <= 飛機目前最後更新時間 的歷史點 (排除未來預測點)
-                // [BUGFIX] Sort FIRST by time ascending so all index calculations are correct
+                // [v11.0] Stop discarding 'future' points from backend. Backend truth is absolute.
                 const validPoints = data.path
-                    .filter((p) => p[1] && p[2] && p[0] <= limitTime)
+                    .filter((p) => p[1] && p[2])
                     .sort((a, b) => a[0] - b[0]);
 
                 // [v4.7.0] 極簡化前端邏輯：信任後端經過 30min GAP 與 0,0 清洗後的純淨陣列
@@ -321,7 +320,7 @@ export function useFlightData(mapRef) {
                 ]);
             }
         } catch (e) {
-            console.warn('無法獲取完整軌跡，使用本地歷史:', e.message);
+            logger.warn('DATA', `Track fetch failed, using local history: ${e.message}`);
         }
 
         // Fallback: 本地歷史 — format: [time, lat, lng, onGround]
@@ -373,6 +372,7 @@ export function useFlightData(mapRef) {
             try {
                 const path = await fetchTrack(icao24);
                 if (path && path.length > 0) {
+                    logger.debug('DATA', `📍 Backfill OK ${icao24} — ${path.length} track points`);
                     // [v4.5.1] Seamless Merge & Deduplication
                     // 1. Get current points from store (Live Points)
                     const livePoints = [];
@@ -380,29 +380,23 @@ export function useFlightData(mapRef) {
                         livePoints.push([time, lat, lng, x, y]);
                     });
 
-                    // 2. Combine with Historical Path and Deduplicate by Time
-                    // Convert historical path [time, lat, lng, alt, head, vel] to [time, lat, lng]
-                    const historicalPoints = path.map(p => [p[0], p[1], p[2]]);
+                    // [v11.0] AEROSTRAT Zero-Truncation Merge Logic
+                    // Use a Map (Time → Point) for O(1) deduplication and high-precision override
+                    const mergedMap = new Map();
                     
-                    // Full Blend: Set used to track unique timestamps
-                    const seenTimes = new Set();
-                    const merged = [];
+                    // 1. Write Backfilled Historical Points (OpenSky)
+                    path.map(p => [p[0], p[1], p[2]]).forEach(pt => mergedMap.set(pt[0], pt));
                     
-                    // Process: Historical first, then Live
-                    [...historicalPoints, ...livePoints].forEach(pt => {
-                        const time = pt[0];
-                        if (!seenTimes.has(time)) {
-                            seenTimes.add(time);
-                            merged.push(pt);
-                        }
-                    });
-
-                    // Sort strict by time (old to new)
-                    merged.sort((a, b) => a[0] - b[0]);
+                    // 2. Write Live Local Points (Favoring Local precision/availability)
+                    livePoints.forEach(pt => mergedMap.set(pt[0], pt));
+                    
+                    // 3. Convert back to array and Sort strictly by time
+                    const merged = Array.from(mergedMap.values()).sort((a, b) => a[0] - b[0]);
 
                     // 3. Re-inject fully merged track into store
                     trackStore.clearTrack(icao24);
-                    const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
+                    // [v11.0] AEROSTRAT Ultra-Long Trajectory Support: Ensure we project at current zoom
+                    const zoom = mapRef.current ? mapRef.current.getZoom() : 10;
                     merged.forEach(pt => {
                         const [time, lat, lng] = pt;
                         const globalPt = latLngToGlobalPixels(lat, lng, zoom, sharedPointRef.current);
@@ -430,7 +424,7 @@ export function useFlightData(mapRef) {
                     });
                 }
             } catch (e) {
-                console.error('Backfill Merge Error:', e);
+                logger.error('DATA', `Backfill merge error for ${icao24}: ${e.message}`);
             }
         }, 500); // 500ms per aircraft
 
@@ -477,11 +471,13 @@ export function useFlightData(mapRef) {
         worker.onmessage = (event) => {
             const { type, payload } = event.data;
             if (type === 'WS_CONNECTED') {
+                logger.info('WS', '✅ WebSocket Connected — AERO-SYNC active');
                 setApiStatus('AERO-SYNC (WS)');
                 setApiStatusClass('stat-success');
                 usesWebSocketRef.current = true;
                 setApiErrorDetail('');
             } else if (type === 'WS_DISCONNECTED' || type === 'WS_ERROR') {
+                logger.warn('WS', `⚠️ WebSocket ${type === 'WS_ERROR' ? 'Error' : 'Disconnected'} — falling back to polling`);
                 usesWebSocketRef.current = false;
                 setApiStatus('FALLBACK (Polling)');
                 setApiStatusClass('stat-warning');
@@ -492,6 +488,10 @@ export function useFlightData(mapRef) {
                 const { changed, removed = [], globalTime } = payload;
                 globalLastUpdateRef.current = globalTime;
                 setLastUpdateTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
+                wsBatchCountRef.current = (wsBatchCountRef.current || 0) + 1;
+                if (wsBatchCountRef.current % 30 === 1) {
+                    logger.debug('WS', `📡 WS Batch #${wsBatchCountRef.current} — changed: ${Object.keys(changed).length}, removed: ${removed.length}`);
+                }
 
                 const map = mapRef.current;
                 const zoom = map ? map.getZoom() : 5;

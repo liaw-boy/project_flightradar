@@ -1,9 +1,9 @@
 @echo off
 title AEROSTRAT Stop Frontend
 
-echo  Stopping frontend (port 5173)...
+echo  Stopping frontend (port 3005)...
 
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":5173" ^| findstr "LISTENING"') do (
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3005" ^| findstr "LISTENING"') do (
     echo  Stopping PID %%a
     taskkill /F /PID %%a >nul 2>&1
 )

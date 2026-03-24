@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getAirlineLogoUrl, normalizeLongitude, predictPosition, getAltitudeColor } from '../utils/flightUtils';
+import { getAirlineLogoUrl, normalizeLongitude, predictPosition, getAltitudeColor, initAirportDatabase } from '../utils/flightUtils';
 import { getAircraftScale, getDrawSize, resolveTypecodeKey, getDynamicImage, prewarmExactSvg, AIRCRAFT_CATALOG as paths } from '../utils/aircraftIcons';
 import { dataManager } from '../services/dataManager';
-import { enrichPlaneDetails, getEnrichedData } from '../services/staticOsintCache'; // Task 2: Sync and Persistent OSINT
+import { enrichPlaneDetails, getEnrichedData } from '../services/staticOsintCache';
 import HoverCard from './HoverCard';
+import { logger } from '../utils/logger';
 
 /**
  * Custom Leaflet Canvas Layer for High-Performance Rendering
@@ -152,7 +153,7 @@ export default function MapView({
         // [v14.1] Data arrival sentinel for debugging - can be removed after verified
         const count = planesDict ? Object.keys(planesDict).length : 0;
         if (count > 0 && !window._hasWarnedPlanes) {
-             console.log(`[MapView] Data stream active: ${count} planes.`);
+             logger.info('INIT', `Data stream active — ${count} planes in view`);
              window._hasWarnedPlanes = true;
         }
     }, [planesDict]);
@@ -480,10 +481,11 @@ export default function MapView({
 
         // [Project AERO-SYNC] L3 Persistent Airport Loading
         dataManager.getAirports().then(data => {
-            console.log(`🌍 [DataManager] Loaded ${data.length} airports`);
+            logger.info('INIT', `Loaded ${data.length} airports from DataManager`);
             airportsRef.current = data;
             setAirports(data);
-        }).catch(err => console.error('Failed to load airports:', err));
+            initAirportDatabase(data);
+        }).catch(err => logger.error('INIT', `Failed to load airports: ${err.message}`));
 
         airportLayerRef.current = L.layerGroup();
         updateAirportVisibility(map);
@@ -950,9 +952,8 @@ export default function MapView({
                     ctx.lineJoin = 'round';
 
                     const drawTrack = (isOutline) => {
-                        ctx.lineWidth = isOutline
-                            ? (zoom >= 12 ? 5 : 4)
-                            : (zoom >= 12 ? 2.5 : 2);
+                        const baseWidth = (zoom >= 12 ? 2.5 : 2);
+                        ctx.lineWidth = isOutline ? (baseWidth * 2) : baseWidth;
                         ctx.strokeStyle = isOutline ? 'rgba(0,0,0,0.8)' : '#ffffff';
                         ctx.globalAlpha = isOutline ? 0.8 : 1.0;
 
@@ -968,16 +969,41 @@ export default function MapView({
                             if (prevPt && prevSeg) {
                                 const dist = haversineKm(prevSeg[1], prevSeg[2], lat, lng);
                                 const isAntimeridian = Math.abs(pt.x - prevPt.x) > canvas.width / 2;
+                                const isLiveStitch = (pi === renderPath.length - 1) && livePlane?.renderLat;
+                                const distThreshold = isLiveStitch ? 300 : 50;
 
-                                if (dist < 50 && !isAntimeridian) {
+                                if (dist < distThreshold && !isAntimeridian) {
+                                    // [v11.0] Redesign: Permanent Visibility (Zero-Truncation Plan)
+                                    // Removed time-based fading. Trajectories stay at 100% opacity throughout the session.
+                                    const currentOpacity = isOutline ? 0.8 : 1.0;
+                                    ctx.globalAlpha = currentOpacity;
+                                    
                                     if (!isOutline) {
-                                        // Altitude gradient — 3D spatial depth cue
-                                        ctx.strokeStyle = getAltitudeColor(seg[3], false, false, colorSchemeRef.current);
+                                        // [v12.5] P0 Fix: Restore Altitude Coloring (Always use ALTITUDE scheme for tracks)
+                                        ctx.strokeStyle = getAltitudeColor(seg[3], false, false, 'ALTITUDE');
                                     }
+
                                     ctx.beginPath();
                                     ctx.moveTo(prevPt.x, prevPt.y);
                                     ctx.lineTo(pt.x, pt.y);
                                     ctx.stroke();
+
+                                    // [v10.5 Redesign] Directional Arrows (Triangles)
+                                    // Draw an arrow every 20-30 points if zoom is sufficient
+                                    if (!isOutline && zoom >= 7 && pi % 25 === 0 && pi > 0) {
+                                        const angle = Math.atan2(pt.y - prevPt.y, pt.x - prevPt.x);
+                                        ctx.save();
+                                        ctx.translate(pt.x, pt.y);
+                                        ctx.rotate(angle);
+                                        ctx.beginPath();
+                                        ctx.moveTo(0, 0);
+                                        ctx.lineTo(-6, -3);
+                                        ctx.lineTo(-6, 3);
+                                        ctx.closePath();
+                                        ctx.fillStyle = ctx.strokeStyle;
+                                        ctx.fill();
+                                        ctx.restore();
+                                    }
                                 }
                             }
                             prevPt = pt;
@@ -1118,15 +1144,16 @@ export default function MapView({
 
                     // [v14.0] High-Performance Canvas Vector Rendering (tar1090 style)
                     // Eliminates external image loading latency and improves visual density.
-                    // [v14.5] Performance Optimization: Cache aircraft scale by zoom
+                    // [v14.5] Performance Optimization: Cache final drawSize by zoom
                     const activeTypecode = plane._activeTypecode || plane.typecode || 'STANDARD_JET';
                     const cacheKey = `${activeTypecode}_${zoom}`;
-                    let wingspanScale = scaleCacheRef.current.get(cacheKey);
+                    let drawSize = scaleCacheRef.current.get(cacheKey);
                     
-                    if (wingspanScale === undefined) {
+                    if (drawSize === undefined) {
                         // Call legacy scale helper (once per zoom change per type)
-                        wingspanScale = getAircraftScale(plane); 
-                        scaleCacheRef.current.set(cacheKey, wingspanScale);
+                        const wingspanScale = getAircraftScale(plane); 
+                        drawSize = getDrawSize(plane, zoom, wingspanScale);
+                        scaleCacheRef.current.set(cacheKey, drawSize);
                         
                         // Prune cache if too large (LRU-ish)
                         if (scaleCacheRef.current.size > 1000) {
@@ -1134,8 +1161,6 @@ export default function MapView({
                              scaleCacheRef.current.delete(firstKey);
                         }
                     }
-
-                    const drawSize = getDrawSize(plane, zoom, wingspanScale);
                     const altColor = getAltitudeColor(plane.altitude, plane.onGround, plane.isEmergency, colorSchemeRef.current);
                     const angleRad = (plane.heading || 0) * Math.PI / 180;
 
@@ -1147,11 +1172,18 @@ export default function MapView({
 
                     if (drawSize <= 6) {
                         // ── Tier 1: Tactical Dot ─────────────────────────────
+                        const dotR = Math.max(2, drawSize / 2);
                         ctx.save();
                         ctx.globalAlpha = opacity;
+                        // Dark border for contrast
+                        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                        ctx.beginPath();
+                        ctx.arc(ptX, ptY, dotR + 1.2, 0, Math.PI * 2);
+                        ctx.fill();
+                        // Colored center
                         ctx.fillStyle = isSelected ? '#00ffff' : altColor;
                         ctx.beginPath();
-                        ctx.arc(ptX, ptY, Math.max(2, drawSize / 2), 0, Math.PI * 2);
+                        ctx.arc(ptX, ptY, dotR, 0, Math.PI * 2);
                         ctx.fill();
                         if (isSelected) {
                             ctx.strokeStyle = '#00ffff';
@@ -1161,17 +1193,21 @@ export default function MapView({
                         ctx.restore();
                     } else {
                         const dynImg = getDynamicImage(activeTypecode, isSelected);
-                        if (dynImg && dynImg.complete && dynImg.naturalWidth > 0) {
-                            // ── Tier 2: 1:1 Exact GitHub SVG ─────────────────
+                        if (dynImg && dynImg.complete) {
+                            // ── Tier 2: 1:1 Exact SVG (pre-warmed, has built-in white outline)
                             ctx.save();
                             ctx.globalAlpha = opacity;
                             ctx.translate(ptX, ptY);
                             ctx.rotate(angleRad);
                             ctx.drawImage(dynImg, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
                             if (isSelected) {
-                                ctx.strokeStyle = '#00ffff';
+                                // Cyan glow ring around selected plane
+                                const r = drawSize * 0.6;
+                                ctx.strokeStyle = 'rgba(0,255,255,0.7)';
                                 ctx.lineWidth = 2;
-                                ctx.strokeRect(-drawSize / 2, -drawSize / 2, drawSize, drawSize);
+                                ctx.beginPath();
+                                ctx.arc(0, 0, r, 0, Math.PI * 2);
+                                ctx.stroke();
                             }
                             ctx.restore();
                         } else {
@@ -1190,10 +1226,17 @@ export default function MapView({
                                 ctx.rotate(angleRad);
                                 ctx.scale(canvasScale, canvasScale);
                                 ctx.translate(-(vb[0] + vbW / 2), -(vb[1] + vbH / 2));
+                                ctx.lineJoin = 'round';
+                                // Pass 1: dark shadow outline (adsb.fi style — contrast against dark map)
+                                ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+                                ctx.lineWidth = Math.max(2.5, 10 / canvasScale);
+                                ctx.stroke(path);
+                                // Pass 2: colored fill
                                 ctx.fillStyle = altColor;
                                 ctx.fill(path);
-                                ctx.strokeStyle = isSelected ? '#00ffff' : '#FFFFFF';
-                                ctx.lineWidth = isSelected ? Math.max(2, 10 / canvasScale) : Math.max(1, 5 / canvasScale);
+                                // Pass 3: thin white outline (adsb.fi signature style)
+                                ctx.strokeStyle = isSelected ? '#00ffff' : 'rgba(255,255,255,0.92)';
+                                ctx.lineWidth = isSelected ? Math.max(1.5, 6 / canvasScale) : Math.max(0.8, 3.5 / canvasScale);
                                 ctx.stroke(path);
                                 ctx.restore();
                             } else {

@@ -5,9 +5,9 @@ import {
     getNearestAirport, formatVerticalRate, getAirportDisplayData,
     formatLocalTime
 } from '../utils/flightUtils';
-import { getDynamicImage, prewarmExactSvg } from '../utils/aircraftIcons';
+import { getDynamicImage, prewarmExactSvg, isSvgUnavailable } from '../utils/aircraftIcons';
 import { useI18n } from '../hooks/useI18n';
-import { logToServer } from '../utils/logger';
+import { logToServer, logger } from '../utils/logger';
 import { dataManager } from '../services/dataManager';
 import TimePlayer from './TimePlayer';
 import './Sidebar.css';
@@ -147,7 +147,7 @@ export default function Sidebar({
                 }
             })
             .catch(err => {
-                console.error("Fusion API Error:", err);
+                logger.error('UI', `Fusion API error for ${icao24}: ${err.message}`);
                 if (isMounted) setIsLoadingDetails(false);
             });
         return () => { isMounted = false; };
@@ -156,30 +156,57 @@ export default function Sidebar({
     const aircraft = fusionData?.aircraft || {};
     const routeInfo = fusionData?.route || {};
 
+    const displayRegistration = aircraft.registration || metadata?.registration || plane.registration || '--';
     const typecode = aircraft.type || metadata?.typecode || plane.typecode || '--';
+    
+    // [v12.5] P0 Fix: Information Anemia - Priority resolve names
+    const aircraftModel = aircraft.description || plane.description ||
+                          [aircraft.manufacturer, aircraft.type || typecode].filter(Boolean).join(' ') ||
+                          (metadata ? [metadata.manufacturerName, metadata.model].filter(Boolean).join(' ') : (plane.aircraftType || 'Unknown Aircraft'));
 
-    // [Fix] Prioritize RexKramer1 tactical-yellow SVG silhouette over planespotters photo
+    // ── Image Resolution: SVG → Planespotters (direct) → fusion photo_url ──────
+    // Priority 1: RexKramer1 SVG silhouette (by typecode, tactical yellow).
+    // NOTE: SVG data-URIs always have naturalWidth === 0 — check img !== null, not naturalWidth.
     const [svgSrc, setSvgSrc] = useState(null);
     useEffect(() => {
         if (!typecode || typecode === '--') { setSvgSrc(null); return; }
         prewarmExactSvg(typecode);
-        setSvgSrc(null);
+        
         let attempts = 0;
         const timer = setInterval(() => {
-            const img = getDynamicImage(typecode, false);
-            if (img?.complete && img.naturalWidth > 0) {
-                setSvgSrc(img.src);
+            if (isSvgUnavailable(typecode)) { 
+                setSvgSrc(null);
+                clearInterval(timer); 
+                return; 
+            }
+            const cachedImg = getDynamicImage(typecode, false);
+            if (cachedImg && cachedImg.src) {
+                setSvgSrc(cachedImg.src); // [Architecture Checkpoint] img.src = cachedImg.src
                 clearInterval(timer);
-            } else if (++attempts > 14) {
-                clearInterval(timer); // give up after ~7s
+            } else if (++attempts > 20) {
+                clearInterval(timer);
             }
         }, 500);
         return () => clearInterval(timer);
     }, [typecode]);
 
-    const aircraftModel = [aircraft.manufacturer, aircraft.type].filter(Boolean).join(' ') ||
-                          (metadata ? [metadata.manufacturerName, metadata.model].filter(Boolean).join(' ') : (plane.aircraftType || 'Unknown Aircraft'));
-    const displayRegistration = aircraft.registration || metadata?.registration || plane.registration || '--';
+    // Priority 2: Direct Planespotters fetch — mirrors exactly what HoverCard does.
+    // Falls back when SVG unavailable and fusion API's photo_url is null/missing.
+    const [directPhoto, setDirectPhoto] = useState(null);
+    useEffect(() => {
+        let active = true;
+        setDirectPhoto(null);
+        dataManager.getPhotos(icao24, displayRegistration !== '--' ? displayRegistration : undefined)
+            .then(photos => {
+                if (!active || !photos || photos.length === 0) return;
+                const p = photos[0];
+                const url = p.thumbnail_large?.src || p.thumbnail?.src || p.link || null;
+                if (url) setDirectPhoto({ url, photographer: p.photographer || 'Planespotters.net' });
+            })
+            .catch(() => {});
+        return () => { active = false; };
+    }, [icao24, displayRegistration]);
+
 
     // [Phase 20] Aggressive Airport Resolution (Bypassing literal "N/A" truthy trap)
     const validDepIata = (routeInfo.origin_iata && routeInfo.origin_iata !== 'N/A') ? routeInfo.origin_iata : null;
@@ -217,12 +244,13 @@ export default function Sidebar({
             <div className="sb-header">
                 <div className="sb-header-main" style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
                     <h2 className="sb-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {plane.callsign || 'UNKNOWN'}
+                        {fusionData?.route?.flightNumber || plane.callsign || 'UNKNOWN'}
                         {typecode && <span className="sb-badge" style={{ marginLeft: '8px' }}>{typecode}</span>}
                     </h2>
                     <div className="sb-subtitle" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {logoUrl && <img src={logoUrl} alt="" className="sb-airline-logo-mini" style={{ display: 'inline-block', marginRight: '4px' }} onError={(e) => e.target.style.display = 'none'} />}
                         {(aircraft.airline && aircraft.airline !== 'Unknown') ? aircraft.airline : (airlineName || 'Unknown')} — {displayRegistration}
+                        <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '2px' }}>{aircraftModel}</div>
                     </div>
                 </div>
                 <div className="sb-header-actions">
@@ -239,30 +267,52 @@ export default function Sidebar({
                 )}
 
                 <div className="sb-photo-container">
-                    {isLoadingDetails ? (
-                        <div className="sb-photo-carousel sb-photo-loading">
-                            <PlaneIcon size={48} className="sb-photo-loading-icon" />
-                        </div>
-                    ) : svgSrc ? (
-                        // Priority 1: RexKramer1 exact SVG silhouette (tactical yellow #ffce00)
-                        <div className="sb-photo-carousel sb-silhouette-view">
-                            <img src={svgSrc} alt={typecode} className="aircraft-silhouette" />
-                            <span className="sb-photo-credit">Shape: RexKramer1 / AircraftShapesSVG</span>
-                        </div>
-                    ) : aircraft.photo_url ? (
-                        // Priority 2: Planespotters.net photo
-                        <div className="sb-photo-carousel">
-                            <img src={aircraft.photo_url} alt={aircraftModel} className="aircraft-photo" />
-                            <a href={aircraft.photo_url} target="_blank" rel="noopener noreferrer" className="sb-photo-credit">
-                                © {aircraft.photographer || 'Planespotters.net'} <span>↗</span>
-                            </a>
-                        </div>
-                    ) : (
-                        <div className="sb-logo-placeholder">
-                            <PlaneIcon size={64} className="sb-photo-placeholder-icon" />
-                            <span className="sb-photo-placeholder-text">NO PHOTO AVAILABLE</span>
-                        </div>
-                    )}
+                    {(() => {
+                        // [v13.0] Open-Source Refactor: SILHOUETTE IS NOW MANDATORY TACTICAL VIEW
+                        // Prioritize SVG silhouette over real photos for the AEROSTRAT Tactical feel.
+                        if (svgSrc) {
+                            return (
+                                <div className="sb-photo-carousel sb-silhouette-view">
+                                    <img src={svgSrc} alt={typecode} className="aircraft-silhouette" />
+                                    <div className="sb-photo-credit">RexKramer1 / AircraftShapesSVG · {typecode}</div>
+                                </div>
+                            );
+                        }
+
+                        // Priority 2: Real photo (Planespotters) — only as fallback to silhouette
+                        const photoUrl = aircraft.photo_url || directPhoto?.url;
+                        const photographer = aircraft.photographer || directPhoto?.photographer || 'Planespotters.net';
+                        
+                        if (photoUrl) {
+                            return (
+                                <div className="sb-photo-carousel">
+                                    <img src={photoUrl} alt={aircraftModel} className="aircraft-photo"
+                                        onError={(e) => { e.target.style.display = 'none'; }}
+                                    />
+                                    <a href={photoUrl} target="_blank" rel="noopener noreferrer" className="sb-photo-credit">
+                                        © {photographer} <span>↗</span>
+                                    </a>
+                                </div>
+                            );
+                        }
+
+                        // Loading spinner while SVG or photo are still resolving
+                        if (isLoadingDetails || (!isSvgUnavailable(typecode) && typecode !== '--')) {
+                            return (
+                                <div className="sb-photo-carousel sb-photo-loading">
+                                    <PlaneIcon size={48} className="sb-photo-loading-icon" />
+                                </div>
+                            );
+                        }
+
+                        // Final Fallback: Placeholder
+                        return (
+                            <div className="sb-logo-placeholder">
+                                <PlaneIcon size={64} className="sb-photo-placeholder-icon" />
+                                <span className="sb-photo-placeholder-text">NO PHOTO AVAILABLE</span>
+                            </div>
+                        );
+                    })()}
                 </div>
 
                 {/* [Phase 16] Restored High-Fidelity Flight Progress View */}
@@ -391,6 +441,7 @@ export default function Sidebar({
                         <DataRow label={t('heading')} value={plane.heading != null ? `${Math.round(plane.heading)}°` : 'N/A'} />
                         <DataRow label={t('vertRate')} value={plane.vRate != null ? formatVerticalRate(plane.vRate) : 'N/A'} />
                         <DataRow label={t('position')} value={plane.lat != null && plane.lng != null ? `${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}` : 'N/A'} />
+                        <DataRow label="Flight No." value={fusionData?.route?.flightNumber || plane.callsign || '---'} />
                         <DataRow label={t('source')} value={posSourceMap[plane.positionSource] || 'ADS-B'} />
                         
                         {flightHistoryRef?.current && (

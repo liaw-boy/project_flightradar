@@ -1,4 +1,5 @@
 const config = require('./config');
+const logger = require('./logger'); // [LOG] Structured logger with file output
 
 const express = require('express');
 const cors = require('cors');
@@ -41,13 +42,14 @@ function getTime() {
 // ==========================================
 // We default to local MongoDB to ensure privacy and speed.
 const MONGODB_URI = config.MONGODB_URI;
+logger.info('DATABASE', `Connecting to MongoDB: ${MONGODB_URI}`);
 
 mongoose.connect(MONGODB_URI, {
     serverSelectionTimeoutMS: 5000,
     connectTimeoutMS: 10000,
     bufferTimeoutMS: 3000, // Fast-fail: stop buffering ops after 3s when disconnected
 }).then(async () => {
-    console.log(`${getTime()} 🍃 [DATABASE] Connected to Local MongoDB`);
+    logger.info('DATABASE', '✅ Connected to MongoDB successfully');
     restoreActiveSessions();
 
     // [Phase 16] Run OSINT Data Sync immediately after connection
@@ -61,27 +63,31 @@ mongoose.connect(MONGODB_URI, {
             collMod: 'trackpoints',
             index: { keyPattern: { timestamp: 1 }, expireAfterSeconds: 172800 }
         });
-        console.log(`${getTime()} [TTL] TrackPoint TTL synced to 48 hours.`);
+        logger.info('DATABASE', 'TrackPoint TTL synced to 48 hours');
     } catch (ttlErr) {
-        // NamespaceNotFound = collection doesn't exist yet (first run), safe to ignore
-        if (ttlErr.codeName !== 'NamespaceNotFound' && ttlErr.codeName !== 'IndexNotFound') {
-            console.warn(`[TTL] Could not sync TTL index: ${ttlErr.message}`);
+        // Time-series collections manage TTL via expireAfterSeconds at creation, not collMod
+        const ignored = ['NamespaceNotFound', 'IndexNotFound'];
+        const isTimeseries = ttlErr.message && ttlErr.message.includes('time-series');
+        if (!ignored.includes(ttlErr.codeName) && !isTimeseries) {
+            logger.warn('DATABASE', `Could not sync TTL index: ${ttlErr.message}`);
+        } else if (isTimeseries) {
+            logger.debug('DATABASE', 'TrackPoint is time-series — TTL managed by collection options (skip collMod)');
         }
     }
 })
-    .catch(err => console.error('❌ [DATABASE] Connection error:', err));
+    .catch(err => logger.error('DATABASE', `Connection failed: ${err.message}`));
 
 mongoose.connection.on('error', err => {
-    console.error('❌ [DATABASE] Runtime connection error:', err);
+    logger.error('DATABASE', `Runtime error: ${err.message}`);
 });
 
 mongoose.connection.on('disconnected', () => {
-    console.warn('⚠️ [DATABASE] MongoDB disconnected.');
+    logger.warn('DATABASE', 'MongoDB disconnected');
 });
 
 mongoose.connection.on('reconnected', () => {
-    console.log('✅ [DATABASE] MongoDB reconnected.');
-    buildAirportListCache(); // Rebuild airport cache after reconnect
+    logger.info('DATABASE', '✅ MongoDB reconnected');
+    buildAirportListCache();
 });
 
 // ==========================================
@@ -112,23 +118,17 @@ async function initAircraftMetadataIndex() {
         let headers = [];
 
         rl.on('line', (line) => {
+            if (!line.trim()) return;
             lineCount++;
-            if (lineCount === 1) {
-                headers = line.split(',').map(h => h.replace(/^"|"$/g, '').toLowerCase());
-                return;
-            }
 
-            const parts = line.split(',');
-            const icao24Idx = headers.indexOf('icao24');
-            const typecodeIdx = headers.indexOf('typecode') !== -1 ? headers.indexOf('typecode') : headers.indexOf('model');
+            // Format: icao24;registration;typecode;category;model (no header row, semicolon-delimited)
+            const parts = line.split(';');
+            const icao = parts[0]?.replace(/^"|"$/g, '').toLowerCase();
+            const type = parts[2]?.replace(/^"|"$/g, '').toUpperCase();
 
-            if (icao24Idx !== -1 && typecodeIdx !== -1 && parts[icao24Idx]) {
-                const icao = parts[icao24Idx].replace(/^"|"$/g, '').toLowerCase();
-                const type = parts[typecodeIdx].replace(/^"|"$/g, '').toUpperCase();
-                if (icao && type && type !== 'N/A' && type !== 'UNKNOWN') {
-                    aircraftMetadataIndex.set(icao, type);
-                    indexedCount++;
-                }
+            if (icao && type && type !== 'N/A' && type !== 'UNKNOWN' && type !== '') {
+                aircraftMetadataIndex.set(icao, type);
+                indexedCount++;
             }
         });
 
@@ -162,9 +162,16 @@ const PORT = config.PORT;
 // ==========================================
 app.use(cors());
 app.use(compression()); // [v2.9.0] Gzip
+app.use(logger.httpMiddleware); // [LOG] HTTP request logging (skips high-freq endpoints)
 
 // [v5.0.0] Static file serving REMOVED — Frontend runs independently via Vite Dev Server
 // Backend is now a pure API + WebSocket data engine
+
+// [v12.5] Aircraft SVG silhouettes served locally (avoids GitHub CDN 404s/rate-limits)
+app.use('/api/svg', express.static(path.join(__dirname, 'public/svg'), {
+    maxAge: '7d',
+    setHeaders: (res) => { res.setHeader('Access-Control-Allow-Origin', '*'); }
+}));
 
 
 // [v3.0] Security Headers
@@ -688,7 +695,7 @@ async function getAuthHeaders(retryCount = 0) {
         // 否則如果還在 ACTIVE 但餘額不足，嘗試主動輪替
         const isCurrentlyLimited = currentStats.unlockTime && new Date(currentStats.unlockTime).getTime() > Date.now();
         if (!isCurrentlyLimited) {
-            console.log(`🛡️ [RESERVE] Account ${ACCOUNTS[currentAccountIndex].user} hit safe floor (${currentStats.remainingCredits}). Rotating preemptively...`);
+            logger.warn('QUOTA', `Account ${ACCOUNTS[currentAccountIndex].user} hit safe floor (${currentStats.remainingCredits} remaining ≤ ${SAFE_RESERVE_CAP}) — rotating preemptively`);
             if (rotateAccount()) {
                 return await getAuthHeaders(retryCount + 1);
             }
@@ -737,13 +744,14 @@ async function getAuthHeaders(retryCount = 0) {
 }
 
 // ==========================================
-// 動作紀錄 API (讓前端的操作顯示在後台中端)
+// 動作紀錄 API (讓前端的操作顯示在後台終端並寫入 log 檔)
 app.post('/api/log', (req, res) => {
     const { message, type = 'info', data = {} } = req.body;
-    const timestamp = new Date().toLocaleTimeString();
-    const prefix = type === 'error' ? '❌ [CLIENT ERROR]' : type === 'warn' ? '⚠️ [CLIENT WARN]' : '📱 [USER ACTION]';
-
-    console.log(`${prefix} [${timestamp}] ${message}`, Object.keys(data).length > 0 ? data : '');
+    const hasData = data && Object.keys(data).length > 0;
+    const logData = hasData ? data : undefined;
+    if (type === 'error')      logger.error('CLIENT', message, logData);
+    else if (type === 'warn')  logger.warn('CLIENT', message, logData);
+    else                       logger.info('CLIENT', message, logData);
     res.json({ status: 'ok' });
 });
 
@@ -1143,17 +1151,16 @@ async function ingestTrackPoints(states, timeUnix) {
             // Case 1: First sighting
             needsNewSession = true;
         } else if (now - session.lastSeen > SESSION_TIMEOUT_MS) {
-            // Case 5: Timeout — check BEFORE other transitions to avoid stale logic
+            // Case 5: Timeout
             needsNewSession = true;
             closeReason = 'TIMEOUT';
         } else if (onGround && velocityKts < GROUND_IDLE_SPEED_KTS) {
-            // Case 7: Ground idle tracking
+            // Case 7: Ground idle tracking (Parked)
             if (!session.groundIdleSince) {
                 session.groundIdleSince = now;
             } else if (now - session.groundIdleSince > GROUND_IDLE_TIMEOUT_MS) {
-                // Parked for 15+ min — close session, next motion opens a new one
                 closeReason = 'COMPLETED';
-                needsNewSession = false; // Don't create yet — wait for movement
+                needsNewSession = false; 
                 sessionCloseOps.push({
                     updateOne: {
                         filter: { sessionId: session.sessionId },
@@ -1169,18 +1176,38 @@ async function ingestTrackPoints(states, timeUnix) {
                 session.onGround = true;
             }
         } else if (session.onGround && !onGround) {
-            // Case 4: Takeoff — always a new flight leg
-            needsNewSession = true;
+            // Case 4: Takeoff? — [v11.0 Protection] Require 3 consecutive airborne points
+            session.airborneCounter = (session.airborneCounter || 0) + 1;
+            session.groundCounter = 0;
+            if (session.airborneCounter >= 3) {
+                needsNewSession = true;
+            }
         } else if (session.callsign !== callsign && callsign !== 'N/A') {
-            // Case 2 & 6: Callsign changed (airborne or ground turnaround)
+            // Case 2 & 6: Callsign changed
             needsNewSession = true;
         } else if (!session.onGround && onGround) {
-            // Case 3: Landing — same session continues, just mark as on-ground
-            session.onGround = true;
-            session.groundIdleSince = now; // Start idle timer on landing
+            // Case 3: Landing? — [v11.0 Protection] Require 3 points onGround AND alt < 1000
+            const altitude = p.altitude || 0;
+            if (altitude < 1000) {
+                session.groundCounter = (session.groundCounter || 0) + 1;
+                session.airborneCounter = 0;
+                if (session.groundCounter >= 3) {
+                    session.onGround = true;
+                    session.groundIdleSince = now;
+                }
+            } else {
+                session.groundCounter = 0;
+            }
             session.lastSeen = now;
         } else {
-            // Normal movement — reset idle timer
+            // Normal movement — reset counters if staying in same state
+            if (onGround) {
+                session.groundCounter = (session.groundCounter || 0) + 1;
+                session.airborneCounter = 0;
+            } else {
+                session.airborneCounter = (session.airborneCounter || 0) + 1;
+                session.groundCounter = 0;
+            }
             if (session.groundIdleSince) session.groundIdleSince = null;
         }
 
@@ -1198,7 +1225,7 @@ async function ingestTrackPoints(states, timeUnix) {
 
             // Create new session
             const newSessionId = `${icao24}_${now}_${Math.random().toString(36).slice(2, 6)}`;
-            session = { sessionId: newSessionId, callsign, lastSeen: now, onGround, groundIdleSince: null };
+            session = { sessionId: newSessionId, callsign, lastSeen: now, onGround, groundIdleSince: null, groundCounter: 0, airborneCounter: 0 };
             activeSessions.set(icao24, session);
 
             sessionCreateDocs.push({
@@ -1302,6 +1329,8 @@ async function fetchGlobalPlanes() {
     isFetchingGlobal = true;
     const start = performance.now();
     syncCycleCount++;
+    const isOpenSkyCycle = syncCycleCount % 3 === 0 || lastOpenSkyFetchTime === 0;
+    logger.debug('SYNC', `Cycle #${syncCycleCount} started | source: ${isOpenSkyCycle ? 'OpenSky (full fetch)' : 'Cache (tactical only)'} | cached: ${(globalPlanesCache.states || []).length} planes`);
 
     try {
         let mergedStates = [];
@@ -1309,18 +1338,18 @@ async function fetchGlobalPlanes() {
         const now = Date.now();
 
         // ── Phase A: GLOBAL BASELINE (Every 3rd cycle = 30s) ───────────
-        if (syncCycleCount % 3 === 0 || lastOpenSkyFetchTime === 0) {
+        if (isOpenSkyCycle) {
             try {
                 const osData = await fetchOpenSky();
                 mergedStates = osData.states;
                 lastOpenSkyFetchTime = now;
                 sourceTags.push('OpenSky');
+                logger.info('SYNC', `OpenSky fetch OK — ${mergedStates.length} planes | ${Math.round(performance.now() - start)}ms`);
             } catch (osErr) {
-                console.warn(`${getTime()} ⚠️ [BASELINE] OpenSky failed: ${osErr.message}. Keeping stale baseline.`);
+                logger.warn('SYNC', `OpenSky failed (${osErr.message}) — keeping stale baseline (${(globalPlanesCache.states || []).length} planes)`);
                 mergedStates = globalPlanesCache.states || [];
             }
         } else {
-            // Use existing cache as baseline for non-OpenSky cycles
             mergedStates = [...(globalPlanesCache.states || [])];
             sourceTags.push('Cache');
         }
@@ -1334,13 +1363,13 @@ async function fetchGlobalPlanes() {
             milData.states.forEach(p => stateMap.set(p.icao24, p));
             sourceTags.push('AL-Mil');
         } catch (milErr) {
-            console.warn(`${getTime()} ⚠️ [TACTICAL] AL-Mil failed: ${milErr.message}`);
+            logger.warn('SYNC', `AL-Mil failed: ${milErr.message}`);
         }
 
         // 2. Airplanes.Live Viewport Sensing
         const viewports = getActiveViewports();
         if (viewports.length > 0) {
-            // Top 2 unique viewports to avoid 429
+            logger.debug('SYNC', `Viewport overlay: ${viewports.length} active client(s)`);
             const uniqPorts = viewports.slice(0, 2);
             for (const vp of uniqPorts) {
                 const centerLat = (vp.lamin + vp.lamax) / 2;
@@ -1349,23 +1378,26 @@ async function fetchGlobalPlanes() {
                     const regional = await fetchAirplanesLive('point', { lat: centerLat, lon: centerLon, dist: 250 });
                     regional.states.forEach(p => stateMap.set(p.icao24, p));
                     sourceTags.push(`AL-Point(${centerLat.toFixed(1)})`);
-                    // Delay slightly between point fetches to ensure 1 QPS
+                    logger.debug('SYNC', `AL-Point OK lat=${centerLat.toFixed(2)} lon=${centerLon.toFixed(2)} → ${regional.states.length} planes`);
                     await new Promise(r => setTimeout(r, 1100));
                 } catch (regErr) {
-                    console.warn(`${getTime()} ⚠️ [TACTICAL] AL-Point failed: ${regErr.message}`);
+                    logger.warn('SYNC', `AL-Point failed: ${regErr.message}`);
                 }
             }
         } else {
-            // Fallback: Always track Taiwan Home area if no one is watching
             try {
                 const regional = await fetchAirplanesLive('point', { lat: 25.07, lon: 121.23, dist: 250 });
                 regional.states.forEach(p => stateMap.set(p.icao24, p));
                 sourceTags.push('AL-Home');
-            } catch (hErr) {}
+                logger.debug('SYNC', `AL-Home (no active viewport) → ${regional.states.length} planes`);
+            } catch (hErr) {
+                logger.warn('SYNC', `AL-Home fallback failed: ${hErr.message}`);
+            }
         }
 
         const finalStates = Array.from(stateMap.values());
         const fetchLatency = Math.round(performance.now() - start);
+        logger.debug('SYNC', `Merge complete — ${finalStates.length} total planes | fetch: ${fetchLatency}ms`);
 
         // ── Phase C: Metadata Enrichment ──────────────────────────────
         let enrichedCount = 0;
@@ -1394,22 +1426,22 @@ async function fetchGlobalPlanes() {
                 }
             });
         } catch (dbErr) {
-            console.warn(`${getTime()} ⚠️ [METADATA] enrichment failed: ${dbErr.message}`);
+            logger.warn('METADATA', `Enrichment failed: ${dbErr.message}`);
         }
 
         const totalLatency = Math.round(performance.now() - start);
         globalPlanesCache = { states: finalStates, time: Math.floor(now/1000), stale: false };
-        
+
         broadcastPlanes(finalStates, globalPlanesCache.time);
-        
+
         const sourceStr = sourceTags.join('+');
-        console.log(`${getTime()} \x1b[32m🚀 [HYBRID] Sync Complete (${sourceStr}) | Latency: ${totalLatency}ms | Planes: ${finalStates.length} (Enriched: ${enrichedCount})\x1b[0m`);
+        logger.info('SYNC', `✅ Cycle #${syncCycleCount} complete | source: ${sourceStr} | planes: ${finalStates.length} | enriched: ${enrichedCount}/${finalStates.length} | latency: ${totalLatency}ms`);
 
         // [v10.5] Broadcast precise global telemetry with version and source blend
         broadcastTelemetry(apiStats, 10, `${AEROSTRAT_VERSION}: ${sourceStr}`);
 
     } catch (e) {
-        console.error(`${getTime()} \x1b[31m❌ [HYBRID ERROR] ${e.message}\x1b[0m`);
+        logger.error('SYNC', `Cycle #${syncCycleCount} failed: ${e.message}`);
         globalPlanesCache.stale = true;
     } finally {
         isFetchingGlobal = false;
@@ -1418,9 +1450,9 @@ async function fetchGlobalPlanes() {
     // [Audit Fix] Use centralized ingestion helper
     await ingestTrackPoints(globalPlanesCache.states, globalPlanesCache.time);
 
-    // Periodic ingestion health log (every 10th batch = ~5 min)
+    // Periodic ingestion health log (every 10th batch = ~5 min at 30s OpenSky interval)
     if (ingestionStats.totalBatches % 10 === 0 && ingestionStats.totalBatches > 0) {
-        console.log(`${getTime()} [INGEST] ${ingestionStats.totalPoints.toLocaleString()} pts | ${ingestionStats.totalBatches} batches | Last: ${ingestionStats.lastBatchSize} pts in ${ingestionStats.lastBatchMs}ms | Sessions: ${activeSessions.size} active, ${ingestionStats.sessionsCreated} created, ${ingestionStats.sessionsClosed} closed`);
+        logger.info('INGEST', `Cumulative: ${ingestionStats.totalPoints.toLocaleString()} pts | ${ingestionStats.totalBatches} batches | last batch: ${ingestionStats.lastBatchSize} pts in ${ingestionStats.lastBatchMs}ms | sessions: ${activeSessions.size} active / ${ingestionStats.sessionsCreated} created / ${ingestionStats.sessionsClosed} closed`);
     }
 }
 
@@ -1450,8 +1482,8 @@ setInterval(() => {
         }));
 
         FlightSession.bulkWrite(closeOps, { ordered: false })
-            .then(r => console.log(`${getTime()} [SESSION REAPER] Closed ${staleIds.length} timed-out sessions.`))
-            .catch(err => console.error('[SESSION REAPER]', err.message));
+            .then(() => logger.info('SESSION', `Reaper closed ${staleIds.length} timed-out sessions`))
+            .catch(err => logger.error('SESSION', `Reaper bulk write failed: ${err.message}`));
     }
 }, 300000); // Every 5 minutes
 
@@ -1756,6 +1788,19 @@ app.get('/api/metadata/:icao24', async (req, res) => {
         // 2. 檢查 MongoDB 永久快取
         const dbAircraft = await Aircraft.findOne({ icao24 }).lean();
         if (dbAircraft) {
+            // Normalize: OSINT stores type_code, OpenSky API stores typecode — unify to typecode
+            if (!dbAircraft.typecode && dbAircraft.type_code) {
+                dbAircraft.typecode = dbAircraft.type_code;
+            }
+            if (!dbAircraft.registration && dbAircraft.registered_owner) {
+                dbAircraft.registration = dbAircraft.registered_owner;
+            }
+            if (!dbAircraft.manufacturerName && dbAircraft.manufacturer) {
+                dbAircraft.manufacturerName = dbAircraft.manufacturer;
+            }
+            if (!dbAircraft.owner && dbAircraft.operator) {
+                dbAircraft.owner = dbAircraft.operator;
+            }
             return res.json(dbAircraft);
         }
 
@@ -2083,6 +2128,31 @@ app.get('/api/airport/:code', async (req, res) => {
 });
 
 // ==========================================
+// [v12.5] ADSB.lol Static DB Proxy (CORS-safe)
+// Frontend calls /api/adsb-static/:prefix → backend fetches from api.adsb.lol
+// ==========================================
+app.get('/api/adsb-static/:prefix', async (req, res) => {
+    const prefix = req.params.prefix.replace(/[^0-9a-f]/gi, '').toLowerCase().slice(0, 2);
+    if (!prefix) return res.status(400).json({ error: 'Invalid prefix' });
+    try {
+        const upstream = await fetch(`https://api.adsb.lol/v2/static/db/${prefix}.json`, {
+            signal: AbortSignal.timeout(5000)
+        });
+        // Always return 200 to client — upstream failures are silent graceful empties.
+        // Forwarding 503/504 would flood browser console with red errors.
+        if (!upstream.ok) {
+            return res.status(200).json({});
+        }
+        const data = await upstream.json();
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.json(data);
+    } catch (e) {
+        // Timeout or network error → empty response, not an error from client's perspective
+        res.status(200).json({});
+    }
+});
+
+// ==========================================
 // 飛機輪廓 SVG 資料 (來自 AircraftShape collection)
 // ==========================================
 app.get('/api/aircraft-shapes', async (req, res) => {
@@ -2209,15 +2279,18 @@ app.get('/api/aircraft/:icao24', async (req, res) => {
             AircraftRegistry.findOne({ icao24 }).lean().catch(() => null)
         ]);
 
-        // [v9.6] Professional Stale Check: Refresh if no typecode (1 day) or if record > 1 day old (instead of 30)
+        // [v9.6] Professional Stale Check: Refresh if no typecode (1 day) or if record > 1 day old
+        const hasTypecode = !!(aircraft && (aircraft.typecode || aircraft.type_code));
         const isStale = !aircraft || (
             (aircraft.noData && (new Date() - aircraft.lastUpdated > 3600000)) ||
-            (!aircraft.typecode && (new Date() - aircraft.lastUpdated > 43200000)) ||
+            (!hasTypecode && (new Date() - aircraft.lastUpdated > 43200000)) ||
             (new Date() - aircraft.lastUpdated > 86400000)
         );
 
         // 如果資料存在且有效（有機型代碼且未過期），直接回傳
-        if (aircraft && !aircraft.noData && !isStale && aircraft.typecode) {
+        if (aircraft && !aircraft.noData && !isStale && hasTypecode) {
+            // Normalize: OSINT stores type_code, unify to typecode for consistent frontend response
+            if (!aircraft.typecode && aircraft.type_code) aircraft.typecode = aircraft.type_code;
             return res.json({
                 ...aircraft,
                 age: registry?.age || null,
@@ -2226,7 +2299,7 @@ app.get('/api/aircraft/:icao24', async (req, res) => {
             });
         }
 
-        console.log(`📡 [FUSION] Resolving metadata for ${icao24}...`);
+        logger.debug('FUSION', `Resolving metadata for ${icao24}`);
 
         // --- Tier 2: adsb.fi (Fast, Open Data, Good for Typecode/Registration) ---
         let fusionData = null;
@@ -2236,7 +2309,7 @@ app.get('/api/aircraft/:icao24', async (req, res) => {
                 const fiData = await fiRes.json();
                 if (fiData.ac && fiData.ac.length > 0) {
                     const ac = fiData.ac[0];
-                    console.log(`✅ [FUSION] adsb.fi solved ${icao24}: ${ac.r} (${ac.t})`);
+                    logger.debug('FUSION', `adsb.fi resolved ${icao24}: reg=${ac.r} type=${ac.t}`);
                     fusionData = {
                         registration: ac.r || '',
                         typecode: ac.t || '',
@@ -2246,7 +2319,7 @@ app.get('/api/aircraft/:icao24', async (req, res) => {
                     };
                 }
             }
-        } catch (e) { console.warn(`⚠️ [FUSION] adsb.fi failed for ${icao24}: ${e.message}`); }
+        } catch (e) { logger.debug('FUSION', `adsb.fi failed for ${icao24}: ${e.message}`); }
 
         // --- Tier 3: OpenSky Network (Detailed, but slow/rate-limited) ---
         if (!fusionData || !fusionData.typecode) {
@@ -2254,7 +2327,7 @@ app.get('/api/aircraft/:icao24', async (req, res) => {
                 const osRes = await fetch(`https://opensky-network.org/api/metadata/aircraft/icao/${icao24}`, { signal: AbortSignal.timeout(5000) });
                 if (osRes.ok) {
                     const osData = await osRes.json();
-                    console.log(`✅ [FUSION] OpenSky solved ${icao24}: ${osData.registration} (${osData.typecode})`);
+                    logger.info('FUSION', `OpenSky solved ${icao24}: ${osData.registration} (${osData.typecode})`);
                     fusionData = {
                         registration: osData.registration || fusionData?.registration || '',
                         manufacturerName: osData.manufacturerName || '',
@@ -2266,7 +2339,7 @@ app.get('/api/aircraft/:icao24', async (req, res) => {
                         source: 'opensky'
                     };
                 }
-            } catch (e) { console.warn(`⚠️ [FUSION] OpenSky failed for ${icao24}: ${e.message}`); }
+            } catch (e) { logger.warn('FUSION', `OpenSky failed for ${icao24}: ${e.message}`); }
         }
 
         // --- Finalize & Save ---
@@ -2277,7 +2350,7 @@ app.get('/api/aircraft/:icao24', async (req, res) => {
                 noData: false,
                 lastUpdated: new Date()
             };
-            const updated = await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true, new: true }).lean();
+            const updated = await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true, returnDocument: 'after' }).lean();
             return res.json({
                 ...updated,
                 age: registry?.age || null,
@@ -2513,7 +2586,7 @@ app.get('/api/route/external', async (req, res) => {
                     arrivalAirport: externalData.arr,
                     lastUpdated: new Date()
                 },
-                { upsert: true, new: true }
+                { upsert: true, returnDocument: 'after' }
             );
 
             return res.json({
@@ -2557,13 +2630,28 @@ async function fetchTracksInternal(icao24) {
     try {
         const icao = icao24.toLowerCase();
         // 1. Get current local session
-        const session = await FlightSession.findOne({ icao24: icao }).sort({ startTime: -1 }).lean();
-        if (!session) return { icao24, path: [] };
-
-        // 2. Load local points
-        const localPoints = await TrackPoint.find({ sessionId: session.sessionId }).sort({ timestamp: 1 }).lean();
+        let session = await FlightSession.findOne({ icao24: icao }).sort({ startTime: -1 }).lean();
         
-        // 3. Trigger Official OpenSky Fetch if local data is sparse (less than 60 points / 1 min of data)
+        let localPoints = [];
+        if (session) {
+            localPoints = await TrackPoint.find({ sessionId: session.sessionId }).sort({ timestamp: 1 }).lean();
+        }
+
+        // [v10.5 Redesign] Robustness: If no session or sparse data, search by icao24 directly (last 12h)
+        if (localPoints.length < 5) {
+            const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+            const fallbackPoints = await TrackPoint.find({ 
+                icao24: icao, 
+                timestamp: { $gt: twelveHoursAgo } 
+            }).sort({ timestamp: 1 }).limit(15000).lean();
+            
+            if (fallbackPoints.length > localPoints.length) {
+                console.log(`📡 [TRACK FALLBACK] Found ${fallbackPoints.length} points for ${icao24} outside of session tracking.`);
+                localPoints = fallbackPoints;
+            }
+        }
+        
+        // 3. Trigger Official OpenSky Fetch if local data is still sparse
         // Or if the session just started and the starting point is far from the current position.
         let mergedPath = localPoints.map(pt => [
             Math.floor(pt.timestamp.getTime() / 1000),
@@ -2882,7 +2970,7 @@ app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
             photo_url: photoRes?.photos?.[0]?.thumbnail_large?.src || dbAircraft?.photo_url || dbAircraft?.photoData?.url || null,
             lastUpdated: new Date()
         };
-        const updatedAircraft = await Aircraft.findOneAndUpdate({ $or: [{ icao24: hex }, { hex: hex }] }, { $set: aircraftUpdate }, { upsert: true, new: true }).lean();
+        const updatedAircraft = await Aircraft.findOneAndUpdate({ $or: [{ icao24: hex }, { hex: hex }] }, { $set: aircraftUpdate }, { upsert: true, returnDocument: 'after' }).lean();
  
         // Flight Route Info
         const routeUpdate = {
@@ -2894,7 +2982,7 @@ app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
             arrivalAirport: routeRes?.destination_iata || dbRoute?.arrivalAirport,
             lastUpdated: new Date()
         };
-        const updatedRoute = await Route.findOneAndUpdate({ callsign }, { $set: routeUpdate }, { upsert: true, new: true }).lean();
+        const updatedRoute = await Route.findOneAndUpdate({ callsign }, { $set: routeUpdate }, { upsert: true, returnDocument: 'after' }).lean();
  
         // --- Step 5: [FINAL ASSEMBLY] Profile Serialization & Caching ---
         const finalProfile = await finalizeProfile(updatedAircraft, updatedRoute, liveState);
@@ -3055,6 +3143,7 @@ async function startServer() {
 
     server.listen(PORT, () => {
         const readyTime = new Date().toLocaleTimeString();
+        const memMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
         console.log('');
         console.log('╔══════════════════════════════════════════╗');
         console.log('║   ✈️  AEROSTRAT API Engine (Hybrid)       ║');
@@ -3062,8 +3151,11 @@ async function startServer() {
         console.log(`║   🔌 WS:  ws://localhost:${PORT}/ws           ║`);
         console.log(`║   🔐 Version: ${AEROSTRAT_VERSION} (Hybrid Sync)      ║`);
         console.log(`║   ⏱️  Ready: ${readyTime}                 ║`);
+        console.log(`║   💾 Heap: ${memMB}MB                          ║`);
+        console.log(`║   📋 Logs: backend/logs/                  ║`);
         console.log('╚══════════════════════════════════════════╝');
         console.log('');
+        logger.info('SERVER', `AEROSTRAT ${AEROSTRAT_VERSION} started on port ${PORT} | heap: ${memMB}MB | LOG_LEVEL: ${process.env.LOG_LEVEL || 'INFO'}`);
     });
 }
 

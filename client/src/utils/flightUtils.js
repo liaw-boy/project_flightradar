@@ -16,6 +16,24 @@ export function normalizeLongitude(lng) {
 // ==========================================
 export const AIRPORTS = [];
 
+/**
+ * Populate the AIRPORTS array from the loaded airport list.
+ * Called once after dataManager.getAirports() resolves.
+ */
+export function initAirportDatabase(airports) {
+    if (!Array.isArray(airports) || airports.length === 0) return;
+    AIRPORTS.length = 0;
+    for (let i = 0; i < airports.length; i++) {
+        const a = airports[i];
+        // Support both {lat, lng} and {lat, lon} field names
+        const lat = a.lat ?? a.latitude;
+        const lng = a.lng ?? a.lon ?? a.longitude;
+        if (lat != null && lng != null) {
+            AIRPORTS.push({ ...a, lat, lng });
+        }
+    }
+}
+
 // ─── [DEP] 國際機場 IATA 與城市對照表 (現在已由 DataManager 統一管理) ────────
 export const getAirportDisplayData = async (code) => {
     // 為了向下相容保留此函數，但邏輯轉發給 dataManager
@@ -27,39 +45,31 @@ export const getAirportDisplayData = async (code) => {
 // ==========================================
 const AIRLINE_DB = {
     // Taiwan
-    'CAL': 'China Airlines', 'EVA': 'EVA Air', 'MDA': 'Mandarin Airlines', 'UIA': 'Uni Air', 'TNA': 'TransAsia Airways',
-    'TTW': 'Tigerair Taiwan', 'SJX': 'StarLux Airlines', 'FEA': 'Far Eastern Air Transport',
+    'CAL': 'China Airlines 中華航空', 'EVA': 'EVA Air 長榮航空', 'MDA': 'Mandarin Airlines 華信航空',
+    'UIA': 'Uni Air 立榮航空', 'TNA': 'TransAsia Airways 復興航空', 'TTW': 'Tigerair Taiwan 台灣虎航',
+    'SJX': 'StarLux Airlines 星宇航空', 'FEA': 'Far Eastern Air Transport 遠東航空',
     // Japan
-    'JAL': 'Japan Airlines', 'ANA': 'All Nippon Airways', 'JJP': 'Jetstar Japan',
-    'APJ': 'Peach Aviation', 'SFJ': 'StarFlyer', 'ADO': 'Air Do', 'SNJ': 'Solaseed Air',
+    'JAL': 'Japan Airlines 日本航空', 'ANA': 'All Nippon Airways 全日空', 'JJP': 'Jetstar Japan 日本捷星',
+    'APJ': 'Peach Aviation 樂桃航空', 'SFJ': 'StarFlyer 星悅航空', 'ADO': 'Air Do 北海道航空',
+    'SNJ': 'Solaseed Air 空之子航空',
     // Korea
-    'KAL': 'Korean Air', 'AAR': 'Asiana Airlines', 'JNA': 'Jin Air', 'TWB': "T'way Air",
-    'JJA': 'Jeju Air', 'ABL': 'Air Busan', 'ESR': 'Eastar Jet',
+    'KAL': 'Korean Air 大韓航空', 'AAR': 'Asiana Airlines 韓亞航空', 'JNA': 'Jin Air 真航空',
+    'TWB': "T'way Air 德威航空", 'JJA': 'Jeju Air 濟州航空', 'ABL': 'Air Busan 釜山航空',
+    'ESR': 'Eastar Jet 易斯達航空',
     // China
-    'CCA': 'Air China', 'CES': 'China Eastern', 'CSN': 'China Southern', 'HXA': 'Hong Kong Airlines',
-    'CPA': 'Cathay Pacific', 'HDA': 'Hong Kong Air Cargo', 'SHQ': 'Spring Airlines',
-    'CSZ': 'Shenzhen Airlines', 'CDG': 'Shandong Airlines', 'CHH': 'Hainan Airlines',
+    'CCA': 'Air China 中國國際航空', 'CES': 'China Eastern 中國東方航空', 'CSN': 'China Southern 中國南方航空',
+    'HXA': 'Hong Kong Airlines 香港航空', 'CPA': 'Cathay Pacific 國泰航空', 'HDA': 'Cathay Dragon 國泰港龍',
+    'SHQ': 'Spring Airlines 春秋航空', 'CSZ': 'Shenzhen Airlines 深圳航空', 'CDG': 'Shandong Airlines 山東航空',
+    'CHH': 'Hainan Airlines 海南航空',
     // Southeast Asia
-    'SIA': 'Singapore Airlines', 'THA': 'Thai Airways', 'MAS': 'Malaysia Airlines',
-    'AXM': 'AirAsia', 'GIA': 'Garuda Indonesia', 'PAL': 'Philippine Airlines',
-    'CEB': 'Cebu Pacific', 'VJC': 'Vietjet', 'HVN': 'Vietnam Airlines',
-    'JSA': 'Jetstar Asia', 'SLK': 'SilkAir', 'SCO': 'Scoot', 'TGW': 'Scoot',
-    // Middle East
-    'UAE': 'Emirates', 'ETD': 'Etihad Airways', 'QTR': 'Qatar Airways',
-    'THY': 'Turkish Airlines', 'SVA': 'Saudia', 'GFA': 'Gulf Air',
-    // Europe
-    'BAW': 'British Airways', 'DLH': 'Lufthansa', 'AFR': 'Air France',
-    'KLM': 'KLM', 'SAS': 'Scandinavian Airlines', 'FIN': 'Finnair',
-    'SWR': 'Swiss Intl', 'AUA': 'Austrian Airlines', 'TAP': 'TAP Portugal',
-    'IBE': 'Iberia', 'AZA': 'ITA Airways', 'LOT': 'LOT Polish',
-    'EZY': 'easyJet', 'RYR': 'Ryanair', 'WZZ': 'Wizz Air',
-    // Americas
-    'AAL': 'American Airlines', 'DAL': 'Delta Air Lines', 'UAL': 'United Airlines',
-    'SWA': 'Southwest Airlines', 'JBU': 'JetBlue', 'ASA': 'Alaska Airlines',
-    'ACA': 'Air Canada', 'TAM': 'LATAM Brasil', 'AVA': 'Avianca',
-    // Oceania
-    'QFA': 'Qantas', 'ANZ': 'Air New Zealand', 'JST': 'Jetstar Airways',
-    'VOZ': 'Virgin Australia',
+    'SIA': 'Singapore Airlines 新加坡航空', 'THA': 'Thai Airways 泰國航空', 'MAS': 'Malaysia Airlines 馬來西亞航空',
+    'AXM': 'AirAsia 亞洲航空', 'GIA': 'Garuda Indonesia 印尼航空', 'PAL': 'Philippine Airlines 菲律賓航空',
+    'CEB': 'Cebu Pacific 宿霧太平洋航空', 'VJC': 'Vietjet 越捷航空', 'HVN': 'Vietnam Airlines 越南航空',
+    // Global Major
+    'BAW': 'British Airways 英國航空', 'DLH': 'Lufthansa 漢莎航空', 'AFR': 'Air France 法國航空',
+    'KLM': 'KLM 荷蘭皇家航空', 'UAE': 'Emirates 阿聯酋航空', 'QTR': 'Qatar Airways 卡達航空',
+    'SWA': 'Southwest Airlines 西南航空', 'AAL': 'American Airlines 美國航空', 'DAL': 'Delta Air Lines 達美航空',
+    'UAL': 'United Airlines 聯合航空', 'THY': 'Turkish Airlines 土耳其航空',
     // Cargo
     'FDX': 'FedEx Express', 'UPS': 'UPS Airlines', 'GTI': 'Atlas Air',
     'CLX': 'Cargolux', 'CKS': 'Kalitta Air', 'ABW': 'AirBridgeCargo',
@@ -182,6 +192,16 @@ export function formatLocalTime(timestamp, timeZone) {
     } catch (e) {
         return new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
     }
+}
+
+function haversine(lat1, lng1, lat2, lng2) {
+    const R = EARTH_RADIUS;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 /**
