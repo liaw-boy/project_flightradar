@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getAirlineLogoUrl, normalizeLongitude, predictPosition, getAltitudeColor, initAirportDatabase } from '../utils/flightUtils';
-import { getAircraftScale, getDrawSize, resolveTypecodeKey, getDynamicImage, prewarmExactSvg, AIRCRAFT_CATALOG as paths } from '../utils/aircraftIcons';
+import { getAircraftScale, getDrawSize, resolveTypecodeKey, getDynamicImage, prewarmExactSvg, AIRCRAFT_CATALOG as paths, ICON_SCALE_VERSION } from '../utils/aircraftIcons';
 import { dataManager } from '../services/dataManager';
 import { enrichPlaneDetails, getEnrichedData } from '../services/staticOsintCache';
 import HoverCard from './HoverCard';
@@ -139,9 +139,9 @@ export default function MapView({
     onMapMove,
     onUsageUpdate,
     colorScheme = 'TACTICAL',
-    mapLayer = 'dark',        // [v2.9.0] tile layer id
-    trackMode = false,        // [v3.0] auto-follow selected plane
-    playbackTime = null,      // [v3.1] UNIX timestamp for historical playback (null = live)
+    mapLayer = 'dark',
+    trackMode = false,
+    playbackTime = null,
     t,
     translateMetar,
     syncViewport,
@@ -729,6 +729,7 @@ export default function MapView({
     const shouldShowPlaneRef = useRef(shouldShowPlane);
     useEffect(() => { shouldShowPlaneRef.current = shouldShowPlane; }, [shouldShowPlane]);
 
+
     // [v4.1.2] Unified Selection & Camera Focus Effect
     useEffect(() => {
         if (selectedIcao24) {
@@ -988,22 +989,6 @@ export default function MapView({
                                     ctx.lineTo(pt.x, pt.y);
                                     ctx.stroke();
 
-                                    // [v10.5 Redesign] Directional Arrows (Triangles)
-                                    // Draw an arrow every 20-30 points if zoom is sufficient
-                                    if (!isOutline && zoom >= 7 && pi % 25 === 0 && pi > 0) {
-                                        const angle = Math.atan2(pt.y - prevPt.y, pt.x - prevPt.x);
-                                        ctx.save();
-                                        ctx.translate(pt.x, pt.y);
-                                        ctx.rotate(angle);
-                                        ctx.beginPath();
-                                        ctx.moveTo(0, 0);
-                                        ctx.lineTo(-6, -3);
-                                        ctx.lineTo(-6, 3);
-                                        ctx.closePath();
-                                        ctx.fillStyle = ctx.strokeStyle;
-                                        ctx.fill();
-                                        ctx.restore();
-                                    }
                                 }
                             }
                             prevPt = pt;
@@ -1146,12 +1131,11 @@ export default function MapView({
                     // Eliminates external image loading latency and improves visual density.
                     // [v14.5] Performance Optimization: Cache final drawSize by zoom
                     const activeTypecode = plane._activeTypecode || plane.typecode || 'STANDARD_JET';
-                    const cacheKey = `${activeTypecode}_${zoom}`;
+                    const cacheKey = `${activeTypecode}_${zoom}_v${ICON_SCALE_VERSION}`;
                     let drawSize = scaleCacheRef.current.get(cacheKey);
-                    
+
                     if (drawSize === undefined) {
-                        // Call legacy scale helper (once per zoom change per type)
-                        const wingspanScale = getAircraftScale(plane); 
+                        const wingspanScale = getAircraftScale(plane);
                         drawSize = getDrawSize(plane, zoom, wingspanScale);
                         scaleCacheRef.current.set(cacheKey, drawSize);
                         
@@ -1200,15 +1184,6 @@ export default function MapView({
                             ctx.translate(ptX, ptY);
                             ctx.rotate(angleRad);
                             ctx.drawImage(dynImg, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
-                            if (isSelected) {
-                                // Cyan glow ring around selected plane
-                                const r = drawSize * 0.6;
-                                ctx.strokeStyle = 'rgba(0,255,255,0.7)';
-                                ctx.lineWidth = 2;
-                                ctx.beginPath();
-                                ctx.arc(0, 0, r, 0, Math.PI * 2);
-                                ctx.stroke();
-                            }
                             ctx.restore();
                         } else {
                             // ── Tier 3: Embedded Path2D Silhouette ───────────

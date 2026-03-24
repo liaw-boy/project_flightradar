@@ -7,6 +7,7 @@
     "start": "node server.js",
     "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan.bold,magenta.bold\" \"node server.js\" \"cd client && npm run dev\"",
     "seed-shapes": "node scripts/seedAircraftShapes.js",
+    "sync-mictronics": "node scripts/syncMictronics.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -14,6 +15,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "adm-zip": "^0.5.16",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
     "csv-parser": "^3.2.0",

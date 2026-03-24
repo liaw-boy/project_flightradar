@@ -166,15 +166,19 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
     const dbRoute    = dbConnected ? await Route.findOne({ callsign }).lean() : null;
 
     try {
-        // [v12.0] High-Performance Layer 0: Local Master Database (tar1090-db)
+        // [v12.0] High-Performance Layer 0: Local Master Database (Mictronics + legacy)
         let resolvedMetadata = null;
         if (dbAircraft && dbAircraft.type_code) {
-            logger.debug('FUSION', `L0 DB match: ${hex} → ${dbAircraft.type_code}`);
+            logger.debug('FUSION', `L0 DB match: ${hex} → ${dbAircraft.type_code} (src:${dbAircraft.source || 'legacy'})`);
+            const rawAirline = dbAircraft.operator || dbAircraft.airline || '';
+            const knownAirline = rawAirline && rawAirline !== 'Unknown' ? rawAirline : null;
             resolvedMetadata = {
                 type: dbAircraft.type_code,
                 registration: dbAircraft.registration || 'Unknown',
-                manufacturer: dbAircraft.manufacturer || 'Unknown',
-                airline: dbAircraft.operator || dbAircraft.airline || 'Unknown',
+                // model: "Boeing 737-800" from Mictronics aircraft_types enrichment
+                description: dbAircraft.model || dbAircraft.manufacturerName || 'Unknown',
+                manufacturer: dbAircraft.manufacturerName || dbAircraft.manufacturer || 'Unknown',
+                airline: knownAirline || 'Unknown',
                 icon_type: dbAircraft.icon_type || 'STANDARD_JET'
             };
         }
@@ -313,7 +317,7 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
                     registration: data.registration || data.r || (dbAircraft ? dbAircraft.registration : 'Unknown'),
                     airline: data.airline || data.ownOp || (dbAircraft ? (dbAircraft.operator || dbAircraft.airline) : 'Unknown'),
                     icon_type: data.icon_type || (dbAircraft ? dbAircraft.icon_type : 'STANDARD_JET'),
-                    description: data.description || data.desc || (dbAircraft ? dbAircraft.description : null),
+                    description: data.description || data.desc || (dbAircraft ? (dbAircraft.model || dbAircraft.description) : null),
                     is_military_or_private: false
                 };
             }
@@ -354,7 +358,7 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
             operator: aircraftInfo.airline,
             airline: aircraftInfo.airline,
             icon_type: aircraftInfo.icon_type,
-            description: aircraftInfo.description || (dbAircraft ? dbAircraft.description : null),
+            description: aircraftInfo.description || (dbAircraft ? (dbAircraft.model || dbAircraft.description) : null),
             photo_url: photoUrl || (dbAircraft ? dbAircraft.photo_url : null),
             photographer: photographer || (dbAircraft ? dbAircraft.photographer : null),
             is_military_or_private: aircraftInfo.is_military_or_private,

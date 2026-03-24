@@ -58,7 +58,8 @@ const AIRLINE_DB = {
     'ESR': 'Eastar Jet 易斯達航空',
     // China
     'CCA': 'Air China 中國國際航空', 'CES': 'China Eastern 中國東方航空', 'CSN': 'China Southern 中國南方航空',
-    'HXA': 'Hong Kong Airlines 香港航空', 'CPA': 'Cathay Pacific 國泰航空', 'HDA': 'Cathay Dragon 國泰港龍',
+    'CRK': 'Hong Kong Airlines 香港航空', 'HXA': 'Hong Kong Airlines 香港航空',
+    'CPA': 'Cathay Pacific 國泰航空', 'HDA': 'Cathay Dragon 國泰港龍', 'HKE': 'Cathay Pacific 國泰航空',
     'SHQ': 'Spring Airlines 春秋航空', 'CSZ': 'Shenzhen Airlines 深圳航空', 'CDG': 'Shandong Airlines 山東航空',
     'CHH': 'Hainan Airlines 海南航空',
     // Southeast Asia

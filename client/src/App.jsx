@@ -82,6 +82,7 @@ export default function App() {
         logToServer(`Color scheme changed: ${scheme}`, 'info');
     }, []);
 
+
     const mapInstanceRef = useRef(null);
 
     const {

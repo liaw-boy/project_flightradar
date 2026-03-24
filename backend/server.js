@@ -56,6 +56,12 @@ mongoose.connect(MONGODB_URI, {
     const { initOsintData } = require('./scripts/syncOsintData');
     initOsintData();
 
+    // [Phase 17] Mictronics Aircraft DB — runs after OSINT, non-blocking
+    const { syncMictronics } = require('./scripts/syncMictronics');
+    syncMictronics(msg => logger.info('MICTRONICS', msg)).catch(err =>
+        logger.warn('MICTRONICS', `Sync failed (non-fatal): ${err.message}`)
+    );
+
     // Sync TTL index to match schema (MongoDB won't auto-update existing TTL values)
     try {
         const db = mongoose.connection.db;

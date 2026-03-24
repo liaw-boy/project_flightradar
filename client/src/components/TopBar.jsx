@@ -18,7 +18,7 @@ export default function TopBar({
     colorScheme,
     onColorSchemeChange,
     mapLayer,
-    onMapLayerChange
+    onMapLayerChange,
 }) {
     const { t, lang, toggleLang } = useI18n();
     const [time, setTime] = useState('--:--:--');

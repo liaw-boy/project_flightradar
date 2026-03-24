@@ -39,7 +39,10 @@ const AircraftSchema = new mongoose.Schema({
         engines: { type: String, default: '' },
         capacity: { type: Number, default: 0 }
     },
-    registered_owner: { type: String, default: '' }, 
+    registered_owner: { type: String, default: '' },
+    description: { type: String, default: '' },   // Full model description e.g. "Boeing 737-800"
+    source: { type: String, default: null, index: true }, // Data provenance: 'mictronics' | null
+    is_military_or_private: { type: Boolean, default: false },
     lastUpdated: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now, index: { expires: '90d' } } // Extended persistence to 90 days
 });

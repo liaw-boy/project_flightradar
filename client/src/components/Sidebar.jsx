@@ -5,7 +5,6 @@ import {
     getNearestAirport, formatVerticalRate, getAirportDisplayData,
     formatLocalTime
 } from '../utils/flightUtils';
-import { getDynamicImage, prewarmExactSvg, isSvgUnavailable } from '../utils/aircraftIcons';
 import { useI18n } from '../hooks/useI18n';
 import { logToServer, logger } from '../utils/logger';
 import { dataManager } from '../services/dataManager';
@@ -160,37 +159,14 @@ export default function Sidebar({
     const typecode = aircraft.type || metadata?.typecode || plane.typecode || '--';
     
     // [v12.5] P0 Fix: Information Anemia - Priority resolve names
-    const aircraftModel = aircraft.description || plane.description ||
-                          [aircraft.manufacturer, aircraft.type || typecode].filter(Boolean).join(' ') ||
-                          (metadata ? [metadata.manufacturerName, metadata.model].filter(Boolean).join(' ') : (plane.aircraftType || 'Unknown Aircraft'));
+    const _isKnown = v => v && v !== 'Unknown' && v !== 'unknown' && v !== '--';
+    const aircraftModel = (_isKnown(aircraft.description) && aircraft.description) ||
+                          (_isKnown(plane.description) && plane.description) ||
+                          [aircraft.manufacturer, aircraft.type].filter(_isKnown).join(' ') ||
+                          (metadata ? [metadata.manufacturerName, metadata.model].filter(_isKnown).join(' ') : '') ||
+                          '';
 
-    // ── Image Resolution: SVG → Planespotters (direct) → fusion photo_url ──────
-    // Priority 1: RexKramer1 SVG silhouette (by typecode, tactical yellow).
-    // NOTE: SVG data-URIs always have naturalWidth === 0 — check img !== null, not naturalWidth.
-    const [svgSrc, setSvgSrc] = useState(null);
-    useEffect(() => {
-        if (!typecode || typecode === '--') { setSvgSrc(null); return; }
-        prewarmExactSvg(typecode);
-        
-        let attempts = 0;
-        const timer = setInterval(() => {
-            if (isSvgUnavailable(typecode)) { 
-                setSvgSrc(null);
-                clearInterval(timer); 
-                return; 
-            }
-            const cachedImg = getDynamicImage(typecode, false);
-            if (cachedImg && cachedImg.src) {
-                setSvgSrc(cachedImg.src); // [Architecture Checkpoint] img.src = cachedImg.src
-                clearInterval(timer);
-            } else if (++attempts > 20) {
-                clearInterval(timer);
-            }
-        }, 500);
-        return () => clearInterval(timer);
-    }, [typecode]);
-
-    // Priority 2: Direct Planespotters fetch — mirrors exactly what HoverCard does.
+    // ── Image Resolution: Planespotters (direct) → fusion photo_url ──────
     // Falls back when SVG unavailable and fusion API's photo_url is null/missing.
     const [directPhoto, setDirectPhoto] = useState(null);
     useEffect(() => {
@@ -249,8 +225,7 @@ export default function Sidebar({
                     </h2>
                     <div className="sb-subtitle" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {logoUrl && <img src={logoUrl} alt="" className="sb-airline-logo-mini" style={{ display: 'inline-block', marginRight: '4px' }} onError={(e) => e.target.style.display = 'none'} />}
-                        {(aircraft.airline && aircraft.airline !== 'Unknown') ? aircraft.airline : (airlineName || 'Unknown')} — {displayRegistration}
-                        <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '2px' }}>{aircraftModel}</div>
+                        {(aircraft.airline && aircraft.airline !== 'Unknown') ? aircraft.airline : (airlineName || '')}
                     </div>
                 </div>
                 <div className="sb-header-actions">
@@ -268,21 +243,10 @@ export default function Sidebar({
 
                 <div className="sb-photo-container">
                     {(() => {
-                        // [v13.0] Open-Source Refactor: SILHOUETTE IS NOW MANDATORY TACTICAL VIEW
-                        // Prioritize SVG silhouette over real photos for the AEROSTRAT Tactical feel.
-                        if (svgSrc) {
-                            return (
-                                <div className="sb-photo-carousel sb-silhouette-view">
-                                    <img src={svgSrc} alt={typecode} className="aircraft-silhouette" />
-                                    <div className="sb-photo-credit">RexKramer1 / AircraftShapesSVG · {typecode}</div>
-                                </div>
-                            );
-                        }
-
-                        // Priority 2: Real photo (Planespotters) — only as fallback to silhouette
+                        // Priority 1: Real photo (Planespotters) — photographer's actual aircraft photo
                         const photoUrl = aircraft.photo_url || directPhoto?.url;
                         const photographer = aircraft.photographer || directPhoto?.photographer || 'Planespotters.net';
-                        
+
                         if (photoUrl) {
                             return (
                                 <div className="sb-photo-carousel">
@@ -296,8 +260,8 @@ export default function Sidebar({
                             );
                         }
 
-                        // Loading spinner while SVG or photo are still resolving
-                        if (isLoadingDetails || (!isSvgUnavailable(typecode) && typecode !== '--')) {
+                        // Loading spinner while photo is still resolving
+                        if (isLoadingDetails) {
                             return (
                                 <div className="sb-photo-carousel sb-photo-loading">
                                     <PlaneIcon size={48} className="sb-photo-loading-icon" />
@@ -462,7 +426,7 @@ export default function Sidebar({
                         <DataRow label={t('icao24')} value={icao24.toUpperCase()} />
                         <DataRow label={t('registration')} value={displayRegistration} />
                         <DataRow label={t('type')} value={typecode} />
-                        <DataRow label="Aircraft" value={aircraftModel} />
+                        {aircraftModel && <DataRow label="Aircraft" value={aircraftModel} />}
                         <DataRow label={t('airline')} value={
                             (aircraft.airline && aircraft.airline !== 'Unknown') ? aircraft.airline : (airlineName || '--')
                         } />
