@@ -201,60 +201,55 @@ export function getNearestAirport(lat, lng) {
     return nearest ? { airport: nearest, distance: Math.round(minDist) } : null;
 }
 
+// ── adsb.fi / tar1090 altitude color stops (HSL) ─────────────────────────────
+// Matches the adsb.fi rainbow gradient: green (low) → yellow → orange → red →
+// purple/magenta → blue (cruise). All values in [hue, saturation%, lightness%].
+const _ALT_STOPS = [
+    { alt:     0, h: 120, s: 80, l: 48 }, // ground-level green
+    { alt:  5000, h:  90, s: 88, l: 50 }, // yellow-green
+    { alt: 10000, h:  55, s: 95, l: 50 }, // yellow
+    { alt: 20000, h:  25, s: 95, l: 55 }, // orange
+    { alt: 30000, h:   0, s: 90, l: 60 }, // red
+    { alt: 38000, h: 295, s: 85, l: 58 }, // purple / magenta
+    { alt: 45000, h: 240, s: 90, l: 65 }, // deep blue (FL450+)
+];
+
 /**
- * 根據高度回傳對應顏色 (支援多重配色方案)
+ * Returns the adsb.fi altitude gradient color for a given altitude (metres).
+ *
+ * scheme = 'TACTICAL'  → uniform #ffce00 (legacy tactical yellow, no altitude info)
+ * scheme = 'ALTITUDE'  → smooth HSL gradient (default, matches adsb.fi)
  */
-export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'TACTICAL') {
-    if (isEmergency) return '#ef4444'; // Red-500 (Emergency)
-    if (onGround || altitude === 'N/A' || altitude === 'GROUND') return '#64748b'; // Slate-500 (Ground)
+export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'ALTITUDE') {
+    if (isEmergency) return '#ef4444';
+    if (scheme === 'TACTICAL') return '#ffce00';
+    if (onGround || altitude === 'GROUND') return '#94a3b8'; // slate — parked / taxiing
 
     const alt = parseFloat(altitude);
+    if (isNaN(alt) || alt <= 0) return '#94a3b8';
 
-    const SCHEMES = {
-        // [v2.6.6] Current Default
-        TACTICAL: {
-            low: '#f59e0b',    // Amber
-            mid: '#10b981',    // Emerald
-            high: '#6366f1'    // Indigo
-        },
-        // [v2.6.5] Classic
-        CLASSIC: {
-            low: '#fbbf24',    // Amber-400
-            mid: '#22d3ee',    // Cyan-400
-            high: '#3b82f6'    // Blue-500
-        },
-        // Maximum Visibility
-        VIVID: {
-            low: '#fb923c',    // Orange-400
-            mid: '#a3e635',    // Lime-400
-            high: '#d946ef'    // Fuchsia-500
-        },
-        // Pro-Contrast
-        MONO: {
-            low: '#fde047',    // Yellow-300
-            mid: '#4ade80',    // Green-400
-            high: '#f472b6'    // Pink-400
-        },
-        // Thermal / Heat look
-        HEATMAP: {
-            low: '#dc2626',    // Red-600
-            mid: '#facc15',    // Yellow-400
-            high: '#f8fafc'    // Slate-50
-        },
-        // Stealth / Night look
-        MIDNIGHT: {
-            low: '#475569',    // Slate-600
-            mid: '#1e3a8a',    // Blue-900
-            high: '#7c3aed'    // Violet-600
-        }
-    };
-
-    const colors = SCHEMES[scheme] || SCHEMES.TACTICAL;
-
-    if (alt < 2500) return colors.low;
-    if (alt < 9000) return colors.mid;
-    return colors.high;
+    const stops = _ALT_STOPS;
+    // Clamp to range
+    if (alt >= stops[stops.length - 1].alt) {
+        const s = stops[stops.length - 1];
+        return `hsl(${s.h},${s.s}%,${s.l}%)`;
+    }
+    // Find bracketing stops
+    let lo = stops[0], hi = stops[1];
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (alt >= stops[i].alt && alt < stops[i + 1].alt) { lo = stops[i]; hi = stops[i + 1]; break; }
+    }
+    const t = (hi.alt === lo.alt) ? 1 : (alt - lo.alt) / (hi.alt - lo.alt);
+    // Shortest-path hue interpolation (handles the 0°↔360° wrap)
+    let dh = hi.h - lo.h;
+    if (dh >  180) dh -= 360;
+    if (dh < -180) dh += 360;
+    const h = ((lo.h + t * dh) % 360 + 360) % 360;
+    const s = lo.s + t * (hi.s - lo.s);
+    const l = lo.l + t * (hi.l - lo.l);
+    return `hsl(${Math.round(h)},${Math.round(s)}%,${Math.round(l)}%)`;
 }
+
 
 /**
  * 產生飛機 SVG HTML

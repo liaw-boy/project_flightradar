@@ -4,7 +4,7 @@ require('dotenv').config();
 const Airline = require('../models/Airline');
 const Airport = require('../models/Airport');
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27018/aerostrat';
 
 /**
  * 格式化 Logo 網址

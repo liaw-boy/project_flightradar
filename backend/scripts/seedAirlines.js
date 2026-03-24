@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 require('dotenv').config();
 const Airline = require('../models/Airline');
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27018/aerostrat';
 
 const airlinesData = [
     { icao: 'EVA', name: 'EVA Air', country: 'Taiwan', logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/EVA_Air_logo.svg/512px-EVA_Air_logo.svg.png' },

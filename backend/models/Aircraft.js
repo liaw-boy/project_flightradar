@@ -16,14 +16,18 @@ const AircraftSchema = new mongoose.Schema({
     operatorCallsign: { type: String, default: '' },
     built: { type: String, default: '' },
     categoryDescription: { type: String, default: '' },
-    // [v11] DB-First Professional Fields
-    hex: { type: String, index: true }, // Alias for icao24
-    type: { type: String, default: '' }, // Alias for model/typecode
-    manufacturer: { type: String, default: '' },
+    // [v12.0] High-Performance UI Integration
+    hex: { type: String, unique: true, index: true, lowercase: true, trim: true }, // [MANDATORY] Unique HEX Index
     registration: { type: String, default: '' },
-    airline: { type: String, default: '' },
-    photo_url: { type: String, default: null },
+    type_code: { type: String, default: '', index: true }, // [MANDATORY] ICAO Type Code (e.g. B738)
+    operator: { type: String, default: '' }, // [MANDATORY] Airline/Operator
+    icon_type: { type: String, default: 'STANDARD_JET', index: true }, // [MANDATORY] Pre-calculated Sidebar/Map icon key
     
+    manufacturer: { type: String, default: '' },
+    airline: { type: String, default: '' }, // Legacy alias for operator
+    photo_url: { type: String, default: null },
+    photographer: { type: String, default: null },
+
     photoData: {
         url: { type: String, default: null },
         thumbnail: { type: String, default: null },
@@ -37,7 +41,7 @@ const AircraftSchema = new mongoose.Schema({
     },
     registered_owner: { type: String, default: '' }, 
     lastUpdated: { type: Date, default: Date.now },
-    updatedAt: { type: Date, default: Date.now, index: { expires: '30d' } }
+    updatedAt: { type: Date, default: Date.now, index: { expires: '90d' } } // Extended persistence to 90 days
 });
 
 

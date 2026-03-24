@@ -103,7 +103,26 @@
     border-radius: 2px;
 }
 
+/* Skeleton loading bars */
+.sb-skel-bar {
+    background: rgba(71, 85, 105, 0.6);
+    border-radius: 3px;
+    animation: sb-pulse 1.5s ease-in-out infinite;
+}
+
+.sb-weather-skeleton {
+    animation: sb-pulse 1.5s ease-in-out infinite;
+}
+
 /* Photo & Logo */
+.sb-photo-container {
+    width: 100%;
+    overflow: hidden;
+    background: #0f172a;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    flex-shrink: 0;
+}
+
 .sb-photo-carousel {
     width: 100%;
     height: 200px;
@@ -112,11 +131,59 @@
     overflow: hidden;
 }
 
+/* Loading skeleton state */
+.sb-photo-loading {
+    background: rgba(30, 41, 59, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: sb-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes sb-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.sb-photo-loading-icon {
+    color: #475569;
+    opacity: 0.5;
+}
+
+.sb-photo-placeholder-icon {
+    color: #475569;
+    opacity: 0.25;
+    margin-bottom: 8px;
+}
+
+.sb-photo-placeholder-text {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #475569;
+    text-transform: uppercase;
+}
+
 .aircraft-photo {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
+}
+
+/* RexKramer1 SVG silhouette view — tactical yellow on dark */
+.sb-silhouette-view {
+    background: radial-gradient(ellipse at center, #0f172a 0%, #020617 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.aircraft-silhouette {
+    max-width: 70%;
+    max-height: 160px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 12px rgba(255, 206, 0, 0.5));
 }
 
 .sb-photo-credit {
@@ -150,14 +217,14 @@
 }
 
 .sb-logo-placeholder {
-    height: 180px;
+    height: 200px;
     background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     position: relative;
     overflow: hidden;
-    border-radius: 12px;
 }
 
 .sb-logo-placeholder::before {

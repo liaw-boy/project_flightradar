@@ -18,7 +18,7 @@ const mongoose = require('mongoose');
 const AircraftShape = require('../models/AircraftShape');
 
 const { execSync } = require('child_process');
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27018/aerostrat';
 const DATA_FILE = path.resolve(__dirname, '../../client/src/data/aircraftShapesData.js');
 const BUILD_SCRIPT = path.resolve(__dirname, '../../scripts/build-aircraft-shapes.js');
 

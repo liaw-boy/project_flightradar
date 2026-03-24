@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getAirlineLogoUrl, normalizeLongitude, predictPosition } from '../utils/flightUtils';
-import { getAircraftIconUrl, getAircraftScale, getAltitudeColor } from '../utils/aircraftIcons';
+import { getAirlineLogoUrl, normalizeLongitude, predictPosition, getAltitudeColor } from '../utils/flightUtils';
+import { getAircraftScale, getDrawSize, resolveTypecodeKey, getDynamicImage, prewarmExactSvg, AIRCRAFT_CATALOG as paths } from '../utils/aircraftIcons';
 import { dataManager } from '../services/dataManager';
+import { enrichPlaneDetails, getEnrichedData } from '../services/staticOsintCache'; // Task 2: Sync and Persistent OSINT
 import HoverCard from './HoverCard';
 
 /**
@@ -73,30 +74,8 @@ const FR24_BASE_PX = 36; // Base icon size — PlaneFinder reference
 const TRAIL_LEN = 12;    // Ring buffer depth for gradient trail
 const TRAIL_MIN_DIST_SQ = 0.000004; // ~2m² — skip duplicate trail points
 
-function getDrawSize(plane, z, scale) {
-    const s = Math.max(scale || 1.0, 0.2);
+// [v14.0] High-Performance Rendering Logic
 
-    // [Phase 23 Fix] Direct scale passthrough.
-    // The previous logic heavily compressed scales (Math.pow(s, 0.15)) and hard-clamped 
-    // to a max of 1.4x, which completely muted our 2.8x B737/A320 Padding Up-Scales.
-    // Now we linearly respect `getAircraftScale` as the absolute source of truth.
-    const basePaddedSize = FR24_BASE_PX * s;
-
-    if (z <= 9) {
-        // At low zooms, uniformly shrink slightly to prevent map overlap clutter
-        return Math.round(basePaddedSize * 0.85);
-    }
-    
-    if (z <= 11) {
-        // Linearly glide scale from 0.85 to 1.0 over zoom levels 10 and 11
-        const t = (z - 9) / 2;
-        return Math.round(basePaddedSize * (0.85 + (0.15 * t)));
-    }
-
-    // z >= 12: Grow progressively larger with the map at high street-level zooms
-    const growthFactor = Math.pow(1.12, z - 11);
-    return Math.round(basePaddedSize * growthFactor);
-}
 
 // ─── Haversine distance helper (km) ──────────────────────────────────────────
 function haversineKm(lat1, lon1, lat2, lon2) {
@@ -109,7 +88,19 @@ function haversineKm(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Render mode flags for 60fps interaction optimization
+// ─── [v14.0] Path2D Vector Object Cache (with ViewBox support) ──────────────
+const vectorPathsMap = new Map();
+Object.entries(paths).forEach(([key, entry]) => {
+    const vbArr = (entry.vb || "0 0 500 500").split(/\s+/).map(Number);
+    vectorPathsMap.set(key, {
+        path: new Path2D(entry.d),
+        vb: vbArr
+    });
+});
+
+// ─── [v12.0] Altitude Coloring Logic ─────────────────────────────────────────
+// [Visual] Standardized altitude colors imported from flightUtils
+// [v14.0] High-Performance Rendering Mode Active
 const RENDER_MODE_FULL = 0;
 const RENDER_MODE_SIMPLE = 1;
 
@@ -117,6 +108,23 @@ const RENDER_MODE_SIMPLE = 1;
  * MapView — 管理 Leaflet 地圖、飛機 markers、軌跡線、機場圖層
  * 使用原生 Leaflet（非 react-leaflet）以獲得對 marker 的完全控制
  */
+// [v14.1] High-Performance Vector Silhouettes resolver
+// Uses resolveTypecodeKey() from aircraftIcons for full fuzzy matching,
+// guaranteeing every call returns a key that exists in vectorPathsMap.
+const getAircraftVectorKey = (plane) => {
+    // 1. Backend-provided shape key — only accept if it's a known catalog entry
+    if (plane.icon_type) {
+        const k = plane.icon_type.toUpperCase();
+        if (paths[k]) return k;
+    }
+    // 2. Direct catalog hit (exact typecode match)
+    const tc = (plane._activeTypecode || plane.typecode || '').toUpperCase();
+    if (tc && paths[tc]) return tc;
+    // 3. Full fuzzy resolution: prefix alias → category detection → CATEGORY_FALLBACK → DEFAULT
+    //    resolveTypecodeKey() is guaranteed to return a key present in AIRCRAFT_CATALOG.
+    return resolveTypecodeKey(tc, plane.category);
+};
+
 export default function MapView({
     planesDict,
     selectedIcao24,
@@ -140,10 +148,19 @@ export default function MapView({
     const [hoveredPlane, setHoveredPlane] = useState(null);
     const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
 
+    useEffect(() => {
+        // [v14.1] Data arrival sentinel for debugging - can be removed after verified
+        const count = planesDict ? Object.keys(planesDict).length : 0;
+        if (count > 0 && !window._hasWarnedPlanes) {
+             console.log(`[MapView] Data stream active: ${count} planes.`);
+             window._hasWarnedPlanes = true;
+        }
+    }, [planesDict]);
+
     const mapContainerRef = useRef(null);
     const mapRef = useRef(null);
     const canvasLayerRef = useRef(null);
-    const cachedPathsRef = useRef(new Map()); // Cache Path2D objects
+    const metadataCacheRef = useRef(new Map()); // [v3.4] Cache for logos/metadata
     const routeLineRef = useRef(null);
 
     const predictiveLineRef = useRef(null);
@@ -169,8 +186,8 @@ export default function MapView({
     // [v6.0] FR24 Render Mode: track active pan/zoom for simplified rendering
     const renderModeRef = useRef(RENDER_MODE_FULL);
     const renderModeTimeoutRef = useRef(null);
-    // [v6.0] ImageBitmap cache — pre-warmed offscreen bitmaps keyed by SVG URL
-    const bitmapCacheRef = useRef(new Map());
+    // [v14.5] Performance: Scale cache to avoid redundant per-frame calculations
+    const scaleCacheRef = useRef(new Map());
     const idleTimeoutRef = useRef(null);
     const syncTimeoutRef = useRef(null);
 
@@ -189,6 +206,7 @@ export default function MapView({
     useEffect(() => { filtersRef.current = filters; }, [filters]);
 
     const [airports, setAirports] = useState([]);
+    const [mapInstance, setMapInstance] = useState(null);
     const airportsRef = useRef([]);
     const [bounds, setBounds] = useState(null);
 
@@ -458,6 +476,7 @@ export default function MapView({
         }, 100);
 
         onMapReady?.(map);
+        setMapInstance(map);
 
         // [Project AERO-SYNC] L3 Persistent Airport Loading
         dataManager.getAirports().then(data => {
@@ -594,55 +613,8 @@ export default function MapView({
         }
     }, [mapLayer]);
 
-    const weatherLayerRef = useRef(null);
-    // [Phase 16] Tactical OSINT Weather Radar Layer
-    useEffect(() => {
-        if (!mapRef.current) return;
-        const map = mapRef.current;
-        let weatherInterval;
-
-        const fetchWeather = async () => {
-            try {
-                const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
-                if (!res.ok) return;
-                const data = await res.json();
-                const past = data.radar.past;
-                if (!past || past.length === 0) return;
-                
-                const timestamp = past[past.length - 1].time;
-                
-                if (weatherLayerRef.current) {
-                    map.removeLayer(weatherLayerRef.current);
-                }
-
-                weatherLayerRef.current = L.tileLayer(`https://tilecache.rainviewer.com/v2/radar/${timestamp}/256/{z}/{x}/{y}/2/1_1.png`, {
-                    opacity: 0.4,
-                    zIndex: 2, // Right above basemap
-                    maxZoom: 19,
-                    className: 'osint-weather-layer'
-                }).addTo(map);
-            } catch (e) {
-                console.warn("[OSINT] Failed to fetch weather radar tile:", e);
-            }
-        };
-
-        // Wait a brief moment to ensure map is fully painted before adding radar
-        setTimeout(fetchWeather, 1000);
-        weatherInterval = setInterval(fetchWeather, 5 * 60 * 1000); // Update every 5 minutes
-
-        return () => {
-            clearInterval(weatherInterval);
-            if (weatherLayerRef.current && map) {
-                map.removeLayer(weatherLayerRef.current);
-                weatherLayerRef.current = null;
-            }
-        };
-    }, []);
-
     // [v3.0] Track mode: update ref so animation loop sees latest value
-    useEffect(() => {
-        trackModeRef.current = trackMode;
-    }, [trackMode]);
+
 
 
     // [Project AERO-SYNC] Zero-GC Pure Math Projector (Global Space Version)
@@ -787,43 +759,25 @@ export default function MapView({
 
     // ===== 動畫引擎與 Canvas 渲染 (Project AERO-SYNC) =====
     useEffect(() => {
-        const map = mapRef.current;
+        const map = mapInstance;
         if (!map) return;
 
-        // [v8.0] Dual-layer icon cache aware of selection state
-        const getSVGImage = (plane, isSelected) => {
-            const url = getAircraftIconUrl(plane, isSelected);
-            if (!cachedPathsRef.current.has(url)) {
-                const img = new Image();
-                img.src = url;
-                cachedPathsRef.current.set(url, img);
-                // Pre-warm ImageBitmap once the Image decodes
-                img.decode?.().then(() => {
-                    if (typeof createImageBitmap === 'function' && img.naturalWidth > 0) {
-                        createImageBitmap(img).then(bmp => {
-                            bitmapCacheRef.current.set(url, bmp);
-                        }).catch(() => { });
-                    }
-                }).catch(() => { });
-            }
-            // Prefer ImageBitmap (GPU-ready), fall back to HTMLImageElement
-            return bitmapCacheRef.current.get(url) || cachedPathsRef.current.get(url);
-        };
 
         // [v3.4] Airline Logo Cache for Canvas
         const getLogoImage = (callsign) => {
             const logoUrl = getAirlineLogoUrl(callsign);
             if (!logoUrl) return null;
-            if (!cachedPathsRef.current.has(logoUrl)) {
+            if (!metadataCacheRef.current.has(logoUrl)) {
                 const img = new Image();
                 img.src = logoUrl;
-                cachedPathsRef.current.set(logoUrl, img);
+                metadataCacheRef.current.set(logoUrl, img);
             }
-            return cachedPathsRef.current.get(logoUrl);
+            return metadataCacheRef.current.get(logoUrl);
         };
 
         function animate(time) {
             const currentPlanes = planesDictRef.current || {};
+            const currentPlanesKeys = Object.keys(currentPlanes);
             const currentSelected = selectedIcao24Ref.current;
             const pbTime = playbackTimeRef.current;
             let isPlaybackActive = false;
@@ -838,6 +792,28 @@ export default function MapView({
             // Update Positions with Interpolation (Phase 8)
             Object.keys(currentPlanes).forEach(id => {
                 const plane = currentPlanes[id];
+
+                // ??? 邊緣運算零延遲注入 (Task 2: Dynamic Merging via Persistent Cache)
+                const enriched = getEnrichedData(id);
+                // 決定最終要用來畫圖的 typecode (優先使用原始資料，其次是快取補強)
+                const activeTypecode = plane.typecode || (enriched ? enriched.typecode : null);
+                
+                // 如果還是不知道，且還沒發送過請求，就在背景觸發
+                if (!activeTypecode && !plane._isEnriching) {
+                    plane._isEnriching = true;
+                    enrichPlaneDetails(id).catch(() => {}); 
+                }
+                
+                // 將 activeTypecode 暫存於物件中供後續繪圖迴圈讀取 (雖然物件會被覆蓋，但動畫幀內是穩定的)
+                plane._activeTypecode = activeTypecode;
+
+                // Pre-warm exact GitHub SVG the first time we know the typecode.
+                // prewarmExactSvg() is a no-op for repeated calls and never blocks.
+                if (activeTypecode && !plane._svgPrewarmed) {
+                    plane._svgPrewarmed = true;
+                    prewarmExactSvg(activeTypecode);
+                }
+
                 const currentLat = plane.renderLat || plane.lat;
                 const currentLng = plane.renderLng || plane.lng;
 
@@ -947,35 +923,32 @@ export default function MapView({
                 const ctx = canvasLayerRef.current.ctx;
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+                // [v9.0] Safety Guard: Ensure map is fully initialized before zoom lookup
+                if (!map || typeof map.getZoom !== 'function') return;
                 const zoom = map.getZoom();
 
                 // ── [v8.0] Professional Altitude-Colored Track with Outline ──
                 const flightPath = trackPointsRef.current;
                 if (flightPath && flightPath.length > 1 && currentSelected) {
-                    // [Phase 18] Dynamic Track Stitching
-                    // Append actual backend heartbeat coordinates to the historical trace to prevent the gap
                     const livePlane = currentPlanes[currentSelected];
-                    if (livePlane && livePlane.lat != null && livePlane.lng != null) {
-                        const lastSeg = flightPath[flightPath.length - 1];
-                        const dLat = Math.abs(lastSeg[1] - livePlane.lat);
-                        const dLng = Math.abs(lastSeg[2] - livePlane.lng);
-                        if (dLat > 0.0001 || dLng > 0.0001) {
-                            flightPath.push([
-                                Date.now() / 1000,
-                                livePlane.lat,
-                                livePlane.lng,
-                                livePlane.altitude || lastSeg[3],
-                                livePlane.heading !== undefined ? livePlane.heading : lastSeg[4],
-                                livePlane.velocity !== undefined ? livePlane.velocity : lastSeg[5]
-                            ]);
-                        }
-                    }
+
+                    // [Fix] Immutable spread: build combined render path without mutating state.
+                    // trackPoints format: [timestamp, lat, lng, altitude, heading, velocity]
+                    const renderPath = livePlane?.renderLat
+                        ? [...flightPath, [
+                            Date.now() / 1000,
+                            livePlane.renderLat,
+                            livePlane.renderLng,
+                            livePlane.altitude,
+                            livePlane.heading,
+                            livePlane.velocity
+                          ]]
+                        : flightPath;
 
                     ctx.save();
                     ctx.lineCap = 'round';
                     ctx.lineJoin = 'round';
 
-                    // trackPoints format: [timestamp, lat, lng, altitude, heading, velocity]
                     const drawTrack = (isOutline) => {
                         ctx.lineWidth = isOutline
                             ? (zoom >= 12 ? 5 : 4)
@@ -986,8 +959,8 @@ export default function MapView({
                         let prevPt = null;
                         let prevSeg = null;
 
-                        for (let pi = 0; pi < flightPath.length; pi++) {
-                            const seg = flightPath[pi];
+                        for (let pi = 0; pi < renderPath.length; pi++) {
+                            const seg = renderPath[pi];
                             const lat = seg[1];
                             const lng = seg[2];
                             const pt = map.latLngToContainerPoint([lat, normalizeLongitude(lng)]);
@@ -998,8 +971,8 @@ export default function MapView({
 
                                 if (dist < 50 && !isAntimeridian) {
                                     if (!isOutline) {
-                                        const avgAlt = (prevSeg[3] + seg[3]) / 2;
-                                        ctx.strokeStyle = getAltitudeColor(avgAlt);
+                                        // Altitude gradient — 3D spatial depth cue
+                                        ctx.strokeStyle = getAltitudeColor(seg[3], false, false, colorSchemeRef.current);
                                     }
                                     ctx.beginPath();
                                     ctx.moveTo(prevPt.x, prevPt.y);
@@ -1010,30 +983,44 @@ export default function MapView({
                             prevPt = pt;
                             prevSeg = seg;
                         }
-
-                        // Final segment to live position
-                        const livePlane = currentPlanes[currentSelected];
-                        if (prevPt && livePlane && livePlane.renderLat && prevSeg) {
-                            const livePt = map.latLngToContainerPoint([livePlane.renderLat, normalizeLongitude(livePlane.renderLng)]);
-                            const dist = haversineKm(prevSeg[1], prevSeg[2], livePlane.renderLat, livePlane.renderLng);
-                            if (Math.abs(livePt.x - prevPt.x) < canvas.width / 2 && dist < 50) {
-                                if (!isOutline) {
-                                    const liveAlt = livePlane.altitude || prevSeg[3];
-                                    ctx.strokeStyle = getAltitudeColor((prevSeg[3] + liveAlt) / 2);
-                                }
-                                ctx.beginPath();
-                                ctx.moveTo(prevPt.x, prevPt.y);
-                                ctx.lineTo(livePt.x, livePt.y);
-                                ctx.stroke();
-                            }
-                        }
                     };
 
                     // Two passes for crisp layering
                     drawTrack(true);  // Outline pass
-                    drawTrack(false); // Colored pass
+                    drawTrack(false); // Altitude-gradient colored pass
 
                     ctx.restore();
+                }
+
+                // ── Fallback: Ring-Buffer Trail (when no historical trackPoints) ──
+                // Renders the local _trail ring buffer for the selected plane so the
+                // user always sees recent movement even before the backend track loads.
+                if ((!flightPath || flightPath.length <= 1) && currentSelected && currentPlanes[currentSelected]) {
+                    const sp = currentPlanes[currentSelected];
+                    if (sp._trail && sp._trailCount > 1) {
+                        ctx.save();
+                        ctx.lineCap = 'round';
+                        ctx.lineJoin = 'round';
+                        const startIdx = (sp._trailHead + TRAIL_LEN - sp._trailCount) % TRAIL_LEN;
+                        for (let pass = 0; pass < 2; pass++) {
+                            ctx.lineWidth = pass === 0 ? 4 : 2;
+                            ctx.strokeStyle = pass === 0 ? 'rgba(0,0,0,0.8)' : '#22d3ee';
+                            ctx.globalAlpha = pass === 0 ? 0.8 : 1.0;
+                            ctx.beginPath();
+                            let trailStarted = false;
+                            for (let k = 0; k < sp._trailCount; k++) {
+                                const idx = ((startIdx + k) % TRAIL_LEN) * 2;
+                                const tLat = sp._trail[idx];
+                                const tLng = sp._trail[idx + 1];
+                                if (!tLat || !tLng) continue;
+                                const tPt = map.latLngToContainerPoint([tLat, normalizeLongitude(tLng)]);
+                                if (!trailStarted) { ctx.moveTo(tPt.x, tPt.y); trailStarted = true; }
+                                else { ctx.lineTo(tPt.x, tPt.y); }
+                            }
+                            if (trailStarted) ctx.stroke();
+                        }
+                        ctx.restore();
+                    }
                 }
 
                 // [v6.0] FR24 Render Mode & Limits
@@ -1059,21 +1046,14 @@ export default function MapView({
 
                 for (const id in currentPlanes) {
                     const plane = currentPlanes[id];
-                    if (!plane.renderLat || !plane.renderLng) continue;
+                    const pLat = plane.renderLat || plane.lat;
+                    const pLng = plane.renderLng || plane.lng;
 
-                    // Fast lat/lng frustum cull — skip projection entirely for off-screen planes
-                    const pLat = plane.renderLat;
-                    const pLng = plane.renderLng;
+                    // Frustum Culling
                     if (pLat < cullS || pLat > cullN || pLng < cullW || pLng > cullE) continue;
-
-                    // Filter check (excludes redundant culling)
                     if (shouldShow && !shouldShow(plane, 1.0)) continue;
 
                     renderQueue.push(plane);
-                }
-
-                if (drawnCount === 0 && renderQueue.length > 0 && Math.random() < 0.05) {
-                    console.log(`[MapView] Queue size: ${renderQueue.length}, currentPlanes: ${Object.keys(currentPlanes).length}`);
                 }
 
                 // ── Label Collision Grid ──────────────────────────────────
@@ -1108,7 +1088,10 @@ export default function MapView({
                 for (let i = 0; i < Math.min(maxDraw, renderQueue.length); i++) {
                     const plane = renderQueue[i];
 
-                    const pt = map.latLngToContainerPoint([plane.renderLat, normalizeLongitude(plane.renderLng)]);
+                    const rLat = plane.renderLat || plane.lat || plane.latitude;
+                    const rLng = plane.renderLng || plane.lng || plane.longitude;
+
+                    const pt = map.latLngToContainerPoint([rLat, normalizeLongitude(rLng)]);
                     const ptX = pt.x;
                     const ptY = pt.y;
 
@@ -1133,37 +1116,98 @@ export default function MapView({
                     // The robust historical 'trackPoints' now handles all trace rendering, 
                     // eliminating the "dual overlapping traces" and pan/zoom jitter bug.
 
-                    // ── Aircraft Silhouette (All Zoom Levels) ──
-                    const scale = getAircraftScale(plane);
-                    const drawSize = getDrawSize(plane, zoom, scale);
+                    // [v14.0] High-Performance Canvas Vector Rendering (tar1090 style)
+                    // Eliminates external image loading latency and improves visual density.
+                    // [v14.5] Performance Optimization: Cache aircraft scale by zoom
+                    const activeTypecode = plane._activeTypecode || plane.typecode || 'STANDARD_JET';
+                    const cacheKey = `${activeTypecode}_${zoom}`;
+                    let wingspanScale = scaleCacheRef.current.get(cacheKey);
+                    
+                    if (wingspanScale === undefined) {
+                        // Call legacy scale helper (once per zoom change per type)
+                        wingspanScale = getAircraftScale(plane); 
+                        scaleCacheRef.current.set(cacheKey, wingspanScale);
+                        
+                        // Prune cache if too large (LRU-ish)
+                        if (scaleCacheRef.current.size > 1000) {
+                             const firstKey = scaleCacheRef.current.keys().next().value;
+                             scaleCacheRef.current.delete(firstKey);
+                        }
+                    }
 
-                    ctx.save();
-                    ctx.globalAlpha = opacity;
-                    ctx.translate(ptX, ptY);
+                    const drawSize = getDrawSize(plane, zoom, wingspanScale);
+                    const altColor = getAltitudeColor(plane.altitude, plane.onGround, plane.isEmergency, colorSchemeRef.current);
+                    const angleRad = (plane.heading || 0) * Math.PI / 180;
 
-                    // [v8.0] Clean icon silhouette without glowing shadows
-                    if (isSelected) {
-                        // Cyan highlight for selection
-                    } else if (plane.isEmergency) {
-                        ctx.shadowColor = '#ef4444';
-                        ctx.shadowBlur = 10;
+                    // ── 3-Tier Render Pipeline ────────────────────────────────
+                    // Tier 1: Tactical dot  — zoom ≤ 4, drawSize ≤ 6 px
+                    // Tier 2: GitHub SVG    — exact 1:1 shape (async pre-warmed)
+                    // Tier 3: Path2D embed  — instant, always available fallback
+                    // Tier 4: Safety dot    — should never fire after resolveTypecodeKey fix
+
+                    if (drawSize <= 6) {
+                        // ── Tier 1: Tactical Dot ─────────────────────────────
+                        ctx.save();
+                        ctx.globalAlpha = opacity;
+                        ctx.fillStyle = isSelected ? '#00ffff' : altColor;
+                        ctx.beginPath();
+                        ctx.arc(ptX, ptY, Math.max(2, drawSize / 2), 0, Math.PI * 2);
+                        ctx.fill();
+                        if (isSelected) {
+                            ctx.strokeStyle = '#00ffff';
+                            ctx.lineWidth = 1.5;
+                            ctx.stroke();
+                        }
+                        ctx.restore();
                     } else {
-                        // Standard shadows removed for professional look
+                        const dynImg = getDynamicImage(activeTypecode, isSelected);
+                        if (dynImg && dynImg.complete && dynImg.naturalWidth > 0) {
+                            // ── Tier 2: 1:1 Exact GitHub SVG ─────────────────
+                            ctx.save();
+                            ctx.globalAlpha = opacity;
+                            ctx.translate(ptX, ptY);
+                            ctx.rotate(angleRad);
+                            ctx.drawImage(dynImg, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
+                            if (isSelected) {
+                                ctx.strokeStyle = '#00ffff';
+                                ctx.lineWidth = 2;
+                                ctx.strokeRect(-drawSize / 2, -drawSize / 2, drawSize, drawSize);
+                            }
+                            ctx.restore();
+                        } else {
+                            // ── Tier 3: Embedded Path2D Silhouette ───────────
+                            const vectorKey = getAircraftVectorKey(plane);
+                            const vectorData = vectorPathsMap.get(vectorKey);
+
+                            if (vectorData) {
+                                const { path, vb } = vectorData;
+                                const vbW = vb[2], vbH = vb[3];
+                                const maxDim = Math.max(vbW, vbH) || 1;
+                                const canvasScale = drawSize / maxDim;
+                                ctx.save();
+                                ctx.globalAlpha = opacity;
+                                ctx.translate(ptX, ptY);
+                                ctx.rotate(angleRad);
+                                ctx.scale(canvasScale, canvasScale);
+                                ctx.translate(-(vb[0] + vbW / 2), -(vb[1] + vbH / 2));
+                                ctx.fillStyle = altColor;
+                                ctx.fill(path);
+                                ctx.strokeStyle = isSelected ? '#00ffff' : '#FFFFFF';
+                                ctx.lineWidth = isSelected ? Math.max(2, 10 / canvasScale) : Math.max(1, 5 / canvasScale);
+                                ctx.stroke(path);
+                                ctx.restore();
+                            } else {
+                                // ── Tier 4: Safety fallback dot (resolveTypecodeKey should prevent this) ──
+                                ctx.save();
+                                ctx.globalAlpha = opacity;
+                                ctx.fillStyle = altColor;
+                                ctx.beginPath();
+                                ctx.arc(ptX, ptY, 5, 0, Math.PI * 2);
+                                ctx.fill();
+                                ctx.restore();
+                            }
+                        }
                     }
-
-                    // Heading rotation (SVG is North-Up)
-                    const finalRotationRad = (plane.heading || 0) * Math.PI / 180;
-                    ctx.rotate(finalRotationRad);
-
-                    // Draw aircraft icon (prefer ImageBitmap → HTMLImageElement)
-                    const img = getSVGImage(plane, isSelected);
-                    const imgReady = img && (img instanceof ImageBitmap || (img.complete && img.naturalHeight !== 0));
-                    if (imgReady) {
-                        const offset = drawSize / 2;
-                        ctx.drawImage(img, -offset, -offset, drawSize, drawSize);
-                    }
-
-                    ctx.restore();
 
                     // ── Label Rendering ──────────────────────────────────────
                     // Selected: always show. Emergency: zoom >= 10. Normal: fade-in at zoom >= 12
@@ -1297,8 +1341,10 @@ export default function MapView({
         }
 
         animFrameRef.current = requestAnimationFrame(animate);
-        return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
-    }, []); // 永動機解耦 (Decoupled Loop Architecture)
+        return () => {
+            if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+        };
+    }, [mapInstance]); // Starts ONLY when map is ready. Size (1) is stable after first mount.
 
     return (
         <div ref={mapContainerRef} className="map-container">

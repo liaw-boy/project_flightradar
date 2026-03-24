@@ -4,7 +4,7 @@ const path = require('path');
 const Airport = require('./models/Airport');
 
 // Database URI
-const MONGODB_URI = 'mongodb://127.0.0.1:27017/aerostrat';
+const MONGODB_URI = 'mongodb://127.0.0.1:27018/aerostrat';
 
 // Data Path
 const AIRPORTS_JSON = path.join(__dirname, 'data', 'processed', 'airports_global.json');

@@ -148,17 +148,18 @@ function broadcastPlanes(states, timestamp) {
 }
 
 /**
- * Broadcast Backend Telemetry (API Hits, Quota, Countdown)
  * @param {Object} stats stats from apiStats
  * @param {number} nextFetchIn seconds until next fetch
+ * @param {string} source active data source name (v10.0)
  */
-function broadcastTelemetry(stats, nextFetchIn) {
+function broadcastTelemetry(stats, nextFetchIn, source = 'Airplanes.Live') {
     if (!wss || wss.clients.size === 0) return;
 
     const payload = msgpack.encode({
         type: 'telemetry',
         totalApiHits: stats.totalCalls,
         nextFetchIn: nextFetchIn,
+        source: source, // [v10.0] New field
         accounts: stats.accounts.map(acc => ({
             user: acc.user,
             remainingCredits: acc.remainingCredits, // [v4.3.6] Sync with Dashboard.jsx

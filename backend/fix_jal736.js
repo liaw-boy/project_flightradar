@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const MONGODB_URI = 'mongodb://127.0.0.1:27017/aerostrat';
+const MONGODB_URI = 'mongodb://127.0.0.1:27018/aerostrat';
 
 const AircraftSchema = new mongoose.Schema({
     icao24: { type: String, required: true, unique: true, index: true },

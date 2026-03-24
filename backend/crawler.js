@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
-require('dotenv').config();
+const config = require('./config');
+
 const Route = require('./models/Route');
 
 // MOTC TDX API 端點 (桃園機場 TPE 為例)
@@ -99,7 +100,7 @@ async function crawlFlightSchedules() {
 
         // 3. 寫入 MongoDB
         if (mongoose.connection.readyState !== 1) {
-            const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat';
+            const MONGODB_URI = config.MONGODB_URI;
             await mongoose.connect(MONGODB_URI);
         }
 

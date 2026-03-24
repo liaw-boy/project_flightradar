@@ -5,6 +5,7 @@ import {
     getNearestAirport, formatVerticalRate, getAirportDisplayData,
     formatLocalTime
 } from '../utils/flightUtils';
+import { getDynamicImage, prewarmExactSvg } from '../utils/aircraftIcons';
 import { useI18n } from '../hooks/useI18n';
 import { logToServer } from '../utils/logger';
 import { dataManager } from '../services/dataManager';
@@ -156,6 +157,26 @@ export default function Sidebar({
     const routeInfo = fusionData?.route || {};
 
     const typecode = aircraft.type || metadata?.typecode || plane.typecode || '--';
+
+    // [Fix] Prioritize RexKramer1 tactical-yellow SVG silhouette over planespotters photo
+    const [svgSrc, setSvgSrc] = useState(null);
+    useEffect(() => {
+        if (!typecode || typecode === '--') { setSvgSrc(null); return; }
+        prewarmExactSvg(typecode);
+        setSvgSrc(null);
+        let attempts = 0;
+        const timer = setInterval(() => {
+            const img = getDynamicImage(typecode, false);
+            if (img?.complete && img.naturalWidth > 0) {
+                setSvgSrc(img.src);
+                clearInterval(timer);
+            } else if (++attempts > 14) {
+                clearInterval(timer); // give up after ~7s
+            }
+        }, 500);
+        return () => clearInterval(timer);
+    }, [typecode]);
+
     const aircraftModel = [aircraft.manufacturer, aircraft.type].filter(Boolean).join(' ') ||
                           (metadata ? [metadata.manufacturerName, metadata.model].filter(Boolean).join(' ') : (plane.aircraftType || 'Unknown Aircraft'));
     const displayRegistration = aircraft.registration || metadata?.registration || plane.registration || '--';
@@ -194,14 +215,14 @@ export default function Sidebar({
     return (
         <div className="sidebar active">
             <div className="sb-header">
-                <div className="sb-header-main w-full" style={{ overflow: 'hidden' }}>
-                    <h2 className="sb-title truncate">
+                <div className="sb-header-main" style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+                    <h2 className="sb-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {plane.callsign || 'UNKNOWN'}
-                        {typecode && <span className="sb-badge ml-2">{typecode}</span>}
+                        {typecode && <span className="sb-badge" style={{ marginLeft: '8px' }}>{typecode}</span>}
                     </h2>
-                    <div className="sb-subtitle truncate">
-                        {logoUrl && <img src={logoUrl} alt="" className="sb-airline-logo-mini inline-block mr-1" onError={(e) => e.target.style.display = 'none'} />}
-                        {aircraft.airline || airlineName || 'Unknown'} — {displayRegistration}
+                    <div className="sb-subtitle" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {logoUrl && <img src={logoUrl} alt="" className="sb-airline-logo-mini" style={{ display: 'inline-block', marginRight: '4px' }} onError={(e) => e.target.style.display = 'none'} />}
+                        {(aircraft.airline && aircraft.airline !== 'Unknown') ? aircraft.airline : (airlineName || 'Unknown')} — {displayRegistration}
                     </div>
                 </div>
                 <div className="sb-header-actions">
@@ -217,22 +238,29 @@ export default function Sidebar({
                     </div>
                 )}
 
-                <div className="sb-photo-container relative overflow-hidden bg-slate-900 border-b border-white/5">
+                <div className="sb-photo-container">
                     {isLoadingDetails ? (
-                        <div className="sb-photo-carousel animate-pulse bg-slate-800/80 flex items-center justify-center min-h-[200px]">
-                            <PlaneIcon size={48} className="text-slate-600 opacity-50 absolute" />
+                        <div className="sb-photo-carousel sb-photo-loading">
+                            <PlaneIcon size={48} className="sb-photo-loading-icon" />
+                        </div>
+                    ) : svgSrc ? (
+                        // Priority 1: RexKramer1 exact SVG silhouette (tactical yellow #ffce00)
+                        <div className="sb-photo-carousel sb-silhouette-view">
+                            <img src={svgSrc} alt={typecode} className="aircraft-silhouette" />
+                            <span className="sb-photo-credit">Shape: RexKramer1 / AircraftShapesSVG</span>
                         </div>
                     ) : aircraft.photo_url ? (
+                        // Priority 2: Planespotters.net photo
                         <div className="sb-photo-carousel">
-                            <img src={aircraft.photo_url} alt={aircraftModel} className="aircraft-photo object-cover w-full h-[200px]" />
+                            <img src={aircraft.photo_url} alt={aircraftModel} className="aircraft-photo" />
                             <a href={aircraft.photo_url} target="_blank" rel="noopener noreferrer" className="sb-photo-credit">
                                 © {aircraft.photographer || 'Planespotters.net'} <span>↗</span>
                             </a>
                         </div>
                     ) : (
-                        <div className="sb-logo-placeholder bg-slate-800/50 flex flex-col items-center justify-center min-h-[200px]">
-                            <PlaneIcon size={64} className="text-slate-600 opacity-25 mb-2" />
-                            <span className="text-xs font-semibold tracking-widest text-slate-500">NO PHOTO AVAILABLE</span>
+                        <div className="sb-logo-placeholder">
+                            <PlaneIcon size={64} className="sb-photo-placeholder-icon" />
+                            <span className="sb-photo-placeholder-text">NO PHOTO AVAILABLE</span>
                         </div>
                     )}
                 </div>
@@ -308,39 +336,39 @@ export default function Sidebar({
 
                 {/* [Phase 21] Ultimate Data Fusion: NOAA METAR Weather Card */}
                 {(routeInfo.destination_weather || isLoadingDetails) && (
-                    <div className="mx-5 mb-5 rounded-lg overflow-hidden bg-slate-800/50 border border-slate-700/80 shadow-lg relative">
-                        <div className="flex items-center justify-between px-3 py-2 bg-slate-900/60 border-b border-white/5">
+                    <div style={{ margin: '0 20px 20px 20px', borderRadius: '8px', overflow: 'hidden', background: 'rgba(30,41,59,0.5)', border: '1px solid rgba(71,85,105,0.8)', position: 'relative' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(15,23,42,0.6)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                             <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--color-text-dim)', letterSpacing: '0.8px' }}>
                                 DESTINATION WEATHER ({arrCode || '...'})
                             </span>
                         </div>
-                        <div className="p-3">
+                        <div style={{ padding: '12px' }}>
                             {isLoadingDetails ? (
-                                <div className="animate-pulse space-y-3">
-                                    <div className="flex justify-between">
-                                        <div className="h-4 bg-slate-700 rounded w-1/3"></div>
-                                        <div className="h-4 bg-slate-700 rounded w-1/4"></div>
+                                <div className="sb-weather-skeleton">
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                                        <div className="sb-skel-bar" style={{ width: '33%', height: '14px' }}></div>
+                                        <div className="sb-skel-bar" style={{ width: '25%', height: '14px' }}></div>
                                     </div>
-                                    <div className="h-3 bg-slate-700 rounded w-full"></div>
-                                    <div className="h-3 bg-slate-700 rounded w-5/6"></div>
+                                    <div className="sb-skel-bar" style={{ width: '100%', height: '11px', marginBottom: '8px' }}></div>
+                                    <div className="sb-skel-bar" style={{ width: '83%', height: '11px' }}></div>
                                 </div>
                             ) : (
                                 <>
-                                    <div className="flex justify-between items-center mb-3">
-                                        <div className="flex flex-col">
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
                                             <span style={{ fontSize: 10, color: 'var(--color-text-dim)', fontWeight: 600 }}>WIND</span>
                                             <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>
-                                                 {routeInfo.destination_weather.wdir != null ? `${routeInfo.destination_weather.wdir}°` : 'VRB'} / {routeInfo.destination_weather.wspd != null ? `${routeInfo.destination_weather.wspd}kts` : '--'}
+                                                {routeInfo.destination_weather.wdir != null ? `${routeInfo.destination_weather.wdir}°` : 'VRB'} / {routeInfo.destination_weather.wspd != null ? `${routeInfo.destination_weather.wspd}kts` : '--'}
                                             </span>
                                         </div>
-                                        <div className="flex flex-col text-right">
+                                        <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'right' }}>
                                             <span style={{ fontSize: 10, color: 'var(--color-text-dim)', fontWeight: 600 }}>TEMP</span>
                                             <span style={{ fontSize: 14, fontWeight: 700, color: '#4ade80' }}>
                                                 {routeInfo.destination_weather.temp != null ? `${routeInfo.destination_weather.temp}°C` : '--'}
                                             </span>
                                         </div>
                                     </div>
-                                    <div className="font-mono text-xs text-gray-400 line-clamp-2 leading-tight" title={routeInfo.destination_weather.rawOws}>
+                                    <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: '#94a3b8', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }} title={routeInfo.destination_weather.rawOws}>
                                         {routeInfo.destination_weather.rawOws || 'NO RAW METAR DATA AVAILABLE'}
                                     </div>
                                 </>
@@ -384,7 +412,9 @@ export default function Sidebar({
                         <DataRow label={t('registration')} value={displayRegistration} />
                         <DataRow label={t('type')} value={typecode} />
                         <DataRow label="Aircraft" value={aircraftModel} />
-                        <DataRow label={t('airline')} value={aircraft.airline || airlineName || '--'} />
+                        <DataRow label={t('airline')} value={
+                            (aircraft.airline && aircraft.airline !== 'Unknown') ? aircraft.airline : (airlineName || '--')
+                        } />
                     </div>
                 )}
 

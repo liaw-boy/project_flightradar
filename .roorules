@@ -1,0 +1,23 @@
+# AEROSTRAT Project Rules
+
+## Project Overview
+This is a Real-Time Flight Tracker application (AEROSTRAT).
+- **Backend**: Node.js/Express with MongoDB.
+- **Frontend**: Vite + React + Vanilla CSS. Using Canvas for aircraft rendering.
+- **Real-Time**: WebSocket (Socket.IO) for aircraft state updates.
+
+## Development Constraints
+- **Styling**: Always use Vanilla CSS. Avoid TailwindCSS unless explicitly requested.
+- **Rendering**: Canvas is used for high-frequency aircraft updates. Ensure 60 FPS performance.
+- **Data Source**: Handles multiple telemetry APIs (ADSB-Fi, OpenSky).
+
+## Coding Standards
+- Follow modern ES6+ JavaScript syntax.
+- Use functional components and hooks for React.
+- Maintain clean separation between data ingestion (backend) and rendering (frontend).
+- Keep `MapView.jsx` clean; logic should be in `canvasHelpers.js` or separate hooks.
+
+## AI Guidelines
+- Before modifying core rendering logic, refer to `g:\project_flightradar\.agent\skills\aerostrat-canvas-rendering\SKILL.md`.
+- Minimize token usage by only reading relevant files in the current task context.
+- Always check `CLAUDE.md` and `CLAUDE_INSIGHTS.md` for existing architectural decisions.

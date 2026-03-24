@@ -6,8 +6,8 @@ RUN npm install
 COPY . .
 
 # Setup build arg for Vite
-ARG VITE_API_URL=http://localhost:3000
-ENV VITE_API_URL=$VITE_API_URL
+ARG VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL:-http://localhost:3001}
 RUN npm run build
 
 # Serve stage

@@ -75,7 +75,7 @@ export default function Dashboard({
             >
                 <span style={{ display: 'flex', alignItems: 'center' }}>
                     <Server size={16} style={{ marginRight: '8px' }} />
-                    API STATS <span className="api-stats-provider" style={{ marginLeft: '6px' }}>[{apiStatus}]</span>
+                    API STATS <span className="api-stats-provider" style={{ marginLeft: '6px' }}>[{apiStats?.source || apiStatus}]</span>
                 </span>
                 <span className="api-stats-icon">▼</span>
             </div>

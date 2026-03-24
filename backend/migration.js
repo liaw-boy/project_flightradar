@@ -14,7 +14,7 @@ async function migrate() {
     console.log('🚀 [MIGRATION] Starting JSON to MongoDB migration...');
 
     try {
-        await mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat');
+        await mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27018/aerostrat');
         console.log('✅ [DB] Connected for migration');
 
         // 1. 遷移 Aircraft
