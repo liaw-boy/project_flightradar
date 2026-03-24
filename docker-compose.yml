@@ -1,39 +1,44 @@
-version: '3.8'
+version: '3.9'
 
 services:
   mongodb:
-    image: mongo:latest
+    image: mongo:8
     container_name: aerostrat-mongo
-    ports:
-      - "${MONGO_PORT:-27017}:27017"
+    restart: unless-stopped
     volumes:
       - ./mongo-data:/data/db
-    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 40s
 
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: aerostrat-backend
+    restart: unless-stopped
     ports:
-      - "${BACKEND_PORT:-3000}:3000"
+      - "3000:3000"
+    env_file:
+      - ./backend/.env
     environment:
-      - PORT=3000
-      - MONGODB_URI=mongodb://mongodb:27017/aerostrat
-      - PRIMARY_TELEMETRY_URL=${PRIMARY_TELEMETRY_URL:-https://opensky-network.org/api/states/all}
-      - FALLBACK_TELEMETRY_URL=${FALLBACK_TELEMETRY_URL:-https://api.adsb.lol}
-      - AERODATABOX_API_KEY=${AERODATABOX_API_KEY:-}
-      - OPENSKY_USER1=${OPENSKY_USER1:-}
-      - OPENSKY_PASS1=${OPENSKY_PASS1:-}
+      # Override MONGODB_URI to use container service name instead of localhost
+      MONGODB_URI: mongodb://mongodb:27017/aerostrat
+    volumes:
+      # Credential files — kept on host, not baked into image
+      - ./backend/credentials1.json:/app/credentials1.json:ro
+      - ./backend/credentials2.json:/app/credentials2.json:ro
+      - ./backend/credentials3.json:/app/credentials3.json:ro
+      - ./backend/credentials4.json:/app/credentials4.json:ro
+      - ./backend/credentials5.json:/app/credentials5.json:ro
+      # Persistent quota cache — preserves OpenSky quota state across restarts
+      - ./backend/quota-cache.json:/app/quota-cache.json
+      # Logs
+      - ./backend/logs:/app/logs
     depends_on:
       - mongodb
-    restart: unless-stopped
-
-  frontend:
-    build:
-      context: ./client
-      args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
-    container_name: aerostrat-frontend
-    ports:
-      - "${FRONTEND_PORT:-80}:80"
-    restart: unless-stopped

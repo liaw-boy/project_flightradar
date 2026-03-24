@@ -106,21 +106,7 @@ export default function Sidebar({
     plane, icao24, metadata, route, trackPoints, playbackTime, onPlaybackChange,
     flightHistoryRef, onClose, trackMode, onToggleTrack
 }) {
-    if (!plane || !icao24) return null;
-
     const { t } = useI18n();
-    const logoUrl = getAirlineLogoUrl(plane.callsign);
-    const nowUnix = Math.floor(Date.now() / 1000);
-    const dataAge = Math.max(0, nowUnix - (plane.lastContact || nowUnix));
-    const contactTime = new Date((plane.lastContact || nowUnix) * 1000).toLocaleTimeString();
-    const fr24Url = `https://www.flightradar24.com/${plane.callsign}`;
-
-    const airlineName = getAirlineName(plane.callsign);
-    const flag = getCountryFlag(plane.country);
-    const categoryName = metadata?.categoryDescription || getCategoryName(plane.category);
-    const nearest = getNearestAirport(plane.lat, plane.lng);
-    const posSourceMap = { 0: 'ADS-B', 1: 'ASTERIX', 2: 'MLAT', 3: 'FLARM' };
-
     const [openSections, setOpenSections] = useState({
         spatial: true, specs: true, status: false, nearest: false,
     });
@@ -214,6 +200,14 @@ export default function Sidebar({
 
     const depCity = routeInfo.origin_city || (depInfo?.city || '');
     const arrCity = routeInfo.destination_city || (arrInfo?.city || '');
+
+    const logoUrl = getAirlineLogoUrl(plane.callsign);
+    const nowUnix = Math.floor(Date.now() / 1000);
+    const dataAge = Math.max(0, nowUnix - (plane.lastContact || nowUnix));
+    const contactTime = new Date((plane.lastContact || nowUnix) * 1000).toLocaleTimeString();
+    const fr24Url = `https://www.flightradar24.com/${plane.callsign}`;
+    const airlineName = getAirlineName(plane.callsign);
+    const posSourceMap = { 0: 'ADS-B', 1: 'ASTERIX', 2: 'MLAT', 3: 'FLARM' };
 
     return (
         <div className="sidebar active">

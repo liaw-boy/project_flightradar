@@ -176,8 +176,19 @@ app.use(cors());
 app.use(compression()); // [v2.9.0] Gzip
 app.use(logger.httpMiddleware); // [LOG] HTTP request logging (skips high-freq endpoints)
 
-// [v5.0.0] Static file serving REMOVED — Frontend runs independently via Vite Dev Server
-// Backend is now a pure API + WebSocket data engine
+// [v5.0.0] Production static file serving — built frontend from public-react/
+// In development, Vite dev server handles the frontend on port 3005.
+// In production (Docker), serve the pre-built React app directly.
+const publicReactPath = path.join(__dirname, '..', 'public-react');
+if (fs.existsSync(publicReactPath)) {
+    app.use(express.static(publicReactPath, { maxAge: '1h' }));
+    // Express 5 wildcard syntax: serve index.html for all non-API routes (SPA fallback)
+    app.get('/{*path}', (req, res, next) => {
+        if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
+        res.sendFile(path.join(publicReactPath, 'index.html'));
+    });
+    logger.info('SERVER', `Serving built frontend from ${publicReactPath}`);
+}
 
 // [v12.5] Aircraft SVG silhouettes served locally (avoids GitHub CDN 404s/rate-limits)
 app.use('/api/svg', express.static(path.join(__dirname, 'public/svg'), {
