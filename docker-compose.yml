@@ -1,20 +1,18 @@
-version: '3.9'
-
 services:
   mongodb:
-    image: mongo:8
+    image: mongo:4.4.18
     container_name: aerostrat-mongo
     restart: unless-stopped
     volumes:
-      - ./mongo-data:/data/db
+      - mongodb_data:/data/db
     ports:
       - "27017:27017"
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      test: ["CMD", "mongo", "--eval", "db.runCommand({ping:1})", "--quiet"]
       interval: 15s
       timeout: 10s
       retries: 6
-      start_period: 40s
+      start_period: 60s
 
   backend:
     build:
@@ -48,3 +46,5 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+volumes:
+  mongodb_data:

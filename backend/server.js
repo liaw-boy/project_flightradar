@@ -1,11 +1,11 @@
+const mongoose = require('mongoose');
 const config = require('./config');
-const logger = require('./logger'); // [LOG] Structured logger with file output
-
+const logger = require('./logger');
 const express = require('express');
 const cors = require('cors');
-const compression = require('compression'); // [v2.9.0] Gzip
-const helmet = require('helmet'); // [v3.0] Security headers
-const rateLimit = require('express-rate-limit'); // [v3.0] API abuse protection
+const compression = require('compression');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const path = require('path');
 const cron = require('node-cron');
@@ -14,20 +14,19 @@ const http = require('http');
 const zlib = require('zlib');
 const readline = require('readline');
 const { initWebSocketServer, broadcastPlanes, broadcastTelemetry, getActiveViewports } = require('./socketEngine');
-const mongoose = require('mongoose'); // [Phase 15] Database Persistence
-const Route = require('./models/Route'); // [Phase 15] Route Schema
-const TrackPoint = require('./models/TrackPoint'); // [Time Series] Historical Tracks
-const Aircraft = require('./models/Aircraft'); // [Cache Migration]
-const Metar = require('./models/Metar'); // [Cache Migration]
-const FlightSession = require('./models/FlightSession'); // [Flight Sessions]
-const Airport = require('./models/Airport'); // [GIS Modernization]
-const AircraftShape = require('./models/AircraftShape'); // [SVG Shapes]
-const AircraftRegistry = require('./models/AircraftRegistry'); // [Registry Data]
-const { crawlFlightSchedules } = require('./crawler'); // [CRAWLER] Real-time schedules
-const NodeCache = require('node-cache'); // [v8.0] BFF Aggregator Cache
-const ActiveFlight = require('./models/ActiveFlight'); // [Phase 12] High-Availability DB-First Live Data
-const flightController = require('./controllers/flightController'); // [Phase 14] Ultimate Fusion Controller
-const AEROSTRAT_VERSION = 'v10.5-Hybrid'; // [v10.5] Dual-Sync Engine
+const Route = require('./models/Route'); 
+const TrackPoint = require('./models/TrackPoint'); 
+const Aircraft = require('./models/Aircraft'); 
+const Metar = require('./models/Metar'); 
+const FlightSession = require('./models/FlightSession'); 
+const Airport = require('./models/Airport'); 
+const AircraftShape = require('./models/AircraftShape');
+const AircraftRegistry = require('./models/AircraftRegistry'); 
+const { crawlFlightSchedules } = require('./crawler'); 
+const NodeCache = require('node-cache'); 
+const ActiveFlight = require('./models/ActiveFlight'); 
+const flightController = require('./controllers/flightController'); 
+const AEROSTRAT_VERSION = 'v10.5-Hybrid';
 
 // ==========================================
 // [v4.4.0] Logging Helper with Tactical Timestamps
@@ -36,70 +35,74 @@ function getTime() {
     return `[${new Date().toLocaleTimeString('en-US', { hour12: false })}]`;
 }
 
-
 // ==========================================
-// [Phase 15] MongoDB Connection (Local Only)
+// MongoDB Connection (Docker-Aware with Retry)
 // ==========================================
-// We default to local MongoDB to ensure privacy and speed.
-const MONGODB_URI = config.MONGODB_URI;
-logger.info('DATABASE', `Connecting to MongoDB: ${MONGODB_URI}`);
+const MONGODB_URI = process.env.MONGODB_URI || config.MONGODB_URI || 'mongodb://mongodb:27017/aerostrat';
 
-mongoose.connect(MONGODB_URI, {
-    serverSelectionTimeoutMS: 5000,
-    connectTimeoutMS: 10000,
-    bufferTimeoutMS: 3000, // Fast-fail: stop buffering ops after 3s when disconnected
-}).then(async () => {
-    logger.info('DATABASE', '✅ Connected to MongoDB successfully');
-    restoreActiveSessions();
-
-    // [Phase 16] Run OSINT Data Sync immediately after connection
-    const { initOsintData } = require('./scripts/syncOsintData');
-    initOsintData();
-
-    // [Phase 17] Mictronics Aircraft DB — runs after OSINT, non-blocking
-    const { syncMictronics } = require('./scripts/syncMictronics');
-    syncMictronics(msg => logger.info('MICTRONICS', msg)).catch(err =>
-        logger.warn('MICTRONICS', `Sync failed (non-fatal): ${err.message}`)
-    );
-
-    // Purge poisoned spatial_inference routes — these are mid-flight position guesses,
-    // not actual flight plans. They cause trans-oceanic flights to show wrong departure airports.
-    Route.deleteMany({ source: 'spatial_inference' })
-        .then(r => { if (r.deletedCount > 0) logger.info('ROUTE', `Purged ${r.deletedCount} spatial_inference route(s) from DB`); })
-        .catch(() => null);
-
-    // Sync TTL index to match schema (MongoDB won't auto-update existing TTL values)
+async function connectToMongo() {
+    process.stdout.write(`[DEBUG] Connecting to MongoDB: ${MONGODB_URI}\n`);
     try {
-        const db = mongoose.connection.db;
-        await db.command({
-            collMod: 'trackpoints',
-            index: { keyPattern: { timestamp: 1 }, expireAfterSeconds: 172800 }
+        await mongoose.connect(MONGODB_URI, {
+            serverSelectionTimeoutMS: 5000,
+            connectTimeoutMS: 10000,
+            family: 4
         });
-        logger.info('DATABASE', 'TrackPoint TTL synced to 48 hours');
-    } catch (ttlErr) {
-        // Time-series collections manage TTL via expireAfterSeconds at creation, not collMod
-        const ignored = ['NamespaceNotFound', 'IndexNotFound'];
-        const isTimeseries = ttlErr.message && ttlErr.message.includes('time-series');
-        if (!ignored.includes(ttlErr.codeName) && !isTimeseries) {
-            logger.warn('DATABASE', `Could not sync TTL index: ${ttlErr.message}`);
-        } else if (isTimeseries) {
-            logger.debug('DATABASE', 'TrackPoint is time-series — TTL managed by collection options (skip collMod)');
+        
+        logger.info('DATABASE', '✅ Connected to MongoDB successfully');
+        process.stdout.write('[DEBUG] MongoDB Success Promise Resolved\n');
+        
+        // Restore sessions and initialize caches
+        if (typeof restoreActiveSessions === 'function') await restoreActiveSessions();
+        if (typeof buildAirportListCache === 'function') buildAirportListCache();
+
+        // [Phase 16] Run OSINT Data Sync
+        const { initOsintData } = require('./scripts/syncOsintData');
+        initOsintData();
+
+        // [Phase 17] Mictronics Aircraft DB
+        const { syncMictronics } = require('./scripts/syncMictronics');
+        syncMictronics(msg => logger.info('MICTRONICS', msg)).catch(err =>
+            logger.warn('MICTRONICS', `Sync failed (non-fatal): ${err.message}`)
+        );
+
+        // Purge poisoned spatial_inference routes
+        Route.deleteMany({ source: 'spatial_inference' })
+            .then(r => { if (r.deletedCount > 0) logger.info('ROUTE', `Purged ${r.deletedCount} spatial_inference route(s) from DB`); })
+            .catch(() => null);
+
+        // Sync TTL index
+        try {
+            const db = mongoose.connection.db;
+            await db.command({
+                collMod: 'trackpoints',
+                index: { keyPattern: { timestamp: 1 }, expireAfterSeconds: 172800 }
+            });
+            logger.info('DATABASE', 'TrackPoint TTL synced to 48 hours');
+        } catch (ttlErr) {
+            const ignored = ['NamespaceNotFound', 'IndexNotFound'];
+            const isTimeseries = ttlErr.message && ttlErr.message.includes('time-series');
+            if (!ignored.includes(ttlErr.codeName) && !isTimeseries) {
+                logger.warn('DATABASE', `Could not sync TTL index: ${ttlErr.message}`);
+            }
         }
+    } catch (err) {
+        logger.error('DATABASE', `Connection failed: ${err.message}`);
+        process.stdout.write(`[DEBUG] Mongoose top-level Fail: ${err.message}. Retrying in 5s...\n`);
+        setTimeout(connectToMongo, 5000);
     }
-})
-    .catch(err => logger.error('DATABASE', `Connection failed: ${err.message}`));
+}
+
+connectToMongo();
 
 mongoose.connection.on('error', err => {
     logger.error('DATABASE', `Runtime error: ${err.message}`);
 });
-
 mongoose.connection.on('disconnected', () => {
     logger.warn('DATABASE', 'MongoDB disconnected');
 });
-
 mongoose.connection.on('reconnected', () => {
     logger.info('DATABASE', '✅ MongoDB reconnected');
-    buildAirportListCache();
 });
 
 // ==========================================
