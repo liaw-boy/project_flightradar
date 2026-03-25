@@ -6,13 +6,11 @@
 - 已安裝 [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/Mac) 或 Docker Engine (Linux)。
 - 建議至少 2GB RAM。
 
-## 步驟 1：準備環境變數
+## 步驟 1：準備環境與素材
 1. 進入 `backend` 目錄。
-2. 將 `.env.example` 複製並重新命名為 `.env`：
-   ```bash
-   cp .env.example .env
-   ```
-3. 編輯 `.env` 並填入您的 API 金鑰：
+2. 將 `.env.example` 複製並重新命名為 `.env` 並填入金鑰。
+3. **重要：手動複製素材**：
+   由於 `.gitignore` 會忽略大型素材，請將原電腦上的 `assets/AircraftShapesSVG/` 資料夾（包含內部的 SVG 檔案）複製到新電腦的相同位置。
    - `TDX_CLIENT_ID` / `SECRET` (用於航班同步)
    - `OPENSKY_USER` / `PASS` (用於 OpenSky API)
 
