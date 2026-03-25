@@ -11,8 +11,17 @@
 const fs = require('fs');
 const path = require('path');
 
-const SVG_DIR = path.resolve(__dirname, '../assets/AircraftShapesSVG/Shapes SVG');
-const OUTPUT = path.resolve(__dirname, '../client/src/data/aircraftShapesData.js');
+const isDocker = fs.existsSync('/.dockerenv');
+const SVG_DIR = isDocker
+    ? path.join(__dirname, '..', 'assets', 'AircraftShapesSVG', 'Shapes SVG')
+    : path.resolve(__dirname, '../assets/AircraftShapesSVG/Shapes SVG');
+const OUTPUT = isDocker
+    ? path.join(__dirname, '..', 'data', 'aircraftShapesData.js')
+    : path.resolve(__dirname, '../client/src/data/aircraftShapesData.js');
+
+// Ensure output directory exists
+const outDir = path.dirname(OUTPUT);
+if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
 // ── Reference wingspan data (meters) for proportional scaling ────────────────
 // Used to normalize all aircraft so they render at correct relative sizes.
