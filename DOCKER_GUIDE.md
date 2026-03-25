@@ -26,7 +26,19 @@ docker compose up -d --build
 2. 編譯前端專案。
 3. 啟動後端伺服器（預設開啟 `3000` 埠）。
 
-## 步驟 3：驗證部署
+## 步驟 3：資料初始化（重要）
+由於新電腦的資料庫是空的，您需要執行以下指令來導入飛機圖標與基礎資料：
+
+1. **導入飛機圖標數據**：
+   ```bash
+   docker compose exec backend node scripts/seedAircraftShapes.js
+   ```
+2. **同步機場與航線資料**：
+   ```bash
+   docker compose exec backend node scripts/syncOsintData.js
+   ```
+
+## 步驟 4：驗證部署
 1. 打開瀏覽器存取：`http://localhost:3000`
 2. 查看日誌確認資料庫連線：
    ```bash

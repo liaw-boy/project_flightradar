@@ -18,6 +18,9 @@ RUN npm ci --omit=dev
 # Copy backend source
 COPY backend/ ./
 
+# Copy root scripts for data seeding
+COPY scripts/ /app/scripts-root/
+
 # Copy built frontend from Stage 1
 # __dirname is /app, so path.join(__dirname, '..', 'public-react') = /public-react
 COPY --from=frontend-builder /public-react /public-react

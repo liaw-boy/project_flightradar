@@ -19,8 +19,20 @@ const AircraftShape = require('../models/AircraftShape');
 
 const { execSync } = require('child_process');
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27018/aerostrat';
-const DATA_FILE = path.resolve(__dirname, '../../client/src/data/aircraftShapesData.js');
-const BUILD_SCRIPT = path.resolve(__dirname, '../../scripts/build-aircraft-shapes.js');
+
+// Docker-aware path resolution
+const isDocker = fs.existsSync('/.dockerenv');
+const DATA_FILE = isDocker 
+    ? path.join(__dirname, '../data/aircraftShapesData.js')
+    : path.resolve(__dirname, '../../client/src/data/aircraftShapesData.js');
+const BUILD_SCRIPT = isDocker
+    ? path.join(__dirname, '../../scripts-root/build-aircraft-shapes.js')
+    : path.resolve(__dirname, '../../scripts/build-aircraft-shapes.js');
+
+// Ensure data directory exists in Docker
+if (isDocker && !fs.existsSync(path.dirname(DATA_FILE))) {
+    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+}
 
 function loadShapesFromBuild() {
     // Auto-generate data file if it doesn't exist
