@@ -26,7 +26,7 @@ async function downloadFile(url, dest) {
         }).on('error', (err) => {
             fs.unlink(dest, () => reject(err));
         });
-        
+
         request.on('error', (err) => {
             fs.unlink(dest, () => reject(err));
         });
