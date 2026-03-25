@@ -28,7 +28,7 @@ services:
       - ./backend/.env
     environment:
       # Override MONGODB_URI to use container service name instead of localhost
-      MONGODB_URI: mongodb://mongodb:27017/aerostrat
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongodb:27017/aerostrat}
     volumes:
       # Credential files — kept on host, not baked into image
       - ./backend/credentials1.json:/app/credentials1.json:ro
@@ -41,4 +41,10 @@ services:
       # Logs
       - ./backend/logs:/app/logs
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/planes/bbox-ping').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
