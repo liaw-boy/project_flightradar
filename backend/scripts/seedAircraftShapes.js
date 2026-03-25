@@ -23,10 +23,10 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27018/aerost
 // Docker-aware path resolution
 const isDocker = fs.existsSync('/.dockerenv');
 const DATA_FILE = isDocker 
-    ? path.join(__dirname, '../data/aircraftShapesData.js')
+    ? path.join(__dirname, '..', 'data', 'aircraftShapesData.js')
     : path.resolve(__dirname, '../../client/src/data/aircraftShapesData.js');
 const BUILD_SCRIPT = isDocker
-    ? path.join(__dirname, '../../scripts-root/build-aircraft-shapes.js')
+    ? path.join(__dirname, '..', 'scripts-root', 'build-aircraft-shapes.js')
     : path.resolve(__dirname, '../../scripts/build-aircraft-shapes.js');
 
 // Ensure data directory exists in Docker
