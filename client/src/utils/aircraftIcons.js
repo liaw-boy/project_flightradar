@@ -555,7 +555,7 @@ function _buildGhImage(svgText, color, isSelected = false) {
             path,polygon,circle,rect,polyline,ellipse{
                 fill:${color} !important;
                 stroke:${strokeColor};
-                stroke-width:1.4;
+                stroke-width:1.0;
                 stroke-linejoin:round;
                 paint-order:stroke fill;
             }

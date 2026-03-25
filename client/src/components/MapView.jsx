@@ -37,14 +37,22 @@ const PlaneCanvasLayer = L.Layer.extend({
     },
     _resize: function () {
         const size = this._map.getSize();
-        this._canvas.width = size.x;
-        this._canvas.height = size.y;
+        const dpr = window.devicePixelRatio || 1;
+        this._canvas.width = size.x * dpr;
+        this._canvas.height = size.y * dpr;
+        this._canvas.style.width = size.x + 'px';
+        this._canvas.style.height = size.y + 'px';
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         this._reset();
     },
     _reset: function () {
         const size = this._map.getSize();
-        this._canvas.width = size.x;
-        this._canvas.height = size.y;
+        const dpr = window.devicePixelRatio || 1;
+        this._canvas.width = size.x * dpr;
+        this._canvas.height = size.y * dpr;
+        this._canvas.style.width = size.x + 'px';
+        this._canvas.style.height = size.y + 'px';
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
         // Critical Fix: Clear canvas immediately on move/reset before the next animation frame
         if (this.ctx) {
@@ -1206,16 +1214,16 @@ export default function MapView({
                                 ctx.scale(canvasScale, canvasScale);
                                 ctx.translate(-(vb[0] + vbW / 2), -(vb[1] + vbH / 2));
                                 ctx.lineJoin = 'round';
-                                // Pass 1: dark shadow outline (adsb.fi style — contrast against dark map)
-                                ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-                                ctx.lineWidth = Math.max(2.5, 10 / canvasScale);
+                                // Pass 1: dark shadow outline
+                                ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+                                ctx.lineWidth = Math.max(1.8, 8 / canvasScale);
                                 ctx.stroke(path);
                                 // Pass 2: colored fill
                                 ctx.fillStyle = altColor;
                                 ctx.fill(path);
-                                // Pass 3: thin white outline (adsb.fi signature style)
-                                ctx.strokeStyle = isSelected ? '#00ffff' : 'rgba(255,255,255,0.92)';
-                                ctx.lineWidth = isSelected ? Math.max(1.5, 6 / canvasScale) : Math.max(0.8, 3.5 / canvasScale);
+                                // Pass 3: thin white outline (refined for High-DPI)
+                                ctx.strokeStyle = isSelected ? '#00ffff' : 'rgba(255,255,255,0.95)';
+                                ctx.lineWidth = isSelected ? Math.max(1.5, 6 / canvasScale) : Math.max(0.6, 2.5 / canvasScale);
                                 ctx.stroke(path);
                                 ctx.restore();
                             } else {
