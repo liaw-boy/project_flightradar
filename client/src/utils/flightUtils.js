@@ -222,17 +222,22 @@ export function getNearestAirport(lat, lng) {
     return nearest ? { airport: nearest, distance: Math.round(minDist) } : null;
 }
 
-// ── adsb.fi / tar1090 altitude color stops (HSL) ─────────────────────────────
-// Matches the adsb.fi rainbow gradient: green (low) → yellow → orange → red →
-// purple/magenta → blue (cruise). All values in [hue, saturation%, lightness%].
+// ── tar1090 / globe.adsb.fi altitude color system (HSL, altitudes in METRES) ──
+// Warm colours at low altitude (takeoff/landing danger zone)
+// → Cool green at typical cruise altitude (most time spent here)
+// → Purple/red at extreme high altitude (unusual/special)
+// This is the same gradient used by tar1090, globe.adsb.fi, and FR24.
+// Converted from tar1090's feet-based stops to metres (1ft = 0.3048m).
 const _ALT_STOPS = [
-    { alt:     0, h: 120, s: 80, l: 48 }, // ground-level green
-    { alt:  5000, h:  90, s: 88, l: 50 }, // yellow-green
-    { alt: 10000, h:  55, s: 95, l: 50 }, // yellow
-    { alt: 20000, h:  25, s: 95, l: 55 }, // orange
-    { alt: 30000, h:   0, s: 90, l: 60 }, // red
-    { alt: 38000, h: 295, s: 85, l: 58 }, // purple / magenta
-    { alt: 45000, h: 240, s: 90, l: 65 }, // deep blue (FL450+)
+    { alt:     0, h:  20, s: 88, l: 52 }, // orange       — ground / takeoff (0ft)
+    { alt:   610, h:  33, s: 88, l: 51 }, // yellow-orange — 2,000ft
+    { alt:  1219, h:  43, s: 88, l: 50 }, // yellow        — 4,000ft
+    { alt:  1829, h:  54, s: 88, l: 49 }, // yellow-green  — 6,000ft
+    { alt:  2438, h:  72, s: 88, l: 46 }, // green-yellow  — 8,000ft
+    { alt:  2743, h:  85, s: 88, l: 44 }, // bright green  — 9,000ft
+    { alt:  3353, h: 140, s: 88, l: 41 }, // emerald green — 11,000ft (regional cruise)
+    { alt: 12192, h: 300, s: 88, l: 48 }, // purple/magenta— 40,000ft (jet cruise)
+    { alt: 15545, h: 360, s: 88, l: 52 }, // red           — 51,000ft+ (extreme)
 ];
 
 /**

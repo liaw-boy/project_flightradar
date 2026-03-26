@@ -107,6 +107,39 @@ Object.entries(paths).forEach(([key, entry]) => {
     });
 });
 
+// ─── [PERF-4 Fix] Module-level enrichment guard — persists across React re-renders ──
+const _enrichScheduled = new Set();
+
+// ─── Great Circle Arc Interpolation (tar1090-style) ──────────────────────────
+// For segments longer than GC_THRESHOLD_KM, insert intermediate points along
+// the spherical great-circle arc so the path follows Earth's curvature.
+// Returns an array of [lat, lng] tuples including the two endpoints.
+const GC_THRESHOLD_KM = 500;
+function greatCirclePoints(lat1, lng1, lat2, lng2, distKm) {
+    const steps = Math.min(16, Math.ceil(distKm / 200)); // 1 point per ~200km, max 16
+    if (steps < 2) return [[lat1, lng1], [lat2, lng2]];
+    const φ1 = lat1 * Math.PI / 180, λ1 = lng1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180, λ2 = lng2 * Math.PI / 180;
+    const sinφ1 = Math.sin(φ1), cosφ1 = Math.cos(φ1);
+    const sinφ2 = Math.sin(φ2), cosφ2 = Math.cos(φ2);
+    const cosλd = Math.cos(λ2 - λ1);
+    const d = Math.acos(Math.min(1, sinφ1 * sinφ2 + cosφ1 * cosφ2 * cosλd));
+    if (d < 1e-9) return [[lat1, lng1], [lat2, lng2]];
+    const pts = [];
+    for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const A = Math.sin((1 - t) * d) / Math.sin(d);
+        const B = Math.sin(t * d) / Math.sin(d);
+        const x = A * cosφ1 * Math.cos(λ1) + B * cosφ2 * Math.cos(λ2);
+        const y = A * cosφ1 * Math.sin(λ1) + B * cosφ2 * Math.sin(λ2);
+        const z = A * sinφ1 + B * sinφ2;
+        const φ = Math.atan2(z, Math.sqrt(x * x + y * y));
+        const λ = Math.atan2(y, x);
+        pts.push([φ * 180 / Math.PI, (λ * 180 / Math.PI + 540) % 360 - 180]);
+    }
+    return pts;
+}
+
 // ─── [v12.0] Altitude Coloring Logic ─────────────────────────────────────────
 // [Visual] Standardized altitude colors imported from flightUtils
 // [v14.0] High-Performance Rendering Mode Active
@@ -402,6 +435,15 @@ export default function MapView({
         container.addEventListener('mouseup', handleInteractionEnd);
         container.addEventListener('touchend', handleInteractionEnd);
 
+        // [PERF-1 Fix] Keyboard zoom (+/-) also needs simplified render mode during animation
+        const handleKeyZoom = (e) => {
+            if (e.key === '+' || e.key === '-' || e.key === '=' || e.key === '_') {
+                handleInteractionStart();
+                setTimeout(handleInteractionEnd, 400);
+            }
+        };
+        container.addEventListener('keydown', handleKeyZoom);
+
         // Also listen to drag end specifically from leaflet
         map.on('dragend', handleInteractionEnd);
 
@@ -500,6 +542,7 @@ export default function MapView({
 
         return () => {
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+            container.removeEventListener('keydown', handleKeyZoom);
             map.off('mousemove');
             map.off('zoomend');
             map.off('moveend');
@@ -682,6 +725,20 @@ export default function MapView({
             // [v3.1] Airline Fleet Focus Mode
             if (filters.fleetFocus && (!plane.callsign || !plane.callsign.startsWith(filters.fleetFocus))) return false;
 
+            // Aircraft category filters (PlaneFinder-style)
+            // category 8 = Rotorcraft/Helicopter
+            if (filters.showHelicopter === false && plane.category === 8) return false;
+            // category 14 = UAV / Drone
+            if (filters.showDrone === false && plane.category === 14) return false;
+            // category 2 = Light aircraft (< 15,500 lbs)
+            if (filters.showLight === false && plane.category === 2) return false;
+            // Military: category 7 (high-performance) + known military typecode prefixes
+            if (filters.showMilitary === false) {
+                if (plane.category === 7) return false;
+                const tc = (plane.typecode || '').toUpperCase();
+                if (/^(F1[56789]|F2[012]|B52|B1|B2|C130|C17|C5|KC|A10|U2|SR71|MIG|SU2|SU3|JA3|JAS|EF2|TYFN)/.test(tc)) return false;
+            }
+
             // [v9.8] Redundant spatial culling removed (now handled in animate() loop for 60fps)
 
             // [v2.3.6] 動態密度過濾器 (Deterministic Hash)
@@ -800,35 +857,30 @@ export default function MapView({
             const dt = Math.min(rawDt, 100) / 1000; // in seconds
             lastDrawTimeRef.current = nowMs;
 
-            // Update Positions with Interpolation (Phase 8)
+            // [PERF-3 Fix] Single unified loop: Interpolation + Trail Recording + Enrichment
+            // Merges two separate Object.keys() iterations into one pass per frame.
             Object.keys(currentPlanes).forEach(id => {
                 const plane = currentPlanes[id];
 
-                // ??? 邊緣運算零延遲注入 (Task 2: Dynamic Merging via Persistent Cache)
+                // [PERF-4 Fix] Enrichment check using module-level Set — survives setState spreads.
+                // Never triggers duplicate requests even when plane objects are replaced by WS updates.
                 const enriched = getEnrichedData(id);
-                // 決定最終要用來畫圖的 typecode (優先使用原始資料，其次是快取補強)
                 const activeTypecode = plane.typecode || (enriched ? enriched.typecode : null);
-                
-                // 如果還是不知道，且還沒發送過請求，就在背景觸發
-                if (!activeTypecode && !plane._isEnriching) {
-                    plane._isEnriching = true;
-                    enrichPlaneDetails(id).catch(() => {}); 
+                if (!activeTypecode && !_enrichScheduled.has(id)) {
+                    _enrichScheduled.add(id);
+                    enrichPlaneDetails(id).catch(() => {});
                 }
-                
-                // 將 activeTypecode 暫存於物件中供後續繪圖迴圈讀取 (雖然物件會被覆蓋，但動畫幀內是穩定的)
                 plane._activeTypecode = activeTypecode;
 
-                // Pre-warm exact GitHub SVG the first time we know the typecode.
-                // prewarmExactSvg() is a no-op for repeated calls and never blocks.
+                // Pre-warm exact SVG once per typecode — no-op on repeat calls.
                 if (activeTypecode && !plane._svgPrewarmed) {
                     plane._svgPrewarmed = true;
                     prewarmExactSvg(activeTypecode);
                 }
 
+                // === Interpolation (Phase 8) ===
                 const currentLat = plane.renderLat || plane.lat;
                 const currentLng = plane.renderLng || plane.lng;
-
-                // 基礎插值速度 (Lerp): 0.5 秒內滑向目標，確保 60 FPS 平滑度
                 const lerpFactor = 0.5;
 
                 if (plane.onGround || plane.velocity <= 0 || plane.altitude === 'GROUND') {
@@ -837,7 +889,6 @@ export default function MapView({
                         plane.renderLng = currentLng + (plane.targetLng - currentLng) * lerpFactor;
                     }
                 } else if (plane.targetLat && plane.targetLng) {
-                    // Micro-Dead Reckoning + Lerp
                     if (!plane.simTime) {
                         plane.simTime = plane.lastContact || (plane.targetUpdatedAt ? plane.targetUpdatedAt / 1000 : Date.now() / 1000);
                     }
@@ -845,10 +896,8 @@ export default function MapView({
 
                     const anchorSec = plane.lastContact || (plane.targetUpdatedAt ? plane.targetUpdatedAt / 1000 : Date.now() / 1000);
                     const elapsedSec = Math.min(plane.simTime - anchorSec, 120);
-
                     const predictedPos = predictPosition(plane.targetLat, plane.targetLng, plane.velocity, plane.heading, Math.max(0, elapsedSec));
 
-                    // 平滑追趕 (Phase 8: Smooth Glide)
                     plane.renderLat = currentLat + (predictedPos.lat - currentLat) * lerpFactor;
                     plane.renderLng = currentLng + (predictedPos.lng - currentLng) * lerpFactor;
 
@@ -859,36 +908,27 @@ export default function MapView({
                     plane.renderLat = plane.lat;
                     plane.renderLng = plane.lng;
                 }
-            });
 
-            // ── Trail Ring Buffer Recording ─────────────────────────────
-            // After interpolation, record each plane's position into a
-            // lightweight ring buffer for the gradient trail effect.
-            Object.keys(currentPlanes).forEach(id => {
-                const plane = currentPlanes[id];
+                // === Trail Ring Buffer Recording ===
                 const lat = plane.renderLat;
                 const lng = plane.renderLng;
                 if (!lat || !lng) return;
 
-                // Lazy-init ring buffer
                 if (!plane._trail) {
-                    plane._trail = new Float64Array(TRAIL_LEN * 2); // [lat0,lng0,lat1,lng1,...]
+                    plane._trail = new Float64Array(TRAIL_LEN * 2);
                     plane._trailHead = 0;
                     plane._trailCount = 0;
-                    // Seed with current position
                     plane._trail[0] = lat;
                     plane._trail[1] = lng;
                     plane._trailCount = 1;
                     return;
                 }
 
-                // Check distance from last recorded point to avoid duplicates
                 const prevIdx = ((plane._trailHead + TRAIL_LEN - 1) % TRAIL_LEN) * 2;
                 const dLat = lat - plane._trail[prevIdx];
                 const dLng = lng - plane._trail[prevIdx + 1];
                 if (dLat * dLat + dLng * dLng < TRAIL_MIN_DIST_SQ) return;
 
-                // Write new point at head
                 const writeIdx = plane._trailHead * 2;
                 plane._trail[writeIdx] = lat;
                 plane._trail[writeIdx + 1] = lng;
@@ -960,67 +1000,158 @@ export default function MapView({
                     ctx.lineCap = 'round';
                     ctx.lineJoin = 'round';
 
-                    const drawTrack = (isOutline) => {
-                        const baseWidth = (zoom >= 12 ? 2.5 : 2);
-                        ctx.lineWidth = isOutline ? (baseWidth * 2) : baseWidth;
-                        ctx.strokeStyle = isOutline ? 'rgba(0,0,0,0.8)' : '#ffffff';
-                        ctx.globalAlpha = isOutline ? 0.8 : 1.0;
+                    // ── Pre-project all points and tag each segment ──────────
+                    // Build a segments array: { pt, seg, stale, gap, isLive }
+                    // stale  = time gap 60–1800s  → dashed line
+                    // gap    = time gap >1800s or dist >50km → break line
+                    // isLive = the live-stitch segment (last point = current interpolated pos)
+                    //          → drawn as elastic band (thinner, lighter)
+                    // Long segments (>GC_THRESHOLD_KM) are expanded to great circle arcs.
+                    const segments = [];
+                    const lastRealIdx = renderPath.length - 2; // last DB-confirmed point index
+                    for (let pi = 0; pi < renderPath.length; pi++) {
+                        const seg = renderPath[pi];
+                        const isLastPoint = pi === renderPath.length - 1;
+                        const isLive = isLastPoint && livePlane?.renderLat;
+                        const pt = map.latLngToContainerPoint([seg[1], normalizeLongitude(seg[2])]);
+                        let stale = false;
+                        let gap   = false;
 
-                        let prevPt = null;
-                        let prevSeg = null;
+                        if (pi > 0) {
+                            const prevSeg = renderPath[pi - 1];
+                            const timeDeltaSec = seg[0] && prevSeg[0] ? seg[0] - prevSeg[0] : 0;
+                            const dist = haversineKm(prevSeg[1], prevSeg[2], seg[1], seg[2]);
+                            const isAntimeridian = Math.abs(pt.x - (segments[segments.length - 1]?.pt.x ?? pt.x)) > canvas.width / 2;
 
-                        for (let pi = 0; pi < renderPath.length; pi++) {
-                            const seg = renderPath[pi];
-                            const lat = seg[1];
-                            const lng = seg[2];
-                            const pt = map.latLngToContainerPoint([lat, normalizeLongitude(lng)]);
+                            if (isAntimeridian || (dist > 50 && !isLive) || timeDeltaSec > 1800) {
+                                gap = true;
+                            } else if (timeDeltaSec > 60 && !isLive) {
+                                stale = true;
+                            }
 
-                            if (prevPt && prevSeg) {
-                                const dist = haversineKm(prevSeg[1], prevSeg[2], lat, lng);
-                                const isAntimeridian = Math.abs(pt.x - prevPt.x) > canvas.width / 2;
-                                const isLiveStitch = (pi === renderPath.length - 1) && livePlane?.renderLat;
-                                const distThreshold = isLiveStitch ? 300 : 50;
-                                // Time-gap guard: if consecutive points are > 30 min apart,
-                                // treat as a different flight leg and break the line.
-                                const timeDeltaMin = seg[0] && prevSeg[0] ? (seg[0] - prevSeg[0]) / 60 : 0;
-                                const isFlightGap = timeDeltaMin > 30;
-
-                                if (dist < distThreshold && !isAntimeridian && !isFlightGap) {
-                                    // [v11.0] Redesign: Permanent Visibility (Zero-Truncation Plan)
-                                    // Removed time-based fading. Trajectories stay at 100% opacity throughout the session.
-                                    const currentOpacity = isOutline ? 0.8 : 1.0;
-                                    ctx.globalAlpha = currentOpacity;
-                                    
-                                    if (!isOutline) {
-                                        // [v12.5] P0 Fix: Restore Altitude Coloring (Always use ALTITUDE scheme for tracks)
-                                        ctx.strokeStyle = getAltitudeColor(seg[3], false, false, 'ALTITUDE');
-                                    }
-
-                                    ctx.beginPath();
-                                    ctx.moveTo(prevPt.x, prevPt.y);
-                                    ctx.lineTo(pt.x, pt.y);
-                                    ctx.stroke();
-
+                            // Great circle arc expansion for long non-gap segments
+                            if (!gap && dist > GC_THRESHOLD_KM) {
+                                const gcPts = greatCirclePoints(prevSeg[1], prevSeg[2], seg[1], seg[2], dist);
+                                // Insert intermediate points (skip first — already in segments, skip last — will be added below)
+                                for (let gi = 1; gi < gcPts.length - 1; gi++) {
+                                    const [gLat, gLng] = gcPts[gi];
+                                    const gPt = map.latLngToContainerPoint([gLat, normalizeLongitude(gLng)]);
+                                    // Interpolate altitude linearly for intermediate points
+                                    const t = gi / (gcPts.length - 1);
+                                    const iAlt = (prevSeg[3] || 0) + t * ((seg[3] || 0) - (prevSeg[3] || 0));
+                                    segments.push({ pt: gPt, seg: [null, gLat, gLng, iAlt, seg[4], seg[5]], stale, gap: false, isLive: false });
                                 }
                             }
-                            prevPt = pt;
-                            prevSeg = seg;
                         }
+
+                        segments.push({ pt, seg, stale, gap, isLive });
+                    }
+
+                    // ── Quadratic Bezier smooth path renderer ───────────────
+                    const drawSmoothedPath = (pts, isOutline, altColor, isDashed, isLiveSeg) => {
+                        if (pts.length < 2) return;
+                        ctx.beginPath();
+                        if (isLiveSeg) {
+                            // Elastic band: thinner, lighter, short dash — shows estimated tail
+                            ctx.setLineDash([6, 8]);
+                            ctx.globalAlpha = isOutline ? 0.35 : 0.55;
+                            if (!isOutline) ctx.strokeStyle = altColor;
+                        } else if (isDashed) {
+                            ctx.setLineDash([8, 12]);
+                            ctx.globalAlpha = isOutline ? 0.5 : 0.7;
+                            if (!isOutline) ctx.strokeStyle = altColor;
+                        } else {
+                            ctx.setLineDash([]);
+                            ctx.globalAlpha = isOutline ? 0.8 : 1.0;
+                            if (!isOutline) ctx.strokeStyle = altColor;
+                        }
+                        ctx.moveTo(pts[0].x, pts[0].y);
+                        if (pts.length === 2) {
+                            ctx.lineTo(pts[1].x, pts[1].y);
+                        } else {
+                            for (let k = 1; k < pts.length - 1; k++) {
+                                const midX = (pts[k].x + pts[k + 1].x) / 2;
+                                const midY = (pts[k].y + pts[k + 1].y) / 2;
+                                ctx.quadraticCurveTo(pts[k].x, pts[k].y, midX, midY);
+                            }
+                            ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+                        }
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    };
+
+                    const drawTrack = (isOutline) => {
+                        const baseWidth = zoom >= 12 ? 2.5 : 2;
+                        ctx.lineWidth = isOutline ? baseWidth * 2 : baseWidth;
+                        ctx.strokeStyle = isOutline ? 'rgba(0,0,0,0.8)' : '#ffffff';
+
+                        let batch = [];
+                        let batchColor = null;
+                        let batchStale = false;
+                        let batchIsLive = false;
+
+                        const flushBatch = () => {
+                            if (batch.length > 1) drawSmoothedPath(batch, isOutline, batchColor, batchStale, batchIsLive);
+                            batch = [];
+                            batchColor = null;
+                            batchStale = false;
+                            batchIsLive = false;
+                        };
+
+                        for (let pi = 0; pi < segments.length; pi++) {
+                            const { pt, seg, stale, gap, isLive } = segments[pi];
+
+                            if (gap) {
+                                flushBatch();
+                                batch = [pt];
+                                continue;
+                            }
+
+                            const altColor = isOutline ? null : getAltitudeColor(seg[3], false, false, 'ALTITUDE');
+
+                            // Flush when color, stale, or live status changes
+                            if (batchColor !== null && (!isOutline && (altColor !== batchColor || stale !== batchStale || isLive !== batchIsLive))) {
+                                flushBatch();
+                            }
+
+                            if (batch.length === 0 && pi > 0 && !segments[pi - 1].gap) {
+                                batch.push(segments[pi - 1].pt);
+                            }
+
+                            batch.push(pt);
+                            batchColor = altColor;
+                            batchStale = stale;
+                            batchIsLive = isLive;
+                        }
+                        flushBatch();
                     };
 
                     // Two passes for crisp layering
-                    drawTrack(true);  // Outline pass
+                    drawTrack(true);  // Black outline pass
                     drawTrack(false); // Altitude-gradient colored pass
 
                     ctx.restore();
                 }
 
-                // ── Fallback: Ring-Buffer Trail (when no historical trackPoints) ──
-                // Renders the local _trail ring buffer for the selected plane so the
-                // user always sees recent movement even before the backend track loads.
-                if ((!flightPath || flightPath.length <= 1) && currentSelected && currentPlanes[currentSelected]) {
+                // ── Live-Tail Ring-Buffer Trail ──
+                // Always renders the most recent 12 positions for the selected plane.
+                // When historical trackPoints are present, this acts as a high-resolution
+                // "live tail" appended after the altitude-colored historical path.
+                // When no historical data exists yet, it is the sole visual indicator.
+                // This prevents the "shrinking path" artifact caused by switching from a
+                // 12-point ring buffer to a shorter historical track on first load.
+                if (currentSelected && currentPlanes[currentSelected]) {
                     const sp = currentPlanes[currentSelected];
                     if (sp._trail && sp._trailCount > 1) {
+                        // When historical path exists, only draw the ring buffer portion
+                        // that extends PAST the last historical point to avoid duplicate rendering.
+                        const lastHistoricalPt = (flightPath && flightPath.length > 1)
+                            ? map.latLngToContainerPoint([
+                                flightPath[flightPath.length - 1][1],
+                                normalizeLongitude(flightPath[flightPath.length - 1][2])
+                              ])
+                            : null;
+
                         ctx.save();
                         ctx.lineCap = 'round';
                         ctx.lineJoin = 'round';
@@ -1037,6 +1168,13 @@ export default function MapView({
                                 const tLng = sp._trail[idx + 1];
                                 if (!tLat || !tLng) continue;
                                 const tPt = map.latLngToContainerPoint([tLat, normalizeLongitude(tLng)]);
+                                // If historical path covers this position (within ~3px), skip
+                                // to avoid double-drawing the same segment in a different color.
+                                if (lastHistoricalPt && k < sp._trailCount - 3) {
+                                    const dx = tPt.x - lastHistoricalPt.x;
+                                    const dy = tPt.y - lastHistoricalPt.y;
+                                    if (dx * dx + dy * dy < 9) continue;
+                                }
                                 if (!trailStarted) { ctx.moveTo(tPt.x, tPt.y); trailStarted = true; }
                                 else { ctx.lineTo(tPt.x, tPt.y); }
                             }
@@ -1379,6 +1517,70 @@ export default function MapView({
     return (
         <div ref={mapContainerRef} className="map-container">
             {hoveredPlane && <HoverCard plane={hoveredPlane} pos={hoverPos} />}
+            <AltitudeLegend colorScheme={colorScheme} />
+        </div>
+    );
+}
+
+// ─── Altitude Color Legend ──────────────────────────────────────────────────
+// Shows the tar1090 HSL gradient with altitude labels, matching the track colors.
+// Only visible in ALTITUDE scheme; hidden in TACTICAL and other solid-color modes.
+function AltitudeLegend({ colorScheme }) {
+    if (colorScheme === 'TACTICAL' || colorScheme === 'MONO') return null;
+
+    // Key stops from the tar1090 HSL table (label, hue, sat, light)
+    const stops = [
+        { label: 'GND',    h: 20,  s: 88, l: 52 },
+        { label: '3km',    h: 140, s: 88, l: 41 },
+        { label: '12km',   h: 300, s: 88, l: 48 },
+        { label: '15km+',  h: 360, s: 88, l: 52 },
+    ];
+    const gradientColors = [
+        `hsl(20,88%,52%)`,
+        `hsl(54,88%,49%)`,
+        `hsl(140,88%,41%)`,
+        `hsl(220,88%,52%)`,
+        `hsl(300,88%,48%)`,
+        `hsl(360,88%,52%)`,
+    ].join(', ');
+
+    return (
+        <div style={{
+            position: 'absolute',
+            bottom: '28px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '3px',
+            pointerEvents: 'none',
+        }}>
+            <div style={{
+                width: '220px',
+                height: '7px',
+                borderRadius: '4px',
+                background: `linear-gradient(to right, ${gradientColors})`,
+                boxShadow: '0 1px 6px rgba(0,0,0,0.7)',
+            }} />
+            <div style={{
+                width: '220px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                padding: '0 2px',
+            }}>
+                {stops.map(({ label, h, s, l }) => (
+                    <span key={label} style={{
+                        fontSize: '9px',
+                        fontFamily: 'JetBrains Mono, monospace',
+                        fontWeight: 700,
+                        color: `hsl(${h},${s}%,${Math.min(l + 15, 80)}%)`,
+                        textShadow: '0 1px 3px rgba(0,0,0,0.9)',
+                        letterSpacing: '0.4px',
+                    }}>{label}</span>
+                ))}
+            </div>
         </div>
     );
 }

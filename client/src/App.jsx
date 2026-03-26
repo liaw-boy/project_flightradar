@@ -39,7 +39,11 @@ export default function App() {
         showEmergency: true,
         showLow: true,
         showAirports: true,
-        fleetFocus: '', // [v4.2.0] Airline ICAO filter (e.g. 'EVA', 'CAL')
+        fleetFocus: '',       // [v4.2.0] Airline ICAO filter
+        showHelicopter: true, // ICAO category 8 – rotorcraft
+        showDrone: true,      // ICAO category 14 – UAV
+        showLight: true,      // ICAO category 2 – light aircraft < 15,500 lbs
+        showMilitary: true,   // high-performance / military typecode prefixes
     });
 
     const [zoom, setZoom] = useState(10);

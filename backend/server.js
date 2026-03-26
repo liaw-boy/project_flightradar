@@ -484,6 +484,7 @@ app.get('/api/admin/missing-data', (req, res) => {
 // ==========================================
 const cache = new Map();
 const activeSessions = new Map(); // [Flight Sessions] icao24 -> { sessionId, callsign, lastSeen, onGround }
+const lastStoredPoint = new Map(); // [Track Dedup] icao24 -> { lat, lng, altitude, heading, velocity, ts }
 
 // [v8.0] BFF Aggregator Caches
 const flightDetailsCache = new NodeCache({ stdTTL: 1800, checkperiod: 300 }); // 30 min TTL [Phase 9]
@@ -1314,6 +1315,32 @@ async function ingestTrackPoints(states, timeUnix) {
         // Skip track point if session was closed by ground-idle (no active session)
         if (!session) continue;
 
+        // ── Meaningful-change filter (tar1090-style deduplication) ───────────
+        // Only store a new point when position or state has changed significantly.
+        // Rules (mirrors tar1090): skip if NONE of these changed since last store:
+        //   - lat/lng differ (any movement)
+        //   - altitude changed > 60m (~200ft)
+        //   - heading changed > 5°
+        //   - velocity changed > 5 m/s (~10 kts)
+        //   - time since last stored > 60 seconds (heartbeat guarantee)
+        const lsp = lastStoredPoint.get(icao24);
+        if (lsp) {
+            const samePos     = lsp.lat === p.lat && lsp.lng === p.lng;
+            const altDelta    = Math.abs((p.altitude || 0) - lsp.altitude);
+            const hdgDelta    = Math.min(Math.abs((p.heading || 0) - lsp.heading), 360 - Math.abs((p.heading || 0) - lsp.heading));
+            const spdDelta    = Math.abs((p.velocity || 0) - lsp.velocity);
+            const timeDelta   = timeUnix - lsp.ts;
+            const meaningful  = !samePos || altDelta > 60 || hdgDelta > 5 || spdDelta > 5 || timeDelta > 60;
+            if (!meaningful) continue;
+        }
+        lastStoredPoint.set(icao24, {
+            lat: p.lat, lng: p.lng,
+            altitude: p.altitude || 0,
+            heading: p.heading || 0,
+            velocity: p.velocity || 0,
+            ts: timeUnix
+        });
+
         // Build track point with ALL available telemetry fields
         batchTrackPoints.push({
             sessionId: session.sessionId,
@@ -1541,24 +1568,42 @@ async function fetchGlobalPlanes() {
         let enrichedCount = 0;
         try {
             const icaoList = finalStates.map(p => p.icao24);
+
+            // ── Typecode enrichment (Aircraft collection) ─────────────────
             const metadata = await Aircraft.find({ icao24: { $in: icaoList } }, { icao24: 1, typecode: 1 }).lean();
             const metaMap = new Map(metadata.map(m => [m.icao24.toLowerCase(), m.typecode]));
 
+            // ── Registration + Owner enrichment (Aircraft collection, 532k entries) ─
+            // Only fetch planes missing registration to minimise DB load.
+            const needsRegIcaos = finalStates.filter(p => !p.registration).map(p => p.icao24);
+            let regMap = new Map();
+            if (needsRegIcaos.length > 0) {
+                const regData = await Aircraft.find(
+                    { icao24: { $in: needsRegIcaos } },
+                    { icao24: 1, registration: 1, owner: 1, operatorCallsign: 1 }
+                ).lean();
+                regMap = new Map(regData.map(r => [r.icao24.toLowerCase(), r]));
+            }
+
             finalStates.forEach(p => {
                 const lowerIcao = p.icao24.toLowerCase();
-                let tc = p.typecode || metaMap.get(lowerIcao);
 
-                // [v11.0] Instant Index Fallback
+                // Typecode
+                let tc = p.typecode || metaMap.get(lowerIcao);
                 if (!tc && aircraftMetadataIndex.has(lowerIcao)) {
                     tc = aircraftMetadataIndex.get(lowerIcao);
                     if (p.callsign && p.callsign !== 'UNKNOWN') {
                         triggerBackgroundResolution(lowerIcao, p.callsign);
                     }
                 }
+                if (tc) { p.typecode = tc; enrichedCount++; }
 
-                if (tc) {
-                    p.typecode = tc;
-                    enrichedCount++;
+                // Registration + Airline from Aircraft collection
+                const reg = regMap.get(lowerIcao);
+                if (reg) {
+                    if (!p.registration && reg.registration) p.registration = reg.registration;
+                    if (!p.operator   && (reg.owner || reg.operatorCallsign))
+                        p.operator = reg.owner || reg.operatorCallsign;
                 }
             });
         } catch (dbErr) {
@@ -2761,6 +2806,50 @@ app.get('/api/route/external', async (req, res) => {
 const trackCache = new Map();
 const TRACK_CACHE_TTL = 30000; // 30 秒快取
 
+// Cache for OpenSky historical tracks — longer TTL since data changes slowly mid-flight
+const historicalTrackCache = new Map();
+const HISTORICAL_TRACK_TTL = 90000; // 90 seconds
+
+/**
+ * Fetch historical track for a single aircraft from OpenSky Network.
+ * time=0 returns the most recent flight track (current or last completed).
+ * Returns the parsed response object or null if unavailable.
+ * Results are cached for HISTORICAL_TRACK_TTL ms to prevent rate-limit hammering.
+ */
+async function fetchOpenSkyHistoricalTrack(icao24) {
+    const cached = historicalTrackCache.get(icao24);
+    if (cached && (Date.now() - cached.timestamp < HISTORICAL_TRACK_TTL)) {
+        return cached.data;
+    }
+
+    try {
+        const account = ACCOUNTS[currentAccountIndex];
+        if (!account || !account.user || !account.pass) return null;
+
+        const credentials = Buffer.from(`${account.user}:${account.pass}`).toString('base64');
+        const url = `https://opensky-network.org/api/tracks/all?icao24=${icao24}&time=0`;
+
+        const res = await fetch(url, {
+            headers: { 'Authorization': `Basic ${credentials}` },
+            signal: AbortSignal.timeout(5000)
+        });
+
+        if (!res.ok) {
+            // 404 = no track data for this aircraft, cache as null to avoid retries
+            historicalTrackCache.set(icao24, { data: null, timestamp: Date.now() });
+            return null;
+        }
+
+        const data = await res.json();
+        historicalTrackCache.set(icao24, { data, timestamp: Date.now() });
+        return data;
+    } catch (e) {
+        logger.debug('TRACK', `OpenSky historical unavailable for ${icao24}: ${e.message}`);
+        historicalTrackCache.set(icao24, { data: null, timestamp: Date.now() });
+        return null;
+    }
+}
+
 /**
  * Fetch track for an aircraft using only locally stored TrackPoint data.
  * Points are keyed by FlightSession.sessionId to ensure current-flight isolation.
@@ -2806,12 +2895,65 @@ async function fetchTracksInternal(icao24) {
             }
         }
         
-        // Build path from local TrackPoints only — continuous 30s polling provides
-        // sufficient density; no external API call needed.
-        const path = localPoints.map(pt => [
+        // [v14] OpenSky Historical Track Augmentation
+        // When local data is sparse (< 20 pts), fetch the full current-flight track from
+        // OpenSky. This provides FR24-style path from takeoff, not just from server start.
+        // Filtered to current session only — never mixes in previous flights.
+        if (localPoints.length < 20) {
+            try {
+                const osTrack = await fetchOpenSkyHistoricalTrack(icao);
+                if (osTrack && Array.isArray(osTrack.path) && osTrack.path.length > 0) {
+                    // Use session.startTime as the flight boundary — exclude any earlier flights.
+                    // Add 2-minute tolerance for sensor lag at takeoff.
+                    const flightStartUnix = session
+                        ? Math.floor(session.startTime.getTime() / 1000) - 120
+                        : Math.floor((Date.now() - 2 * 60 * 60 * 1000) / 1000);
+
+                    // OpenSky path: [time, lat, lng, baro_altitude, true_track, on_ground]
+                    const osFiltered = osTrack.path.filter(p =>
+                        p[0] >= flightStartUnix &&
+                        typeof p[1] === 'number' && p[1] !== 0 &&
+                        typeof p[2] === 'number' && p[2] !== 0
+                    );
+
+                    if (osFiltered.length > localPoints.length) {
+                        // Convert to TrackPoint-like objects for uniform handling
+                        const osConverted = osFiltered.map(p => ({
+                            timestamp: new Date(p[0] * 1000),
+                            lat: p[1],
+                            lng: p[2],
+                            altitude: typeof p[3] === 'number' ? p[3] : 0,
+                            heading: typeof p[4] === 'number' ? p[4] : 0,
+                            velocity: 0,
+                            onGround: !!p[5]
+                        }));
+
+                        // Merge: local points override OpenSky for the same second
+                        // (local data has higher update rate and precision)
+                        const mergedMap = new Map();
+                        osConverted.forEach(p => mergedMap.set(Math.round(p.timestamp.getTime() / 1000), p));
+                        localPoints.forEach(p => mergedMap.set(Math.round(p.timestamp.getTime() / 1000), p));
+                        localPoints = Array.from(mergedMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+
+                        logger.info('TRACK', `Historical augment OK: ${icao24} — ${osFiltered.length} OpenSky pts merged → ${localPoints.length} total`);
+                    }
+                }
+            } catch (osErr) {
+                logger.debug('TRACK', `Historical augment failed for ${icao24}: ${osErr.message}`);
+            }
+        }
+
+        // Build final path array — deduplicate consecutive identical coordinates
+        // (handles legacy data and OpenSky snapshots with repeated positions)
+        const rawPath = localPoints.map(pt => [
             Math.floor(pt.timestamp.getTime() / 1000),
             pt.lat, pt.lng, pt.altitude || 0, pt.heading || 0, pt.velocity || 0, pt.onGround ? 1 : 0
         ]);
+        const path = rawPath.filter((pt, i) => {
+            if (i === 0) return true;
+            const prev = rawPath[i - 1];
+            return pt[1] !== prev[1] || pt[2] !== prev[2];
+        });
 
         const result = { icao24, path };
         trackCache.set(icao24, { data: result, timestamp: Date.now() });

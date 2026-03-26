@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plane, Layers, Palette, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plane, Layers, Palette, ChevronDown, ChevronUp, Filter } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import './FilterPanel.css';
 
@@ -37,6 +37,7 @@ export default function FilterPanel({ filters, onFilterChange, colorScheme, onCo
     const { t } = useI18n();
     const [isThemesExpanded, setIsThemesExpanded] = useState(false);
     const [isLayersExpanded, setIsLayersExpanded] = useState(false);
+    const [isCategoryExpanded, setIsCategoryExpanded] = useState(true);
 
     const schemes = [
         { id: 'TACTICAL', label: t('themeTactical'), color: '#10b981' },
@@ -82,6 +83,40 @@ export default function FilterPanel({ filters, onFilterChange, colorScheme, onCo
                 />
                 <span>{t('showAirports')}</span>
             </label>
+
+            <div className="stat-divider" style={{ margin: '15px 0' }} />
+
+            {/* Aircraft Category Filters (PlaneFinder-style) */}
+            <div
+                className="filter-title collapsible-header"
+                style={{ fontSize: '11px', opacity: 0.8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isCategoryExpanded ? '8px' : '0' }}
+                onClick={() => setIsCategoryExpanded(!isCategoryExpanded)}
+            >
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <Filter size={14} style={{ marginRight: '6px' }} />
+                    AIRCRAFT TYPE
+                </div>
+                {isCategoryExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </div>
+            {isCategoryExpanded && (
+                <div style={{ marginBottom: '6px' }}>
+                    {[
+                        { key: 'showHelicopter', label: '🚁 Helicopter' },
+                        { key: 'showDrone',      label: '🛸 Drone / UAV' },
+                        { key: 'showLight',      label: '✈ Light Aircraft' },
+                        { key: 'showMilitary',   label: '🛡 Military' },
+                    ].map(({ key, label }) => (
+                        <label key={key} className="filter-option">
+                            <input
+                                type="checkbox"
+                                checked={filters[key] !== false}
+                                onChange={(e) => onFilterChange(key, e.target.checked)}
+                            />
+                            <span>{label}</span>
+                        </label>
+                    ))}
+                </div>
+            )}
 
             <div className="stat-divider" style={{ margin: '15px 0' }} />
 
