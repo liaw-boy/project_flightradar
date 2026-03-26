@@ -356,7 +356,7 @@ export function useFlightData(mapRef) {
             // Priority Logic: Selected aircraft > Viewport center > Others
             // Find selected aircraft in queue if any
             const urlParams = new URLSearchParams(window.location.search);
-            const selectedIcao = urlParams.get('selected');
+            const selectedIcao = urlParams.get('icao');
             
             let targetIdx = backfillQueueRef.current.findIndex(id => id === selectedIcao);
             if (targetIdx === -1) {
@@ -409,15 +409,13 @@ export function useFlightData(mapRef) {
                         if (currentPlane) {
                             // Create a brand new plane object with a new 'track' property if needed
                             // and a 'forceUpdate' timestamp to ensure Mapbox/React detect the change.
-                            return { 
-                                ...prev, 
-                                [icao24]: { 
-                                    ...currentPlane, 
-                                    isBackfilling: false, 
-                                    isDirty: true,
-                                    forceUpdate: Date.now(),
-                                    _renderTrigger: Math.random() // Extra safety for shallow comparison
-                                } 
+                            return {
+                                ...prev,
+                                [icao24]: {
+                                    ...currentPlane,
+                                    isBackfilling: false,
+                                    isDirty: true
+                                }
                             };
                         }
                         return prev;

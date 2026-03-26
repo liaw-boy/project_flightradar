@@ -89,7 +89,7 @@ export const dataManager = {
      * [L2 -> API] 獲取歷史軌跡
      */
     async getTrack(icao24, lastContact, forceRefresh = false) {
-        const cacheKey = `track_${icao24}_${lastContact || 'live'}`;
+        const cacheKey = `track_${icao24}`;
         if (!forceRefresh) {
             const cached = lruCache.get(cacheKey);
             if (cached) return cached;

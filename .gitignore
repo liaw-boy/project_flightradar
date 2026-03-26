@@ -39,10 +39,23 @@ aircraft-cache.json
 audit_report_log.txt
 audit_utf8.txt
 
-# Claude Code Agent
+# Claude Code Agent & Tools
 .agent/*
 !.agent/skills/
+.agents/
+.claude/skills/
+.claude/settings.local.json
 Claude-Code-Usage-Monitor/
+impeccable.md
+shadcn-ui.md
+skills-lock.json
+
+# Playwright — timestamped per-run screenshots (ephemeral test output)
+# Only canonical artifacts/ and trail_*.png reference shots are kept.
+pw-screenshots/test*_*.png
+pw-screenshots/adsb_analysis/
+pw-screenshots/planefinder/
+pw-screenshots/artifacts/planefinder_*/
 
 # Data Sources & Raw Assets
 doc/
