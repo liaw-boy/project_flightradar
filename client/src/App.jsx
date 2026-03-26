@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import LoadingScreen from './components/LoadingScreen';
 import Dashboard from './components/Dashboard';
+import DevPanel from './components/DevPanel';
 import Sidebar from './components/Sidebar';
 import SearchBar from './components/SearchBar';
 import TopBar from './components/TopBar';
@@ -137,11 +138,25 @@ export default function App() {
     // Initial URL Params parsing
     const initializedUrlRef = useRef(false);
 
+    // Dev Panel visibility (Ctrl+D toggle, persisted)
+    const [showDevPanel, setShowDevPanel] = useState(
+        () => localStorage.getItem('devpanel_visible') === '1'
+    );
+
     // Global Keydown Listener
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (e.key === 'Escape') {
                 handleDeselectPlane();
+            }
+            // Ctrl+D — toggle developer monitor panel
+            if (e.ctrlKey && e.key === 'd') {
+                e.preventDefault();
+                setShowDevPanel(v => {
+                    const next = !v;
+                    localStorage.setItem('devpanel_visible', next ? '1' : '0');
+                    return next;
+                });
             }
         };
         window.addEventListener('keydown', handleKeyDown);
@@ -426,6 +441,17 @@ export default function App() {
             )}
 
             <PerformanceMonitor usageStats={usageStats} />
+
+            {/* Dev Panel — Ctrl+D to toggle */}
+            {showDevPanel && (
+                <DevPanel
+                    usageStats={usageStats}
+                    apiStatus={apiStatus}
+                    apiStats={apiStats}
+                    latency={latency}
+                    planeCount={planeCount}
+                />
+            )}
         </div>
     );
 }

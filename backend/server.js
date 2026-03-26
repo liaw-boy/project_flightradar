@@ -187,7 +187,7 @@ if (fs.existsSync(publicReactPath)) {
     app.use(express.static(publicReactPath, { maxAge: '1h' }));
     // Express 5 wildcard syntax: serve index.html for all non-API routes (SPA fallback)
     app.get('/{*path}', (req, res, next) => {
-        if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
+        if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path === '/monitor') return next();
         res.sendFile(path.join(publicReactPath, 'index.html'));
     });
     logger.info('SERVER', `Serving built frontend from ${publicReactPath}`);
@@ -879,6 +879,315 @@ function detectAnomalies(states) {
     if (alerts.length > 0) {
         broadcastSSE({ type: 'anomalies', alerts });
     }
+}
+
+// ── System Monitor Dashboard (/monitor) ───────────────────────
+// Protected by MONITOR_TOKEN env var (default: 'dev').
+// Access: http://localhost:3000/monitor?token=<MONITOR_TOKEN>
+const MONITOR_TOKEN = process.env.MONITOR_TOKEN || 'dev';
+
+app.get('/monitor', (req, res) => {
+    if (req.query.token !== MONITOR_TOKEN) {
+        return res.status(401).send(`
+            <html><body style="background:#060810;color:#ef4444;font-family:monospace;padding:40px">
+            <h2>401 Unauthorized</h2>
+            <p>Provide <code>?token=YOUR_MONITOR_TOKEN</code></p>
+            <p>Default token during development: <code>dev</code></p>
+            </body></html>`);
+    }
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(getMonitorHtml());
+});
+
+function getMonitorHtml() {
+    return `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AEROSTRAT — System Monitor</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#06080f;--s:#0d1220;--s2:#111827;
+  --b:rgba(148,163,184,.08);--bh:rgba(148,163,184,.16);
+  --t:#e2e8f0;--td:#64748b;--tm:#3d4f63;
+  --cyan:#22d3ee;--green:#10b981;--amber:#f59e0b;--red:#ef4444;
+  --font:'JetBrains Mono',Consolas,monospace;
+}
+html,body{min-height:100vh;background:var(--bg);color:var(--t);font-family:var(--font);font-size:12px}
+a{color:var(--cyan);text-decoration:none}
+
+/* Layout */
+#wrap{max-width:1100px;margin:0 auto;padding:20px 16px}
+.hd{display:flex;align-items:center;justify-content:space-between;
+  padding:14px 0 16px;border-bottom:1px solid var(--b);margin-bottom:20px}
+.hd-title{font-size:14px;font-weight:700;letter-spacing:.12em;color:var(--t)}
+.hd-sub{font-size:10px;color:var(--td);margin-top:3px;letter-spacing:.06em}
+.hd-sync{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--td)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green);
+  animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Grid */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.card{background:var(--s);border:1px solid var(--b);border-radius:8px;overflow:hidden}
+.card-hd{display:flex;align-items:center;justify-content:space-between;
+  padding:10px 14px;background:rgba(15,23,42,.5);border-bottom:1px solid var(--b)}
+.card-title{font-size:10px;font-weight:600;letter-spacing:.12em;color:var(--td);text-transform:uppercase}
+.card-badge{font-size:10px;font-weight:700;color:var(--cyan);
+  background:rgba(34,211,238,.1);padding:2px 7px;border-radius:3px}
+.card-body{padding:12px 14px}
+
+/* Rows */
+.row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;
+  border-bottom:1px solid var(--b)}
+.row:last-child{border-bottom:none}
+.lbl{color:var(--td)}
+.val{color:var(--t);font-weight:500;text-align:right}
+.val.ok{color:var(--green)}
+.val.warn{color:var(--amber)}
+.val.err{color:var(--red)}
+.val.dim{color:var(--tm)}
+
+/* Account rows */
+.acct-row{display:flex;align-items:center;gap:8px;padding:6px 0;
+  border-bottom:1px solid var(--b)}
+.acct-row:last-child{border-bottom:none}
+.acct-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.acct-name{flex:1;color:var(--td);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acct-credits{min-width:52px;text-align:right;font-weight:600;font-size:11px}
+.bar-wrap{width:60px;height:4px;background:rgba(255,255,255,.05);border-radius:2px;overflow:hidden}
+.bar-fill{height:100%;border-radius:2px;transition:width .4s}
+
+/* Log */
+.log-box{background:var(--bg);border-radius:4px;padding:10px;
+  font-size:10px;line-height:1.7;max-height:220px;overflow-y:auto;
+  border:1px solid var(--b)}
+.log-box::-webkit-scrollbar{width:4px}
+.log-box::-webkit-scrollbar-thumb{background:var(--b);border-radius:2px}
+.log-info{color:#475569}
+.log-warn{color:var(--amber)}
+.log-err{color:var(--red)}
+
+/* Stat pills at top */
+.pills{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.pill{padding:6px 14px;border-radius:6px;border:1px solid var(--b);
+  background:var(--s);display:flex;flex-direction:column;gap:2px;min-width:110px}
+.pill-val{font-size:18px;font-weight:700;color:var(--t);line-height:1}
+.pill-lbl{font-size:9px;color:var(--td);letter-spacing:.1em;text-transform:uppercase}
+
+/* Footer */
+footer{text-align:center;padding:20px 0;color:var(--tm);font-size:10px;margin-top:20px;
+  border-top:1px solid var(--b)}
+
+/* Skeleton loading */
+.skel{background:linear-gradient(90deg,var(--s) 25%,var(--s2) 50%,var(--s) 75%);
+  background-size:200% 100%;animation:shimmer 1.5s infinite;
+  border-radius:3px;height:12px;opacity:.5}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="hd">
+    <div>
+      <div class="hd-title">✈ AEROSTRAT — SYSTEM MONITOR</div>
+      <div class="hd-sub" id="last-updated">載入中…</div>
+    </div>
+    <div class="hd-sync">
+      <div class="dot" id="sync-dot" style="background:var(--amber)"></div>
+      <span id="sync-label">連接中…</span>
+      &nbsp;·&nbsp;
+      <a href="/" target="_blank">← 主介面</a>
+    </div>
+  </div>
+
+  <!-- Top-level stat pills -->
+  <div class="pills" id="pills">
+    <div class="pill"><div class="pill-val skel" style="width:60px"> </div><div class="pill-lbl">AIRCRAFT</div></div>
+    <div class="pill"><div class="pill-val skel" style="width:40px"> </div><div class="pill-lbl">SYNC CYCLE</div></div>
+    <div class="pill"><div class="pill-val skel" style="width:50px"> </div><div class="pill-lbl">TRACK PTS</div></div>
+    <div class="pill"><div class="pill-val skel" style="width:50px"> </div><div class="pill-lbl">UPTIME</div></div>
+  </div>
+
+  <div class="grid">
+    <!-- OpenSky Accounts -->
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">🔑 OpenSky 帳號</span>
+        <span class="card-badge" id="acct-badge">—</span>
+      </div>
+      <div class="card-body" id="accounts-body">
+        <div class="skel" style="margin:8px 0"></div>
+        <div class="skel" style="margin:8px 0;width:80%"></div>
+        <div class="skel" style="margin:8px 0;width:60%"></div>
+      </div>
+    </div>
+
+    <!-- Sync Status -->
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">⟳ 同步狀態</span>
+        <span class="card-badge" id="sync-badge">—</span>
+      </div>
+      <div class="card-body" id="sync-body">
+        <div class="skel" style="margin:8px 0"></div>
+        <div class="skel" style="margin:8px 0;width:70%"></div>
+      </div>
+    </div>
+
+    <!-- WebSocket / Connections -->
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">◈ 連線狀態</span>
+        <span class="card-badge" id="ws-badge">—</span>
+      </div>
+      <div class="card-body" id="ws-body">
+        <div class="skel" style="margin:8px 0"></div>
+      </div>
+    </div>
+
+    <!-- Ingestion Stats -->
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">◉ 資料吸收</span>
+        <span class="card-badge" id="ingest-badge">—</span>
+      </div>
+      <div class="card-body" id="ingest-body">
+        <div class="skel" style="margin:8px 0"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent log (fetched from /api/stats) -->
+  <div class="card" style="margin-top:14px">
+    <div class="card-hd">
+      <span class="card-title">📋 API 統計</span>
+      <span class="card-badge" id="api-badge">—</span>
+    </div>
+    <div class="card-body" id="api-body">
+      <div class="skel"></div>
+    </div>
+  </div>
+
+  <footer>AEROSTRAT System Monitor &nbsp;·&nbsp; 每 5 秒自動更新 &nbsp;·&nbsp; <a href="?token=${MONITOR_TOKEN}">重新整理</a></footer>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+let lastCycle = null;
+
+function row(lbl, val, cls) {
+  return '<div class="row"><span class="lbl">' + lbl + '</span><span class="val ' + (cls||'') + '">' + val + '</span></div>';
+}
+function acctRow(a) {
+  const locked = a.unlockTime && new Date(a.unlockTime) > new Date();
+  const pct = locked ? 0 : Math.min(100, Math.round((a.remainingCredits / 4000) * 100));
+  const col = locked ? '#ef4444' : pct > 50 ? '#10b981' : pct > 20 ? '#f59e0b' : '#ef4444';
+  const shortName = (a.user || '').replace(/-api-client/g, '');
+  const label = locked ? 'LOCKED' : (a.remainingCredits || 0).toLocaleString();
+  return \`<div class="acct-row">
+    <div class="acct-dot" style="background:\${locked ? '#ef4444' : '#10b981'}"></div>
+    <div class="acct-name">\${shortName}</div>
+    <div class="acct-credits" style="color:\${col}">\${label}</div>
+    <div class="bar-wrap"><div class="bar-fill" style="width:\${pct}%;background:\${col}"></div></div>
+  </div>\`;
+}
+
+async function refresh() {
+  try {
+    const [health, stats] = await Promise.all([
+      fetch('/api/health').then(r => r.json()),
+      fetch('/api/stats').then(r => r.json()),
+    ]);
+
+    // Sync dot
+    document.getElementById('sync-dot').style.background = '#10b981';
+    document.getElementById('sync-label').textContent = '실시간 연결';
+    document.getElementById('last-updated').textContent = '마지막 업데이트: ' + new Date().toLocaleTimeString();
+
+    // Last updated text (zh-TW)
+    document.getElementById('last-updated').textContent = '最後更新：' + new Date().toLocaleTimeString('zh-TW');
+    document.getElementById('sync-dot').style.background = '#10b981';
+    document.getElementById('sync-label').textContent = '即時同步';
+
+    const ing = health.ingestion || {};
+    const upMin = Math.round((health.uptime || 0) / 60);
+    const upStr = upMin >= 60 ? (Math.floor(upMin/60) + 'h ' + (upMin%60) + 'm') : upMin + ' 分鐘';
+
+    // Pills
+    document.getElementById('pills').innerHTML =
+      pill((health.cacheSize || ing.lastBatchSize || 0).toLocaleString(), 'AIRCRAFT') +
+      pill(ing.totalBatches || '—', 'SYNC CYCLE') +
+      pill((ing.totalPoints || 0).toLocaleString(), 'TRACK PTS') +
+      pill(upStr, 'UPTIME');
+
+    // Accounts
+    const accts = stats.accounts || [];
+    const activeCount = accts.filter(a => !a.unlockTime || new Date(a.unlockTime) <= new Date()).length;
+    document.getElementById('acct-badge').textContent = activeCount + ' / ' + accts.length + ' 可用';
+    document.getElementById('accounts-body').innerHTML = accts.map(acctRow).join('');
+
+    // Sync
+    const batchMs = ing.lastBatchMs || 0;
+    const batchCls = batchMs < 2000 ? 'ok' : batchMs < 5000 ? 'warn' : 'err';
+    document.getElementById('sync-badge').textContent = 'Cycle #' + (ing.totalBatches || '—');
+    document.getElementById('sync-body').innerHTML =
+      row('上次批次大小', (ing.lastBatchSize || 0) + ' 架', '') +
+      row('上次批次耗時', batchMs + ' ms', batchCls) +
+      row('已建立 Sessions', (ing.sessionsCreated || 0).toLocaleString(), '') +
+      row('已關閉 Sessions', (ing.sessionsClosed || 0).toLocaleString(), 'dim') +
+      row('活躍帳號', health.activeAccount || '—', 'ok');
+
+    // WS / Connections
+    const wsCls = health.status === 'ok' ? 'ok' : 'err';
+    document.getElementById('ws-badge').textContent = health.status === 'ok' ? '● 正常' : '● 異常';
+    document.getElementById('ws-body').innerHTML =
+      row('後端狀態', health.status === 'ok' ? '運作正常' : '異常', wsCls) +
+      row('活躍 Sessions', (health.activeSessions || 0).toLocaleString(), '') +
+      row('WebSocket Port', '3000', 'dim') +
+      row('總帳號數', health.totalAccounts || '—', 'dim');
+
+    // Ingestion
+    document.getElementById('ingest-badge').textContent = (ing.totalPoints || 0).toLocaleString() + ' pts';
+    document.getElementById('ingest-body').innerHTML =
+      row('總 TrackPoint', (ing.totalPoints || 0).toLocaleString(), '') +
+      row('總批次數', (ing.totalBatches || 0).toLocaleString(), '') +
+      row('Sessions 建立', (ing.sessionsCreated || 0).toLocaleString(), '') +
+      row('Sessions 關閉', (ing.sessionsClosed || 0).toLocaleString(), 'dim');
+
+    // API Stats
+    document.getElementById('api-badge').textContent = (stats.totalCalls || 0) + ' calls';
+    document.getElementById('api-body').innerHTML =
+      row('總 API 呼叫', (stats.totalCalls || 0).toLocaleString(), '') +
+      row('State 呼叫', (stats.stateCalls || 0).toLocaleString(), 'dim') +
+      row('Metadata 呼叫', (stats.metadataCalls || 0).toLocaleString(), 'dim') +
+      row('Cache 命中', (stats.cacheHits || 0).toLocaleString(), 'ok');
+
+    // Animate new cycle
+    if (lastCycle !== null && ing.totalBatches !== lastCycle) {
+      document.getElementById('sync-badge').style.color = '#10b981';
+      setTimeout(() => { document.getElementById('sync-badge').style.color = ''; }, 800);
+    }
+    lastCycle = ing.totalBatches;
+
+  } catch(err) {
+    document.getElementById('sync-dot').style.background = '#ef4444';
+    document.getElementById('sync-label').textContent = '連線失敗';
+    console.error('Monitor fetch error:', err);
+  }
+}
+
+function pill(val, lbl) {
+  return '<div class="pill"><div class="pill-val">' + val + '</div><div class="pill-lbl">' + lbl + '</div></div>';
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>`;
 }
 
 // 健康檢查

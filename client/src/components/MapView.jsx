@@ -208,6 +208,9 @@ export default function MapView({
     const predictiveLineRef = useRef(null);
     const animFrameRef = useRef(null);
     const lastDrawTimeRef = useRef(performance.now());
+    const fpsCountRef    = useRef(0);
+    const fpsWindowRef   = useRef(performance.now());
+    const fpsRef         = useRef(0);
     const airportLayerRef = useRef(null);
     const airportMarkersLoadedRef = useRef(false);
     const airportMarkersMapRef = useRef(new Map());
@@ -1500,8 +1503,23 @@ export default function MapView({
                     } // shouldShowLabel
                 }
 
+                // FPS counter (1-second sliding window)
+                fpsCountRef.current++;
+                const fpsNow = performance.now();
+                if (fpsNow - fpsWindowRef.current >= 1000) {
+                    fpsRef.current = fpsCountRef.current;
+                    fpsCountRef.current = 0;
+                    fpsWindowRef.current = fpsNow;
+                }
+
                 if (onUsageUpdateRef.current) {
-                    onUsageUpdateRef.current({ visibleCount: drawnCount, totalInView: renderQueue.length, renderLimit: maxDraw, throttleFactor: 1.0 });
+                    onUsageUpdateRef.current({
+                        visibleCount: drawnCount,
+                        totalInView: renderQueue.length,
+                        renderLimit: maxDraw,
+                        throttleFactor: 1.0,
+                        fps: fpsRef.current,
+                    });
                 }
             }
 
