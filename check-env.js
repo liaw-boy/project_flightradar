@@ -93,9 +93,9 @@ async function main() {
             if (m) env[m[1].trim()] = m[2].trim();
         });
 
-        const required = ['MONGODB_URI', 'OPENSKY_USER', 'OPENSKY_PASS', 'PORT'];
+        const required = ['MONGODB_URI', 'PORT'];
         const missing = required.filter(k => !env[k]);
-        missing.length ? bad(`Missing required vars: ${missing.join(', ')}`) : ok('Required .env vars present');
+        missing.length ? bad(`Missing required vars: ${missing.join(', ')}`) : ok('Required .env vars (MONGODB, PORT) present');
 
         const osAccounts = [1,2,3,4,5].filter(i => env[`OPENSKY_USER${i}`] && env[`OPENSKY_PASS${i}`]);
         osAccounts.length >= 3
