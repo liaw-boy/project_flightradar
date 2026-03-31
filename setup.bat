@@ -74,8 +74,8 @@ if not exist "assets\AircraftShapesSVG\Shapes SVG" (
         move "AircraftShapesSVG" "assets\AircraftShapesSVG" >nul 2>&1
     )
     if not exist "assets\AircraftShapesSVG" (
-        git clone https://github.com/RexKramer1/AircraftShapesSVG.git assets\AircraftShapesSVG
-        if errorlevel 1 ( echo  [FAIL] Failed to clone AircraftShapesSVG & pause & exit /b 1 )
+        git clone https://github.com/RexKramer1/AircraftShapesSVG.git assets\AircraftShapesSVG >nul 2>&1
+        if errorlevel 1 ( echo  [WARN] Failed to clone AircraftShapesSVG ^(Git not installed?^). Missing SVG icons. )
     )
     echo  [OK] AircraftShapesSVG ready
 ) else (
