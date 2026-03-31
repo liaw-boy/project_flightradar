@@ -19,11 +19,25 @@ for /f %%v in ('node -v') do echo  [OK] Node.js %%v
 
 :: ── Check .env ────────────────────────────────────────────
 if not exist "backend\.env" (
-    echo  [FAIL] backend\.env not found
-    echo         Copy your .env file to backend\.env first.
-    pause & exit /b 1
+    if exist "backend\.env.example" (
+        copy "backend\.env.example" "backend\.env" >nul
+        echo  [WARN] backend\.env automatically created from example.
+        echo         Please remember to configure your real credentials later!
+    ) else (
+        echo  [FAIL] backend\.env not found
+        echo         Copy your .env file to backend\.env first.
+        pause & exit /b 1
+    )
+) else (
+    echo  [OK] .env found
 )
-echo  [OK] .env found
+
+if not exist "client\.env" (
+    if exist "client\.env.example" (
+        copy "client\.env.example" "client\.env" >nul
+        echo  [WARN] client\.env automatically created from example.
+    )
+)
 
 :: ── npm install backend (needed before MongoDB check) ─────
 echo.
