@@ -175,8 +175,7 @@ async function importAircraftDb(zipPath, typesMap, logger) {
 
             bulkOps.push({
                 updateOne: {
-                    // Match by hex OR icao24 to handle both index formats in existing docs
-                    filter: { $or: [{ hex: parsed.hex }, { icao24: parsed.hex }] },
+                    filter: { icao24: parsed.hex },
                     update: { $set: setFields },
                     upsert: true
                 }

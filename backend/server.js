@@ -57,15 +57,15 @@ async function connectToMongo() {
         if (typeof restoreActiveSessions === 'function') await restoreActiveSessions();
         if (typeof buildAirportListCache === 'function') buildAirportListCache();
 
-        // [Phase 16] Run OSINT Data Sync
-        const { initOsintData } = require('./scripts/syncOsintData');
-        initOsintData();
-
-        // [Phase 17] Mictronics Aircraft DB
-        const { syncMictronics } = require('./scripts/syncMictronics');
-        syncMictronics(msg => logger.info('MICTRONICS', msg)).catch(err =>
-            logger.warn('MICTRONICS', `Sync failed (non-fatal): ${err.message}`)
-        );
+        // [Phase 16+17] Run data syncs sequentially to avoid simultaneous write storms on fresh DB
+        (async () => {
+            const { initOsintData } = require('./scripts/syncOsintData');
+            await initOsintData().catch(err => logger.warn('OSINT', `Sync failed (non-fatal): ${err.message}`));
+            const { syncMictronics } = require('./scripts/syncMictronics');
+            await syncMictronics(msg => logger.info('MICTRONICS', msg)).catch(err =>
+                logger.warn('MICTRONICS', `Sync failed (non-fatal): ${err.message}`)
+            );
+        })();
 
         // Purge poisoned spatial_inference routes
         Route.deleteMany({ source: 'spatial_inference' })
@@ -1356,7 +1356,7 @@ async function ingestTrackPoints(states, timeUnix) {
     const sessionCreateDocs = []; // Batched new session documents
 
     // ── Session thresholds (defined once outside the hot loop) ─────────
-    const SESSION_TIMEOUT_MS = 1200000;     // 20 minutes
+    const SESSION_TIMEOUT_MS = 600000;      // 10 minutes (reduced from 20 to free activeSessions memory sooner)
     const GROUND_IDLE_TIMEOUT_MS = 900000;  // 15 minutes
     const GROUND_IDLE_SPEED_KTS = 10;       // knots threshold
 
@@ -1501,7 +1501,11 @@ async function ingestTrackPoints(states, timeUnix) {
         //   - time since last stored > 60 seconds (heartbeat guarantee)
         const lsp = lastStoredPoint.get(icao24);
         if (lsp) {
-            const samePos     = lsp.lat === p.lat && lsp.lng === p.lng;
+            // Use L1-norm distance threshold (~55m) instead of exact equality.
+            // ADS-B parked aircraft have sub-50m transponder jitter that would
+            // pass an exact-equality check and trigger unnecessary writes every 15s.
+            const MIN_POS_DEG = 0.0005; // ~55m — below any meaningful flight-phase delta
+            const samePos     = Math.abs(p.lat - lsp.lat) + Math.abs(p.lng - lsp.lng) < MIN_POS_DEG;
             const altDelta    = Math.abs((p.altitude || 0) - lsp.altitude);
             const hdgDelta    = Math.min(Math.abs((p.heading || 0) - lsp.heading), 360 - Math.abs((p.heading || 0) - lsp.heading));
             const spdDelta    = Math.abs((p.velocity || 0) - lsp.velocity);

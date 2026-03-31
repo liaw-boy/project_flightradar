@@ -111,6 +111,19 @@ Object.entries(paths).forEach(([key, entry]) => {
 // ─── [PERF-4 Fix] Module-level enrichment guard — persists across React re-renders ──
 const _enrichScheduled = new Set();
 
+// ─── measureText cache — avoids redundant font measurement each frame ─────────
+const _textWidthCache = new Map(); // 'font|text' → width
+function measureCached(ctx, text, font) {
+    const key = font + '|' + text;
+    const cached = _textWidthCache.get(key);
+    if (cached !== undefined) return cached;
+    ctx.font = font;
+    const w = ctx.measureText(text).width;
+    if (_textWidthCache.size > 2000) _textWidthCache.clear();
+    _textWidthCache.set(key, w);
+    return w;
+}
+
 // ─── Great Circle Arc Interpolation (tar1090-style) ──────────────────────────
 // For segments longer than GC_THRESHOLD_KM, insert intermediate points along
 // the spherical great-circle arc so the path follows Earth's curvature.
@@ -876,6 +889,7 @@ export default function MapView({
                 const enriched = getEnrichedData(id);
                 const activeTypecode = plane.typecode || (enriched ? enriched.typecode : null);
                 if (!activeTypecode && !_enrichScheduled.has(id)) {
+                    if (_enrichScheduled.size > 5000) _enrichScheduled.clear();
                     _enrichScheduled.add(id);
                     enrichPlaneDetails(id).catch(() => {});
                 }
@@ -1375,8 +1389,9 @@ export default function MapView({
                             labelText += ` FL${altFL}`;
                         }
 
-                        ctx.font = 'bold 13px "JetBrains Mono", "Roboto Mono", Inter, sans-serif';
-                        const textWidth = ctx.measureText(labelText).width;
+                        const _labelFont = 'bold 13px "JetBrains Mono", "Roboto Mono", Inter, sans-serif';
+                        const textWidth = measureCached(ctx, labelText, _labelFont);
+                        ctx.font = _labelFont;
 
                         const logoWidth = hasLogo ? 40 : 0;
                         const logoHeight = 14;
