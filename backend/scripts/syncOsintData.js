@@ -112,9 +112,11 @@ async function syncRoutes() {
     await downloadFile(ROUTES_URL, TEMP_ROUTES_CSV);
     console.log(`[OSINT] Finished downloading routes. Parsing and inserting...`);
 
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
     return new Promise((resolve, reject) => {
         let batch = [];
-        const BATCH_SIZE = 10000;
+        const BATCH_SIZE = 2000;   // reduced from 10000 to limit per-write CPU spike
         let totalInserted = 0;
 
         const processBatch = async (isFinal = false) => {
@@ -152,6 +154,7 @@ async function syncRoutes() {
                     await RouteDictionary.bulkWrite(ops, { ordered: false });
                     totalInserted += ops.length;
                     console.log(`[OSINT] Inserted ${totalInserted} routes so far...`);
+                    await sleep(100); // throttle: prevent sustained MongoDB CPU spike
                 } catch (e) {
                     if (e.code !== 11000) console.error('[OSINT] Bulk write error:', e.message);
                 }

@@ -29,8 +29,11 @@ const TEMP_DB_ZIP   = path.join(__dirname, '../data/mictronics_db.zip');
 const TEMP_TYPE_ZIP = path.join(__dirname, '../data/mictronics_types.zip');
 const TYPE_CACHE    = path.join(__dirname, '../data/aircraft_types.json');
 
-const BATCH_SIZE = 2000;
+const BATCH_SIZE = 500;                    // smaller batches → lower per-write CPU spike
+const BATCH_DELAY_MS = 150;               // pause between batches — keeps MongoDB CPU < ~40%
 const MICTRONICS_SOURCE_TAG = 'mictronics'; // stored in Aircraft.source to track provenance
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // ── Wake-turbulence class → icon_type ────────────────────────────────────────
 // wtc: J=Super-Heavy(A380), H=Heavy(Wide), M=Medium(Narrow), L=Light
@@ -187,6 +190,7 @@ async function importAircraftDb(zipPath, typesMap, logger) {
                 totalProcessed += bulkOps.length;
                 logger(`[Mictronics] Progress: ${totalProcessed.toLocaleString()} queued | ${totalUpdated.toLocaleString()} written`);
                 bulkOps = [];
+                await sleep(BATCH_DELAY_MS); // throttle: give MongoDB CPU breathing room
             }
         }
 
@@ -194,6 +198,7 @@ async function importAircraftDb(zipPath, typesMap, logger) {
             const result = await Aircraft.bulkWrite(bulkOps, { ordered: false });
             totalUpdated   += (result.upsertedCount || 0) + (result.modifiedCount || 0);
             totalProcessed += bulkOps.length;
+            await sleep(BATCH_DELAY_MS);
         }
     }
 
