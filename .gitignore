@@ -9,8 +9,9 @@ node_modules/
 npm-debug.log*
 dist/
 build/
-public/
-public-react/
+/public/
+/public-react/
+backend/public/logs/
 database_backup/
 
 # Environments & Secrets
