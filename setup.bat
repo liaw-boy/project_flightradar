@@ -84,6 +84,16 @@ if errorlevel 1 ( echo  [WARN] seed-shapes had errors, continuing... )
 echo  [OK] Aircraft shapes seeded
 cd ..
 
+:: ── Copy SVG icons to backend/public/svg ──────────────────
+echo  Copying SVG icons to backend/public/svg...
+if not exist "backend\public\svg" mkdir "backend\public\svg"
+if exist "assets\AircraftShapesSVG\Shapes SVG" (
+    xcopy "assets\AircraftShapesSVG\Shapes SVG\*.svg" "backend\public\svg\" /Y /Q >nul 2>&1
+    echo  [OK] SVG icons copied
+) else (
+    echo  [WARN] AircraftShapesSVG not found, skipping SVG copy
+)
+
 :: ── sync-mictronics ───────────────────────────────────────
 echo  [6/6] Syncing Mictronics aircraft database (~530k records, takes 3-5 min)...
 cd backend
