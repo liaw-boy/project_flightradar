@@ -295,14 +295,29 @@
 }
 
 /* RWD */
+
+/* 1280px 以下：跟隨 right-hud 縮小 */
+@media (max-width: 1280px) {
+    .dashboard {
+        width: 100%;
+        min-width: unset;
+        max-width: 290px;
+    }
+}
+
+/* 768px 以下：移到底部浮動卡片（right-hud 已隱藏） */
 @media (max-width: 768px) {
     .dashboard {
+        position: fixed;
         top: auto;
-        bottom: 24px;
+        bottom: 16px;
         right: 12px;
         left: 12px;
         width: auto;
-        padding: 15px;
-        border-radius: 20px;
+        max-width: none;
+        min-width: unset;
+        padding: 12px 16px;
+        border-radius: 16px;
+        z-index: 900;
     }
 }

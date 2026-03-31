@@ -211,6 +211,17 @@ class AccountPool {
             );
         }
 
+        // 5xx 是伺服器端暫時錯誤，不消耗帳號配額，但累計 consecutiveFails
+        if (status >= 500) {
+            account.consecutiveFails++;
+            logger.warn('POOL',
+                `Account ${account.user} server error (${status}) — ` +
+                `consecutiveFails: ${account.consecutiveFails}`
+            );
+            this._saveCache();
+            return;
+        }
+
         account.dailyUsed++;
         this._saveCache();
     }
@@ -246,8 +257,8 @@ class AccountPool {
             } catch (e) {
                 logger.warn('POOL', `Warmup failed for ${account.user}: ${e.message}`);
             }
-            // 每帳號間隔 1.2 秒，避免同 IP 並發請求觸發 429
-            await new Promise(r => setTimeout(r, 1200));
+            // 每帳號間隔 5 秒，避免同 IP 短時間內大量請求觸發 OpenSky IP 層封鎖
+            await new Promise(r => setTimeout(r, 5000));
         }
 
         logger.info('POOL', `Warmup complete. ` +

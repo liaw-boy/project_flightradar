@@ -718,13 +718,19 @@
     box-shadow: 0 5px 20px rgba(34, 211, 238, 0.4);
 }
 
-/* Mobile Bottom Sheet */
+/* 平板（768-960px）：Sidebar 稍微窄一點，保留地圖空間 */
+@media (max-width: 960px) and (min-width: 769px) {
+    .sidebar {
+        width: 340px;
+    }
+}
+
+/* 手機底部抽屜 */
 @media (max-width: 768px) {
     .sidebar {
         width: 100vw;
-        height: 60vh;
-        /* Taller on mobile to show more content */
-        max-height: calc(100vh - 60px);
+        height: 62vh;
+        max-height: calc(100dvh - 60px);
         top: auto;
         bottom: 0;
         left: 0;
@@ -733,6 +739,8 @@
         border-top: 1px solid var(--color-glass-border);
         border-radius: 24px 24px 0 0;
         box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+        /* iOS safe area */
+        padding-bottom: env(safe-area-inset-bottom, 0px);
     }
 
     .sidebar.active {
@@ -747,6 +755,13 @@
     .sb-route-center {
         width: 100%;
         padding: 10px 0;
+    }
+}
+
+/* 超小手機（<480px）：Sidebar 高度稍小，避免擋住整個畫面 */
+@media (max-width: 480px) {
+    .sidebar {
+        height: 55vh;
     }
 }
 

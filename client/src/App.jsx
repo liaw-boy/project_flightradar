@@ -40,11 +40,6 @@ export default function App() {
         showEmergency: true,
         showLow: true,
         showAirports: true,
-        fleetFocus: '',       // [v4.2.0] Airline ICAO filter
-        showHelicopter: true, // ICAO category 8 – rotorcraft
-        showDrone: true,      // ICAO category 14 – UAV
-        showLight: true,      // ICAO category 2 – light aircraft < 15,500 lbs
-        showMilitary: true,   // high-performance / military typecode prefixes
     });
 
     const [zoom, setZoom] = useState(10);
@@ -55,9 +50,7 @@ export default function App() {
         throttleFactor: 1.0
     });
 
-    const [colorScheme, setColorScheme] = useState(() => {
-        return localStorage.getItem('radar_color_scheme') || 'TACTICAL';
-    });
+    const colorScheme = 'TACTICAL';
 
     // [v2.9.0] Map tile layer
     const [mapLayer, setMapLayer] = useState(() =>
@@ -81,11 +74,6 @@ export default function App() {
         setPlaybackTime(unixTime);
     }, []);
 
-    const handleColorSchemeChange = useCallback((scheme) => {
-        setColorScheme(scheme);
-        localStorage.setItem('radar_color_scheme', scheme);
-        logToServer(`Color scheme changed: ${scheme}`, 'info');
-    }, []);
 
 
     const mapInstanceRef = useRef(null);
@@ -369,8 +357,6 @@ export default function App() {
                 onSearchSelect={handleSearchSelect}
                 filters={filters}
                 onFilterChange={handleFilterChange}
-                colorScheme={colorScheme}
-                onColorSchemeChange={handleColorSchemeChange}
                 mapLayer={mapLayer}
                 onMapLayerChange={handleMapLayerChange}
             />

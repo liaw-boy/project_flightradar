@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Plane, Layers, Palette, ChevronDown, ChevronUp, Filter } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Layers, ChevronDown, ChevronUp, Activity, ExternalLink } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import './FilterPanel.css';
 
@@ -31,22 +31,14 @@ export const MAP_LAYERS = [
     },
 ];
 
-import { ICAO_TO_IATA } from '../utils/flightUtils';
-
-export default function FilterPanel({ filters, onFilterChange, colorScheme, onColorSchemeChange, mapLayer, onMapLayerChange, embedded }) {
+export default function FilterPanel({ filters, onFilterChange, mapLayer, onMapLayerChange, embedded }) {
     const { t } = useI18n();
-    const [isThemesExpanded, setIsThemesExpanded] = useState(false);
     const [isLayersExpanded, setIsLayersExpanded] = useState(false);
-    const [isCategoryExpanded, setIsCategoryExpanded] = useState(true);
+    const monitorUrl = `${window.location.protocol}//${window.location.hostname}:${window.location.port === '3005' ? '3000' : window.location.port}/monitor?token=dev`;
 
-    const schemes = [
-        { id: 'TACTICAL', label: t('themeTactical'), color: '#10b981' },
-        { id: 'CLASSIC', label: t('themeClassic'), color: '#22d3ee' },
-        { id: 'VIVID', label: t('themeVivid'), color: '#a3e635' },
-        { id: 'MONO', label: t('themeMono'), color: '#fde047' },
-        { id: 'HEATMAP', label: t('themeHeatmap'), color: '#dc2626' },
-        { id: 'MIDNIGHT', label: t('themeMidnight'), color: '#1e3a8a' },
-    ];
+    const openMonitor = () => {
+        window.open(monitorUrl, 'aerostrat-monitor', 'width=1200,height=800,resizable=yes,scrollbars=yes');
+    };
 
     return (
         <div className={`filter-panel ${embedded ? 'embedded' : ''}`}>
@@ -86,59 +78,6 @@ export default function FilterPanel({ filters, onFilterChange, colorScheme, onCo
 
             <div className="stat-divider" style={{ margin: '15px 0' }} />
 
-            {/* Aircraft Category Filters (PlaneFinder-style) */}
-            <div
-                className="filter-title collapsible-header"
-                style={{ fontSize: '11px', opacity: 0.8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isCategoryExpanded ? '8px' : '0' }}
-                onClick={() => setIsCategoryExpanded(!isCategoryExpanded)}
-            >
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <Filter size={14} style={{ marginRight: '6px' }} />
-                    AIRCRAFT TYPE
-                </div>
-                {isCategoryExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </div>
-            {isCategoryExpanded && (
-                <div style={{ marginBottom: '6px' }}>
-                    {[
-                        { key: 'showHelicopter', label: '🚁 Helicopter' },
-                        { key: 'showDrone',      label: '🛸 Drone / UAV' },
-                        { key: 'showLight',      label: '✈ Light Aircraft' },
-                        { key: 'showMilitary',   label: '🛡 Military' },
-                    ].map(({ key, label }) => (
-                        <label key={key} className="filter-option">
-                            <input
-                                type="checkbox"
-                                checked={filters[key] !== false}
-                                onChange={(e) => onFilterChange(key, e.target.checked)}
-                            />
-                            <span>{label}</span>
-                        </label>
-                    ))}
-                </div>
-            )}
-
-            <div className="stat-divider" style={{ margin: '15px 0' }} />
-
-            {/* [v3.1] Airline Fleet Focus Mode */}
-            <div className="filter-title" style={{ fontSize: '11px', opacity: 0.8, marginBottom: '8px', display: 'flex', alignItems: 'center' }}>
-                <Plane size={14} style={{ marginRight: '6px' }} />
-                FLEET FOCUS
-            </div>
-            <select
-                className="theme-select"
-                value={filters.fleetFocus}
-                onChange={(e) => onFilterChange('fleetFocus', e.target.value)}
-                style={{ width: '100%', marginBottom: '15px' }}
-            >
-                <option value="">-- ALL FLEETS --</option>
-                {Object.keys(ICAO_TO_IATA).sort().map(icao => (
-                    <option key={icao} value={icao}>{icao} ({ICAO_TO_IATA[icao]})</option>
-                ))}
-            </select>
-
-            <div className="stat-divider" style={{ margin: '0 0 15px 0' }} />
-
             {/* [v2.9.0] Map Layer Switcher */}
             <div
                 className="filter-title collapsible-header"
@@ -168,33 +107,12 @@ export default function FilterPanel({ filters, onFilterChange, colorScheme, onCo
 
             <div className="stat-divider" style={{ margin: '15px 0' }} />
 
-            <div
-                className="filter-title collapsible-header"
-                style={{ fontSize: '11px', opacity: 0.8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                onClick={() => setIsThemesExpanded(!isThemesExpanded)}
-            >
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <Palette size={14} style={{ marginRight: '6px' }} />
-                    {t('themeLabel')}
-                </div>
-                {isThemesExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </div>
-
-            <div className={`theme-section ${isThemesExpanded ? 'expanded' : ''}`}>
-                <div className="theme-grid">
-                    {schemes.map((s) => (
-                        <div
-                            key={s.id}
-                            className={`theme-swatch ${colorScheme === s.id ? 'active' : ''}`}
-                            onClick={() => onColorSchemeChange(s.id)}
-                            title={s.label}
-                        >
-                            <div className="swatch-color" style={{ background: s.color }} />
-                            <span className="swatch-name">{s.label}</span>
-                        </div>
-                    ))}
-                </div>
-            </div>
+            {/* SYSTEM MONITOR */}
+            <button className="sys-monitor-btn" onClick={openMonitor}>
+                <Activity size={13} style={{ marginRight: '6px', flexShrink: 0 }} />
+                系統監控
+                <ExternalLink size={11} style={{ marginLeft: 'auto', opacity: 0.5 }} />
+            </button>
         </div>
     );
 }

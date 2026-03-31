@@ -72,19 +72,15 @@ async function connectToMongo() {
             .then(r => { if (r.deletedCount > 0) logger.info('ROUTE', `Purged ${r.deletedCount} spatial_inference route(s) from DB`); })
             .catch(() => null);
 
-        // Sync TTL index
+        // Sync TTL for time-series collection — uses collMod at collection level,
+        // NOT the index-based approach (which only works for regular collections).
         try {
             const db = mongoose.connection.db;
-            await db.command({
-                collMod: 'trackpoints',
-                index: { keyPattern: { timestamp: 1 }, expireAfterSeconds: 172800 }
-            });
-            logger.info('DATABASE', 'TrackPoint TTL synced to 48 hours');
+            await db.command({ collMod: 'trackpoints', expireAfterSeconds: 172800 });
+            logger.info('DATABASE', 'TrackPoint TTL synced to 48 hours (time-series collMod)');
         } catch (ttlErr) {
-            const ignored = ['NamespaceNotFound', 'IndexNotFound'];
-            const isTimeseries = ttlErr.message && ttlErr.message.includes('time-series');
-            if (!ignored.includes(ttlErr.codeName) && !isTimeseries) {
-                logger.warn('DATABASE', `Could not sync TTL index: ${ttlErr.message}`);
+            if (!['NamespaceNotFound','IndexNotFound'].includes(ttlErr.codeName)) {
+                logger.warn('DATABASE', `TTL sync: ${ttlErr.message}`);
             }
         }
     } catch (err) {
@@ -195,10 +191,23 @@ if (fs.existsSync(publicReactPath)) {
 }
 
 // [v12.5] Aircraft SVG silhouettes served locally (avoids GitHub CDN 404s/rate-limits)
+// Known-missing types get a generic jet silhouette instead of a 404 to suppress console noise.
 app.use('/api/svg', express.static(path.join(__dirname, 'public/svg'), {
     maxAge: '7d',
+    fallthrough: true,
     setHeaders: (res) => { res.setHeader('Access-Control-Allow-Origin', '*'); }
 }));
+app.get('/api/svg/:typecode', (req, res) => {
+    // Fallback: serve generic jet SVG for unknown typecodes — suppresses 404 noise
+    const fallback = path.join(__dirname, 'public/svg/A320.svg');
+    if (fs.existsSync(fallback)) {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.sendFile(fallback);
+    } else {
+        res.status(204).end(); // no content, still 2xx
+    }
+});
 
 
 // [v3.0] Security Headers
@@ -769,284 +778,257 @@ function getMonitorHtml() {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AEROSTRAT — System Monitor</title>
+<title>AEROSTRAT &mdash; System Monitor</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#06080f;--s:#0d1220;--s2:#111827;
+  --bg:#04060d;--s:#0a0f1e;--s2:#0f1628;
   --b:rgba(148,163,184,.08);--bh:rgba(148,163,184,.16);
   --t:#e2e8f0;--td:#64748b;--tm:#3d4f63;
-  --cyan:#22d3ee;--green:#10b981;--amber:#f59e0b;--red:#ef4444;
+  --cyan:#22d3ee;--green:#10b981;--amber:#f59e0b;--red:#ef4444;--purple:#a855f7;
   --font:'JetBrains Mono',Consolas,monospace;
 }
-html,body{min-height:100vh;background:var(--bg);color:var(--t);font-family:var(--font);font-size:12px}
+html,body{min-height:100vh;background:var(--bg);color:var(--t);font-family:var(--font);font-size:15px}
 a{color:var(--cyan);text-decoration:none}
-
-/* Layout */
-#wrap{max-width:1100px;margin:0 auto;padding:20px 16px}
-.hd{display:flex;align-items:center;justify-content:space-between;
-  padding:14px 0 16px;border-bottom:1px solid var(--b);margin-bottom:20px}
-.hd-title{font-size:14px;font-weight:700;letter-spacing:.12em;color:var(--t)}
-.hd-sub{font-size:10px;color:var(--td);margin-top:3px;letter-spacing:.06em}
-.hd-sync{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--td)}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--green);
-  animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-
-/* Grid */
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
-.card{background:var(--s);border:1px solid var(--b);border-radius:8px;overflow:hidden}
-.card-hd{display:flex;align-items:center;justify-content:space-between;
-  padding:10px 14px;background:rgba(15,23,42,.5);border-bottom:1px solid var(--b)}
-.card-title{font-size:10px;font-weight:600;letter-spacing:.12em;color:var(--td);text-transform:uppercase}
-.card-badge{font-size:10px;font-weight:700;color:var(--cyan);
-  background:rgba(34,211,238,.1);padding:2px 7px;border-radius:3px}
-.card-body{padding:12px 14px}
-
-/* Rows */
-.row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;
-  border-bottom:1px solid var(--b)}
+a:hover{opacity:.8}
+#wrap{max-width:1280px;margin:0 auto;padding:24px 20px}
+.hd{display:flex;align-items:center;justify-content:space-between;padding:0 0 20px;border-bottom:1px solid var(--b);margin-bottom:24px}
+.hd-brand{font-size:22px;font-weight:700;letter-spacing:.15em;background:linear-gradient(135deg,var(--cyan),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hd-sub{font-size:12px;color:var(--td);margin-top:3px}
+.hd-sync{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--td)}
+.sync-dot{width:9px;height:9px;border-radius:50%;background:var(--amber);flex-shrink:0;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.75)}}
+.stat-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
+.stat-card{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:18px 22px;position:relative;overflow:hidden;transition:border-color .3s}
+.stat-card:hover{border-color:var(--bh)}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:12px 12px 0 0}
+.stat-card.cyan::before{background:linear-gradient(90deg,var(--cyan),transparent)}
+.stat-card.green::before{background:linear-gradient(90deg,var(--green),transparent)}
+.stat-card.amber::before{background:linear-gradient(90deg,var(--amber),transparent)}
+.stat-card.purple::before{background:linear-gradient(90deg,var(--purple),transparent)}
+.stat-val{font-size:30px;font-weight:700;color:var(--t);line-height:1;margin-bottom:5px}
+.stat-lbl{font-size:11px;color:var(--td);letter-spacing:.12em;text-transform:uppercase}
+.stat-trend{font-size:11px;color:var(--tm);margin-top:5px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.grid-full{margin-bottom:16px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}.stat-bar{grid-template-columns:repeat(2,1fr)}}
+.card{background:var(--s);border:1px solid var(--b);border-radius:12px;overflow:hidden}
+.card-hd{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--b);background:rgba(10,15,30,.6)}
+.card-title{font-size:12px;font-weight:700;letter-spacing:.1em;color:var(--td);text-transform:uppercase}
+.card-badge{font-size:12px;font-weight:700;color:var(--cyan);background:rgba(34,211,238,.1);padding:4px 10px;border-radius:5px;border:1px solid rgba(34,211,238,.2)}
+.card-body{padding:18px}
+.accts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
+.acct-card{background:var(--s2);border:1px solid var(--b);border-radius:10px;padding:20px 16px;display:flex;flex-direction:column;align-items:center;gap:10px;transition:all .3s}
+.acct-card.is-active{border-color:rgba(34,211,238,.45);box-shadow:0 0 24px rgba(34,211,238,.1)}
+.acct-card.is-locked{border-color:rgba(239,68,68,.25);opacity:.72}
+.ring-wrap{position:relative;width:90px;height:90px;flex-shrink:0}
+.ring-wrap svg{transform:rotate(-90deg);display:block}
+.ring-bg{fill:none;stroke:rgba(255,255,255,.05);stroke-width:7}
+.ring-fill{fill:none;stroke-width:7;stroke-linecap:round;transition:stroke-dasharray .7s cubic-bezier(.4,0,.2,1)}
+.ring-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;line-height:1.3}
+.ring-pct{font-size:17px;font-weight:700}
+.ring-sub{font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:.05em}
+.acct-name{font-size:13px;font-weight:600;color:var(--t);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.acct-credits-lbl{font-size:12px;color:var(--td);text-align:center}
+.acct-status-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:4px;letter-spacing:.08em}
+.acct-status-badge.s-active{color:var(--cyan);background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.3)}
+.acct-status-badge.s-standby{color:var(--td);background:rgba(100,116,139,.1);border:1px solid rgba(100,116,139,.2)}
+.acct-status-badge.s-locked{color:var(--red);background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25)}
+.unlock-time{font-size:11px;color:var(--red);opacity:.8}
+.acct-meta{display:flex;gap:14px;font-size:11px;color:var(--tm)}
+.sources{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.src-pill{display:flex;align-items:center;gap:6px;padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid}
+.src-pill.up{color:var(--green);border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.06)}
+.src-pill.down{color:var(--red);border-color:rgba(239,68,68,.3);opacity:.65}
+.src-pill.cb{color:var(--amber);border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.06)}
+.src-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+.row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--b);font-size:13px}
 .row:last-child{border-bottom:none}
 .lbl{color:var(--td)}
-.val{color:var(--t);font-weight:500;text-align:right}
-.val.ok{color:var(--green)}
-.val.warn{color:var(--amber)}
-.val.err{color:var(--red)}
-.val.dim{color:var(--tm)}
-
-/* Account rows */
-.acct-row{display:flex;align-items:center;gap:8px;padding:6px 0;
-  border-bottom:1px solid var(--b)}
-.acct-row:last-child{border-bottom:none}
-.acct-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.acct-name{flex:1;color:var(--td);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.acct-credits{min-width:52px;text-align:right;font-weight:600;font-size:11px}
-.bar-wrap{width:60px;height:4px;background:rgba(255,255,255,.05);border-radius:2px;overflow:hidden}
-.bar-fill{height:100%;border-radius:2px;transition:width .4s}
-
-/* Log */
-.log-box{background:var(--bg);border-radius:4px;padding:10px;
-  font-size:10px;line-height:1.7;max-height:220px;overflow-y:auto;
-  border:1px solid var(--b)}
-.log-box::-webkit-scrollbar{width:4px}
-.log-box::-webkit-scrollbar-thumb{background:var(--b);border-radius:2px}
-.log-info{color:#475569}
-.log-warn{color:var(--amber)}
-.log-err{color:var(--red)}
-
-/* Stat pills at top */
-.pills{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
-.pill{padding:6px 14px;border-radius:6px;border:1px solid var(--b);
-  background:var(--s);display:flex;flex-direction:column;gap:2px;min-width:110px}
-.pill-val{font-size:18px;font-weight:700;color:var(--t);line-height:1}
-.pill-lbl{font-size:9px;color:var(--td);letter-spacing:.1em;text-transform:uppercase}
-
-/* Footer */
-footer{text-align:center;padding:20px 0;color:var(--tm);font-size:10px;margin-top:20px;
-  border-top:1px solid var(--b)}
-
-/* Skeleton loading */
-.skel{background:linear-gradient(90deg,var(--s) 25%,var(--s2) 50%,var(--s) 75%);
-  background-size:200% 100%;animation:shimmer 1.5s infinite;
-  border-radius:3px;height:12px;opacity:.5}
+.val{color:var(--t);font-weight:600;text-align:right}
+.val.ok{color:var(--green)}.val.warn{color:var(--amber)}.val.err{color:var(--red)}.val.dim{color:var(--tm)}
+.skel{background:linear-gradient(90deg,var(--s) 25%,var(--s2) 50%,var(--s) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:5px;height:15px;opacity:.5}
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+footer{text-align:center;padding:24px 0;color:var(--tm);font-size:12px;margin-top:8px;border-top:1px solid var(--b)}
 </style>
 </head>
 <body>
 <div id="wrap">
   <div class="hd">
     <div>
-      <div class="hd-title">✈ AEROSTRAT — SYSTEM MONITOR</div>
-      <div class="hd-sub" id="last-updated">載入中…</div>
+      <div class="hd-brand">&#x2708; AEROSTRAT MONITOR</div>
+      <div class="hd-sub" id="last-updated">&#x8F09;&#x5165;&#x4E2D;&#x2026;</div>
     </div>
     <div class="hd-sync">
-      <div class="dot" id="sync-dot" style="background:var(--amber)"></div>
-      <span id="sync-label">連接中…</span>
-      &nbsp;·&nbsp;
-      <a href="/" target="_blank">← 主介面</a>
+      <div class="sync-dot" id="sync-dot"></div>
+      <span id="sync-label">&#x9023;&#x63A5;&#x4E2D;&#x2026;</span>
+      &nbsp;&middot;&nbsp; &#x6BCF; 5 &#x79D2;&#x66F4;&#x65B0;
+      &nbsp;&middot;&nbsp; <a href="/" target="_blank">&#x2190; &#x4E3B;&#x4ECB;&#x9762;</a>
     </div>
   </div>
-
-  <!-- Top-level stat pills -->
-  <div class="pills" id="pills">
-    <div class="pill"><div class="pill-val skel" style="width:60px"> </div><div class="pill-lbl">AIRCRAFT</div></div>
-    <div class="pill"><div class="pill-val skel" style="width:40px"> </div><div class="pill-lbl">SYNC CYCLE</div></div>
-    <div class="pill"><div class="pill-val skel" style="width:50px"> </div><div class="pill-lbl">TRACK PTS</div></div>
-    <div class="pill"><div class="pill-val skel" style="width:50px"> </div><div class="pill-lbl">UPTIME</div></div>
+  <div class="stat-bar" id="stat-bar">
+    <div class="stat-card cyan"><div class="stat-val skel" style="width:90px;height:30px"> </div><div class="stat-lbl">AIRCRAFT</div></div>
+    <div class="stat-card green"><div class="stat-val skel" style="width:70px;height:30px"> </div><div class="stat-lbl">SYNC CYCLE</div></div>
+    <div class="stat-card amber"><div class="stat-val skel" style="width:90px;height:30px"> </div><div class="stat-lbl">TRACK PTS</div></div>
+    <div class="stat-card purple"><div class="stat-val skel" style="width:70px;height:30px"> </div><div class="stat-lbl">UPTIME</div></div>
   </div>
-
-  <div class="grid">
-    <!-- OpenSky Accounts -->
-    <div class="card">
-      <div class="card-hd">
-        <span class="card-title">🔑 OpenSky 帳號</span>
-        <span class="card-badge" id="acct-badge">—</span>
-      </div>
-      <div class="card-body" id="accounts-body">
-        <div class="skel" style="margin:8px 0"></div>
-        <div class="skel" style="margin:8px 0;width:80%"></div>
-        <div class="skel" style="margin:8px 0;width:60%"></div>
-      </div>
-    </div>
-
-    <!-- Sync Status -->
-    <div class="card">
-      <div class="card-hd">
-        <span class="card-title">⟳ 同步狀態</span>
-        <span class="card-badge" id="sync-badge">—</span>
-      </div>
-      <div class="card-body" id="sync-body">
-        <div class="skel" style="margin:8px 0"></div>
-        <div class="skel" style="margin:8px 0;width:70%"></div>
-      </div>
-    </div>
-
-    <!-- WebSocket / Connections -->
-    <div class="card">
-      <div class="card-hd">
-        <span class="card-title">◈ 連線狀態</span>
-        <span class="card-badge" id="ws-badge">—</span>
-      </div>
-      <div class="card-body" id="ws-body">
-        <div class="skel" style="margin:8px 0"></div>
-      </div>
-    </div>
-
-    <!-- Ingestion Stats -->
-    <div class="card">
-      <div class="card-hd">
-        <span class="card-title">◉ 資料吸收</span>
-        <span class="card-badge" id="ingest-badge">—</span>
-      </div>
-      <div class="card-body" id="ingest-body">
-        <div class="skel" style="margin:8px 0"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Recent log (fetched from /api/stats) -->
-  <div class="card" style="margin-top:14px">
+  <div class="card grid-full">
     <div class="card-hd">
-      <span class="card-title">📋 API 統計</span>
-      <span class="card-badge" id="api-badge">—</span>
+      <span class="card-title">&#x1F511; OpenSky &#x5E33;&#x865F;&#x984D;&#x5EA6;</span>
+      <span class="card-badge" id="acct-badge">&#x2014;</span>
     </div>
-    <div class="card-body" id="api-body">
-      <div class="skel"></div>
+    <div class="card-body">
+      <div id="accounts-body" class="accts-grid">
+        <div class="skel" style="height:190px;border-radius:10px"></div>
+        <div class="skel" style="height:190px;border-radius:10px"></div>
+        <div class="skel" style="height:190px;border-radius:10px"></div>
+      </div>
     </div>
   </div>
-
-  <footer>AEROSTRAT System Monitor &nbsp;·&nbsp; 每 5 秒自動更新 &nbsp;·&nbsp; <a href="?token=${MONITOR_TOKEN}">重新整理</a></footer>
+  <div class="grid">
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">&#x27F3; &#x540C;&#x6B65;&#x72C0;&#x614B;</span>
+        <span class="card-badge" id="sync-badge">&#x2014;</span>
+      </div>
+      <div class="card-body">
+        <div id="sources-bar" class="sources"></div>
+        <div id="sync-body"><div class="skel" style="margin:10px 0"></div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">&#x25C8; &#x9023;&#x7DDA; / &#x7CFB;&#x7D71;</span>
+        <span class="card-badge" id="ws-badge">&#x2014;</span>
+      </div>
+      <div class="card-body" id="ws-body"><div class="skel" style="margin:10px 0"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">&#x25C9; &#x8CC7;&#x6599;&#x5438;&#x6536;</span>
+        <span class="card-badge" id="ingest-badge">&#x2014;</span>
+      </div>
+      <div class="card-body" id="ingest-body"><div class="skel" style="margin:10px 0"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">&#x1F4CA; API &#x7D71;&#x8A08;</span>
+        <span class="card-badge" id="api-badge">&#x2014;</span>
+      </div>
+      <div class="card-body" id="api-body"><div class="skel"></div></div>
+    </div>
+  </div>
+  <footer>AEROSTRAT System Monitor &nbsp;&middot;&nbsp; <a href="?token=${MONITOR_TOKEN}">&#x91CD;&#x65B0;&#x6574;&#x7406;</a></footer>
 </div>
-
 <script>
-const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const QUOTA_MAX = 4000;
 let lastCycle = null;
-
 function row(lbl, val, cls) {
   return '<div class="row"><span class="lbl">' + lbl + '</span><span class="val ' + (cls||'') + '">' + val + '</span></div>';
 }
-function acctRow(a) {
-  const locked = a.unlockTime && new Date(a.unlockTime) > new Date();
-  const pct = locked ? 0 : Math.min(100, Math.round((a.remainingCredits / 4000) * 100));
-  const col = locked ? '#ef4444' : pct > 50 ? '#10b981' : pct > 20 ? '#f59e0b' : '#ef4444';
-  const shortName = (a.user || '').replace(/-api-client/g, '');
-  const label = locked ? 'LOCKED' : (a.remainingCredits || 0).toLocaleString();
-  return \`<div class="acct-row">
-    <div class="acct-dot" style="background:\${locked ? '#ef4444' : '#10b981'}"></div>
-    <div class="acct-name">\${shortName}</div>
-    <div class="acct-credits" style="color:\${col}">\${label}</div>
-    <div class="bar-wrap"><div class="bar-fill" style="width:\${pct}%;background:\${col}"></div></div>
-  </div>\`;
+function ringGauge(pct, color) {
+  var r = 38, circ = +(2 * Math.PI * r).toFixed(2);
+  var filled = +((pct / 100) * circ).toFixed(2);
+  return '<svg width="90" height="90" viewBox="0 0 90 90">' +
+    '<circle class="ring-bg" cx="45" cy="45" r="' + r + '"/>' +
+    '<circle class="ring-fill" cx="45" cy="45" r="' + r + '" stroke="' + color + '" stroke-dasharray="' + filled + ' ' + circ + '"/>' +
+    '</svg>';
 }
-
+function acctCard(a, activeUser) {
+  var locked = !!(a.unlockTime && new Date(a.unlockTime) > new Date());
+  var credits = a.remainingCredits != null ? a.remainingCredits : 0;
+  var pct = locked ? 0 : Math.min(100, Math.round((credits / QUOTA_MAX) * 100));
+  var color = locked ? '#ef4444' : pct > 60 ? '#10b981' : pct > 25 ? '#f59e0b' : '#ef4444';
+  var isActive = a.user === activeUser;
+  var shortName = (a.user || '').replace(/-api-client$/, '');
+  var unlockLocal = locked ? new Date(a.unlockTime).toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'}) : '';
+  var cardCls = isActive ? 'is-active' : locked ? 'is-locked' : '';
+  var badgeCls = isActive ? 's-active' : locked ? 's-locked' : 's-standby';
+  var badgeTxt = isActive ? '&#x25CF; ACTIVE' : locked ? '&#x1F512; LOCKED' : '&#x25CB; STANDBY';
+  return '<div class="acct-card ' + cardCls + '">' +
+    '<div class="ring-wrap">' + ringGauge(pct, color) +
+    '<div class="ring-center"><div class="ring-pct" style="color:' + color + '">' + pct + '%</div><div class="ring-sub">QUOTA</div></div></div>' +
+    '<div class="acct-name">' + shortName + '</div>' +
+    '<span class="acct-status-badge ' + badgeCls + '">' + badgeTxt + '</span>' +
+    (locked ? '<div class="unlock-time">&#x89E3;&#x9396; ' + unlockLocal + '</div>' : '') +
+    '<div class="acct-credits-lbl">' + (locked ? '&#x2014; / ' : credits.toLocaleString() + ' / ') + QUOTA_MAX.toLocaleString() + '</div>' +
+    '<div class="acct-meta"><span title="&#x4ECA;&#x65E5;&#x5DF2;&#x7528;">&#x1F4E4; ' + (a.dailyUsed||0) + '</span>' +
+    '<span title="&#x7D2F;&#x8A08;429">&#x26A0; ' + (a.rateLimits||0) + '</span></div></div>';
+}
+function statCard(val, lbl, cls, trend) {
+  return '<div class="stat-card ' + cls + '"><div class="stat-val">' + val + '</div><div class="stat-lbl">' + lbl + '</div>' + (trend ? '<div class="stat-trend">' + trend + '</div>' : '') + '</div>';
+}
+function srcPill(name, status) {
+  return '<div class="src-pill ' + status + '"><span class="src-dot"></span>' + name + '</div>';
+}
 async function refresh() {
   try {
-    const [health, stats] = await Promise.all([
+    var [health, stats] = await Promise.all([
       fetch('/api/health').then(r => r.json()),
       fetch('/api/stats').then(r => r.json()),
     ]);
-
-    // Sync dot
     document.getElementById('sync-dot').style.background = '#10b981';
-    document.getElementById('sync-label').textContent = '실시간 연결';
-    document.getElementById('last-updated').textContent = '마지막 업데이트: ' + new Date().toLocaleTimeString();
-
-    // Last updated text (zh-TW)
-    document.getElementById('last-updated').textContent = '最後更新：' + new Date().toLocaleTimeString('zh-TW');
-    document.getElementById('sync-dot').style.background = '#10b981';
-    document.getElementById('sync-label').textContent = '即時同步';
-
-    const ing = health.ingestion || {};
-    const upMin = Math.round((health.uptime || 0) / 60);
-    const upStr = upMin >= 60 ? (Math.floor(upMin/60) + 'h ' + (upMin%60) + 'm') : upMin + ' 分鐘';
-
-    // Pills
-    document.getElementById('pills').innerHTML =
-      pill((health.cacheSize || ing.lastBatchSize || 0).toLocaleString(), 'AIRCRAFT') +
-      pill(ing.totalBatches || '—', 'SYNC CYCLE') +
-      pill((ing.totalPoints || 0).toLocaleString(), 'TRACK PTS') +
-      pill(upStr, 'UPTIME');
-
-    // Accounts
-    const accts = stats.accounts || [];
-    const activeCount = accts.filter(a => !a.unlockTime || new Date(a.unlockTime) <= new Date()).length;
-    document.getElementById('acct-badge').textContent = activeCount + ' / ' + accts.length + ' 可用';
-    document.getElementById('accounts-body').innerHTML = accts.map(acctRow).join('');
-
-    // Sync
-    const batchMs = ing.lastBatchMs || 0;
-    const batchCls = batchMs < 2000 ? 'ok' : batchMs < 5000 ? 'warn' : 'err';
-    document.getElementById('sync-badge').textContent = 'Cycle #' + (ing.totalBatches || '—');
+    document.getElementById('sync-label').textContent = '&#x5373;&#x6642;&#x540C;&#x6B65;';
+    document.getElementById('last-updated').textContent = '&#x6700;&#x5F8C;&#x66F4;&#x65B0;&#xFF1A;' + new Date().toLocaleTimeString('zh-TW');
+    var ing = health.ingestion || {};
+    var upSec = health.uptime || 0;
+    var upStr = upSec >= 3600 ? Math.floor(upSec/3600) + 'h ' + Math.floor((upSec%3600)/60) + 'm' : Math.floor(upSec/60) + ' min';
+    var batchMs = ing.lastBatchMs || 0;
+    var batchCls = batchMs < 2000 ? 'ok' : batchMs < 5000 ? 'warn' : 'err';
+    document.getElementById('stat-bar').innerHTML =
+      statCard((health.cacheSize||0).toLocaleString(), 'AIRCRAFT', 'cyan', '&#x5373;&#x6642;&#x98DB;&#x6A5F;&#x7E3D;&#x6578;') +
+      statCard('#' + (ing.totalBatches||0), 'SYNC CYCLE', 'green', '&#x4E0A;&#x6B21; ' + batchMs + 'ms') +
+      statCard((ing.totalPoints||0).toLocaleString(), 'TRACK PTS', 'amber', 'TTL 48h') +
+      statCard(upStr, 'UPTIME', 'purple', (health.activeAccount||'').replace(/-api-client$/,''));
+    var accts = stats.accounts || [];
+    var activeUser = health.activeAccount;
+    var activeCount = accts.filter(a => !a.unlockTime || new Date(a.unlockTime) <= new Date()).length;
+    var totalCredits = accts.reduce(function(s,a){ return s+(a.remainingCredits||0); }, 0);
+    document.getElementById('acct-badge').textContent = activeCount + ' / ' + accts.length + ' \u53EF\u7528\u3000\u7E3D\u984D\u5EA6 ' + totalCredits.toLocaleString();
+    document.getElementById('accounts-body').innerHTML = accts.map(a => acctCard(a, activeUser)).join('');
+    document.getElementById('sources-bar').innerHTML =
+      srcPill('adsb.lol','up') + srcPill('OpenSky', activeCount>0?'up':'cb') +
+      srcPill('AL-Mil','up') + srcPill('AL-Point','up') + srcPill('adsb.fi','up');
+    document.getElementById('sync-badge').textContent = 'Cycle #' + (ing.totalBatches||'—');
     document.getElementById('sync-body').innerHTML =
-      row('上次批次大小', (ing.lastBatchSize || 0) + ' 架', '') +
-      row('上次批次耗時', batchMs + ' ms', batchCls) +
-      row('已建立 Sessions', (ing.sessionsCreated || 0).toLocaleString(), '') +
-      row('已關閉 Sessions', (ing.sessionsClosed || 0).toLocaleString(), 'dim') +
-      row('活躍帳號', health.activeAccount || '—', 'ok');
-
-    // WS / Connections
-    const wsCls = health.status === 'ok' ? 'ok' : 'err';
-    document.getElementById('ws-badge').textContent = health.status === 'ok' ? '● 正常' : '● 異常';
+      row('\u4E0A\u6B21\u6279\u6B21', (ing.lastBatchSize||0) + ' \u67B6\u3000' + batchMs + 'ms', batchCls) +
+      row('\u6D3B\u8E8D\u5E33\u865F', (health.activeAccount||'').replace(/-api-client$/,''), 'ok') +
+      row('Sessions \u5EFA\u7ACB', (ing.sessionsCreated||0).toLocaleString(), '') +
+      row('Sessions \u95DC\u9589', (ing.sessionsClosed||0).toLocaleString(), 'dim');
+    var wsCls = health.status === 'ok' ? 'ok' : 'err';
+    document.getElementById('ws-badge').innerHTML = health.status === 'ok'
+      ? '<span style="color:var(--green)">&#x25CF; \u6B63\u5E38</span>'
+      : '<span style="color:var(--red)">&#x25CF; \u7570\u5E38</span>';
     document.getElementById('ws-body').innerHTML =
-      row('後端狀態', health.status === 'ok' ? '運作正常' : '異常', wsCls) +
-      row('活躍 Sessions', (health.activeSessions || 0).toLocaleString(), '') +
-      row('WebSocket Port', '3000', 'dim') +
-      row('總帳號數', health.totalAccounts || '—', 'dim');
-
-    // Ingestion
-    document.getElementById('ingest-badge').textContent = (ing.totalPoints || 0).toLocaleString() + ' pts';
+      row('\u5F8C\u7AEF\u72C0;&#x614B;', health.status==='ok'?'\u904B\u4F5C\u6B63\u5E38':'\u7570\u5E38', wsCls) +
+      row('\u6D3B\u8E8D Sessions', (health.activeSessions||0).toLocaleString(), '') +
+      row('\u5E33\u865F\u6C60', (health.totalAccounts||0)+' \u500B', 'dim') +
+      row('Port', '3000', 'dim');
+    document.getElementById('ingest-badge').textContent = (ing.totalPoints||0).toLocaleString() + ' pts';
     document.getElementById('ingest-body').innerHTML =
-      row('總 TrackPoint', (ing.totalPoints || 0).toLocaleString(), '') +
-      row('總批次數', (ing.totalBatches || 0).toLocaleString(), '') +
-      row('Sessions 建立', (ing.sessionsCreated || 0).toLocaleString(), '') +
-      row('Sessions 關閉', (ing.sessionsClosed || 0).toLocaleString(), 'dim');
-
-    // API Stats
-    document.getElementById('api-badge').textContent = (stats.totalCalls || 0) + ' calls';
+      row('\u7E3D TrackPoints', (ing.totalPoints||0).toLocaleString(), '') +
+      row('\u7E3D\u6279\u6B21', (ing.totalBatches||0).toLocaleString(), '') +
+      row('Sessions \u5EFA\u7ACB', (ing.sessionsCreated||0).toLocaleString(), '') +
+      row('Sessions \u95DC\u9589', (ing.sessionsClosed||0).toLocaleString(), 'dim');
+    document.getElementById('api-badge').textContent = (stats.totalCalls||0).toLocaleString() + ' calls';
     document.getElementById('api-body').innerHTML =
-      row('總 API 呼叫', (stats.totalCalls || 0).toLocaleString(), '') +
-      row('State 呼叫', (stats.stateCalls || 0).toLocaleString(), 'dim') +
-      row('Metadata 呼叫', (stats.metadataCalls || 0).toLocaleString(), 'dim') +
-      row('Cache 命中', (stats.cacheHits || 0).toLocaleString(), 'ok');
-
-    // Animate new cycle
+      row('\u7E3D API \u547C\u53EB', (stats.totalCalls||0).toLocaleString(), '') +
+      row('State \u547C\u53EB', (stats.stateCalls||0).toLocaleString(), 'dim') +
+      row('Metadata \u547C\u53EB', (stats.metadataCalls||0).toLocaleString(), 'dim') +
+      row('Cache \u547D\u4E2D', (stats.cacheHits||0).toLocaleString(), 'ok') +
+      row('\u932F\u8AA4\u6B21\u6578', (stats.errors||0).toLocaleString(), (stats.errors||0)>0?'err':'dim');
     if (lastCycle !== null && ing.totalBatches !== lastCycle) {
-      document.getElementById('sync-badge').style.color = '#10b981';
-      setTimeout(() => { document.getElementById('sync-badge').style.color = ''; }, 800);
+      var el = document.getElementById('sync-badge');
+      el.style.background = 'rgba(16,185,129,.3)';
+      el.style.color = '#10b981';
+      setTimeout(function(){ el.style.background=''; el.style.color=''; }, 700);
     }
     lastCycle = ing.totalBatches;
-
   } catch(err) {
     document.getElementById('sync-dot').style.background = '#ef4444';
-    document.getElementById('sync-label').textContent = '連線失敗';
-    console.error('Monitor fetch error:', err);
+    document.getElementById('sync-label').textContent = '\u9023\u7DDA\u5931\u6557';
   }
 }
-
-function pill(val, lbl) {
-  return '<div class="pill"><div class="pill-val">' + val + '</div><div class="pill-lbl">' + lbl + '</div></div>';
-}
-
 refresh();
 setInterval(refresh, 5000);
 </script>
@@ -1059,7 +1041,7 @@ app.get('/api/health', (req, res) => {
     res.json({
         status: 'ok',
         uptime: process.uptime(),
-        cacheSize: cache.size,
+        cacheSize: masterStateMap?.size ?? globalPlanesCache.states?.length ?? 0,
         activeAccount: accountPool.getCurrentUser(),
         totalAccounts: _rawAccounts.length,
         activeSessions: activeSessions.size,
@@ -1118,6 +1100,9 @@ app.get('/api/stats', function (req, res) {
         uptimeMinutes: Math.round((Date.now() - apiStats.startTime) / 60000),
         recommendedInterval: Math.round(accountPool.getRecommendedInterval(15000) / 1000),
         activeAccount: accountPool.getCurrentUser(),
+        // [v11.0] Per-source health for DevPanel
+        sourceHealth,
+        totalPlanes: masterStateMap?.size ?? globalPlanesCache.states?.length ?? 0,
     });
 });
 
@@ -1127,13 +1112,62 @@ function calculateRecommendedInterval() {
 }
 
 // ==========================================
-// [V2.0.0] Global Polling System & BBox API
+// [v11.0] Multi-Source Polling Engine — Shared State
 // ==========================================
 let globalPlanesCache = { states: [], time: 0 };
 let lastGlobalStatesMap = new Map(); // icao24 -> state (用於偵測起飛/降落)
-let isFetchingGlobal = false;
-let globalRateLimitCooldown = 0; // The timestamp when we are allowed to ping OpenSky again
-let lastGlobalFetchTime = 0;
+
+// ── Master state map with TTL ──────────────────────────────────────────────
+// All three tiers write here. pruneAndBroadcast() serialises to globalPlanesCache.
+const masterStateMap = new Map();  // icao24 → { ...state, _lastSeen: ms }
+const PLANE_TTL_MS = 90_000;       // 90s without update → remove from map
+
+// ── Centralised circuit breakers & source health ──────────────────────────
+const sourceHealth = {};  // key → { cbUntil, consecutiveFails, lastOk, lastCount, lastLatency }
+const SOURCE_CB_MS = 5 * 60_000;  // 5 min backoff on 429/503
+const cbOpen  = k => (sourceHealth[k]?.cbUntil || 0) > Date.now();
+const cbTrip  = (k, ms = SOURCE_CB_MS) => {
+    sourceHealth[k] = {
+        ...sourceHealth[k],
+        cbUntil: Date.now() + ms,
+        consecutiveFails: (sourceHealth[k]?.consecutiveFails || 0) + 1,
+    };
+};
+const cbReset = (k, count, latency) => {
+    sourceHealth[k] = { cbUntil: 0, consecutiveFails: 0, lastOk: Date.now(), lastCount: count, lastLatency: latency };
+};
+
+// ── Merge helper ───────────────────────────────────────────────────────────
+// strategy='upsert': full replacement (Tier 1 global baseline)
+// strategy='merge' : keep existing fields, only update non-null new values (Tier 2/3 overlays)
+function mergeStates(states, strategy = 'upsert') {
+    const now = Date.now();
+    for (const p of states) {
+        if (!p.icao24 || typeof p.lat !== 'number' || typeof p.lng !== 'number') continue;
+        if (strategy === 'merge') {
+            const existing = masterStateMap.get(p.icao24) || {};
+            const merged = { ...existing, ...p, _lastSeen: now };
+            // Preserve richer metadata fields from existing if new record lacks them
+            if (!p.description && existing.description) merged.description = existing.description;
+            if (!p.year        && existing.year)        merged.year        = existing.year;
+            if (!p.typecode    && existing.typecode)    merged.typecode    = existing.typecode;
+            masterStateMap.set(p.icao24, merged);
+        } else {
+            masterStateMap.set(p.icao24, { ...p, _lastSeen: now });
+        }
+    }
+}
+
+// ── Prune stale planes + serialise to cache + broadcast ───────────────────
+function pruneAndBroadcast() {
+    const cutoff = Date.now() - PLANE_TTL_MS;
+    for (const [id, p] of masterStateMap) {
+        if ((p._lastSeen || 0) < cutoff) masterStateMap.delete(id);
+    }
+    const states = Array.from(masterStateMap.values());
+    globalPlanesCache = { states, time: Math.floor(Date.now() / 1000), stale: false };
+    broadcastPlanes(states, globalPlanesCache.time);
+}
 
 // ==========================================
 // [v2.8.4] Spatial Grid Index (空間格狀索引)
@@ -1227,6 +1261,34 @@ async function fetchOpenSky(params = {}) {
 }
 
 /**
+ * [v10.3] Shared normalizer for all adsb-format sources (adsb.lol, adsb.fi, airplanes.live).
+ * All three return the same ADSBexchange v2 compatible format with `ac[]` array.
+ * Extra fields (desc, ownOp, year, nav_modes) are passed through for DB write-back.
+ */
+function normalizeAcRecord(p) {
+    return {
+        icao24:      p.hex?.toLowerCase(),
+        callsign:    (p.flight || '').trim(),
+        lng:         p.lon,
+        lat:         p.lat,
+        altitude:    p.alt_baro === 'ground' ? 0 : (p.alt_baro || p.alt_geom || 0),
+        velocity:    (p.gs || 0) * 0.51444,
+        heading:     p.track || 0,
+        vRate:       (p.baro_rate || 0) * 0.00508,
+        onGround:    p.alt_baro === 'ground' || false,
+        squawk:      p.squawk || null,
+        typecode:    p.t || p.type || null,
+        registration: p.r || null,
+        operator:    p.ownOp || null,
+        description: p.desc || null,
+        year:        p.year || null,
+        navModes:    p.nav_modes || null,
+        category:    p.category || null,
+        isMil:       !!(p.mil || p.dbFlags === 1),
+    };
+}
+
+/**
  * [v10.1] New Primary Telemetry: Airplanes.Live (Multi-Endpoint Support)
  * Supports 'mil', 'point', and 'all' types. Capped at 1 QPS.
  */
@@ -1248,24 +1310,9 @@ async function fetchAirplanesLive(type = 'all', params = {}) {
     }
 
     const data = await response.json();
-    
-    const standardStates = (data.aircraft || []).map(p => ({
-        icao24: p.hex?.toLowerCase(),
-        callsign: (p.flight || '').trim(),
-        lng: p.lon,
-        lat: p.lat,
-        altitude: p.alt_baro === 'ground' ? 0 : (p.alt_baro || p.alt_geom || 0),
-        velocity: (p.gs || 0) * 0.51444,
-        heading: p.track || 0,
-        vRate: (p.baro_rate || 0) * 0.00508,
-        onGround: p.alt_baro === 'ground' || false,
-        squawk: p.squawk || null,
-        typecode: p.t || p.type || null,
-        registration: p.r || null,
-        operator: p.ownOp || null,
-        category: p.category || null,
-        isMil: !!(p.mil || p.dbFlags === 1)
-    })).filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+    // API returns ac[] (ADSBexchange v2 format), not aircraft[]
+    const standardStates = (data.ac || []).map(p => normalizeAcRecord(p))
+        .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
 
     return { states: standardStates, time: Math.floor(data.now || Date.now() / 1000) };
 }
@@ -1281,22 +1328,9 @@ async function fetchAdsbFi(lat, lon, dist = 250) {
     );
     if (!response.ok) throw new Error(`adsb.fi Error: ${response.status}`);
     const data = await response.json();
-    const standardStates = (data.aircraft || []).map(p => ({
-        icao24: p.hex?.toLowerCase(),
-        callsign: (p.flight || '').trim(),
-        lng: p.lon,
-        lat: p.lat,
-        altitude: p.alt_baro === 'ground' ? 0 : (p.alt_baro || p.alt_geom || 0),
-        velocity: (p.gs || 0) * 0.51444,
-        heading: p.track || 0,
-        vRate: (p.baro_rate || 0) * 0.00508,
-        onGround: p.alt_baro === 'ground' || false,
-        squawk: p.squawk || null,
-        typecode: p.t || null,
-        registration: p.r || null,
-        operator: p.ownOp || null,
-        isMil: !!(p.mil || p.dbFlags === 1)
-    })).filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+    // API returns ac[] (ADSBexchange v2 format), not aircraft[]
+    const standardStates = (data.ac || []).map(p => normalizeAcRecord(p))
+        .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
     return { states: standardStates };
 }
 
@@ -1542,24 +1576,327 @@ async function ingestTrackPoints(states, timeUnix) {
     ingestionStats.lastBatchMs = Math.round(performance.now() - batchStart);
 }
 
-// 改寫原本的 fetchGlobalPlanes 為 fetchOpenSky 的封裝
-// [v10.2] Dual-Cycle Hybrid Engine State
-let syncCycleCount = 0;
-let lastOpenSkyFetchTime = 0;
+// ── v11.0 Three-Tier Polling Engine ───────────────────────────────────────
+// Replaces the old single-loop fetchGlobalPlanes().
+// Three independent setIntervals run concurrently:
+//   fetchGlobalBaseline    — 15s  parallel adsb.fi-snap + adsb.lol
+//   fetchViewportOverlay   — 8s   parallel AL-point + re-api, fallback adsb.fi v3
+//   fetchSpecialCategories — 60s  parallel AL-mil + AL-ladd
 
-/**
- * [v10.2] Ultimate Hybrid Engine: Global (OpenSky) + Tactical (Airplanes.Live)
- * Cycle: 10s (Tactical) / 30s (Global Baseline)
- */
+// ── Tier 1: Global Baseline ────────────────────────────────────────────────
+let _baselineRunning = false;
+async function fetchGlobalBaseline() {
+    if (_baselineRunning) return;
+    _baselineRunning = true;
+    const t0 = performance.now();
+
+    try {
+        const [snapR, lolR] = await Promise.allSettled([
+            cbOpen('adsb.fi-snap')
+                ? Promise.reject(new Error('CB open'))
+                : fetch('https://opendata.adsb.fi/api/v2/snapshot', {
+                      headers: { 'User-Agent': 'AEROSTRAT/11.0' },
+                      signal: AbortSignal.timeout(12000),
+                  }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+
+            cbOpen('adsb.lol')
+                ? Promise.reject(new Error('CB open'))
+                : fetch('https://api.adsb.lol/v2/lat/0/lon/0/dist/99999', {
+                      headers: { 'User-Agent': 'AEROSTRAT/11.0' },
+                      signal: AbortSignal.timeout(10000),
+                  }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+        ]);
+
+        let snapStates = [];
+        let lolStates  = [];
+
+        if (snapR.status === 'fulfilled') {
+            snapStates = (snapR.value.ac || []).map(p => normalizeAcRecord(p))
+                .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+            cbReset('adsb.fi-snap', snapStates.length, Math.round(performance.now() - t0));
+        } else {
+            const msg = snapR.reason?.message || '';
+            if (msg.includes('429') || msg.includes('403')) cbTrip('adsb.fi-snap');
+        }
+
+        if (lolR.status === 'fulfilled') {
+            lolStates = (lolR.value.ac || []).map(p => normalizeAcRecord(p))
+                .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+            cbReset('adsb.lol', lolStates.length, Math.round(performance.now() - t0));
+        } else {
+            const msg = lolR.reason?.message || '';
+            if (msg.includes('429') || msg.includes('503')) cbTrip('adsb.lol');
+        }
+
+        if (snapStates.length === 0 && lolStates.length === 0) {
+            logger.warn('SYNC', 'Global baseline: both sources failed — using stale cache');
+            globalPlanesCache.stale = true;
+            return;
+        }
+
+        // Use the richer set as the base; merge the other's metadata fields
+        let baseStates, extraStates;
+        if (snapStates.length >= lolStates.length) {
+            [baseStates, extraStates] = [snapStates, lolStates];
+        } else {
+            [baseStates, extraStates] = [lolStates, snapStates];
+        }
+
+        // Build extra map for metadata-only merge (desc, year, typecode)
+        if (extraStates.length > 0) {
+            const extraMap = new Map(extraStates.map(p => [p.icao24, p]));
+            for (const p of baseStates) {
+                const ex = extraMap.get(p.icao24);
+                if (!ex) continue;
+                if (!p.description && ex.description) p.description = ex.description;
+                if (!p.year        && ex.year)        p.year        = ex.year;
+                if (!p.typecode    && ex.typecode)    p.typecode    = ex.typecode;
+            }
+        }
+
+        mergeStates(baseStates, 'upsert');
+        pruneAndBroadcast();
+
+        const sourceStr = [snapStates.length > 0 && 'adsb.fi-snap', lolStates.length > 0 && 'adsb.lol']
+            .filter(Boolean).join('+');
+        logger.info('SYNC', `✅ Global baseline: ${baseStates.length} planes | sources: ${sourceStr} | ${Math.round(performance.now()-t0)}ms`);
+
+        // Metadata enrichment + TrackPoint ingestion (only on global cycle, not viewport)
+        await enrichAndIngest();
+
+    } catch (e) {
+        logger.error('SYNC', `Global baseline error: ${e.message}`);
+        globalPlanesCache.stale = true;
+    } finally {
+        _baselineRunning = false;
+    }
+}
+
+// ── Tier 2: Viewport Overlay ───────────────────────────────────────────────
+let _viewportRunning = false;
+async function fetchViewportOverlay() {
+    if (_viewportRunning) return;
+    _viewportRunning = true;
+    const t0 = performance.now();
+
+    try {
+        const viewports = getActiveViewports();
+        const vp = viewports.length > 0 ? viewports[0] : null;
+        const lat = vp ? ((vp.lamin + vp.lamax) / 2).toFixed(4) : '25.07';
+        const lon = vp ? ((vp.lomin + vp.lomax) / 2).toFixed(4) : '121.23';
+
+        // Parallel: airplanes.live /point + re-api
+        const [alR, reR] = await Promise.allSettled([
+            cbOpen('al-point')
+                ? Promise.reject(new Error('CB open'))
+                : fetch(`https://api.airplanes.live/v2/point/${lat}/${lon}/250`, {
+                      headers: { 'User-Agent': 'AEROSTRAT/11.0' },
+                      signal: AbortSignal.timeout(8000),
+                  }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+
+            cbOpen('re-api')
+                ? Promise.reject(new Error('CB open'))
+                : fetch(`https://re-api.adsb.lol?circle=${lat},${lon},500`, {
+                      headers: { 'User-Agent': 'AEROSTRAT/11.0' },
+                      signal: AbortSignal.timeout(8000),
+                  }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+        ]);
+
+        let vpStates = [];
+        let vpSources = [];
+
+        if (alR.status === 'fulfilled') {
+            const states = (alR.value.ac || []).map(p => normalizeAcRecord(p))
+                .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+            vpStates = vpStates.concat(states);
+            vpSources.push('al-point');
+            cbReset('al-point', states.length, Math.round(performance.now() - t0));
+        } else {
+            const msg = alR.reason?.message || '';
+            if (msg.includes('429')) cbTrip('al-point');
+        }
+
+        if (reR.status === 'fulfilled') {
+            // re-api uses "aircraft" key (readsb native)
+            const states = (reR.value.aircraft || []).map(p => normalizeAcRecord(p))
+                .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+            vpStates = vpStates.concat(states);
+            vpSources.push('re-api');
+            cbReset('re-api', states.length, Math.round(performance.now() - t0));
+        } else {
+            const msg = reR.reason?.message || '';
+            if (msg.includes('429') || msg.includes('403')) cbTrip('re-api');
+        }
+
+        // Fallback: adsb.fi v3 if both AL and re-api failed
+        if (vpStates.length === 0 && !cbOpen('adsb.fi-v3')) {
+            try {
+                const r = await fetch(
+                    `https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/250`,
+                    { headers: { 'User-Agent': 'AEROSTRAT/11.0' }, signal: AbortSignal.timeout(8000) }
+                );
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const data = await r.json();
+                vpStates = (data.ac || []).map(p => normalizeAcRecord(p))
+                    .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+                vpSources.push('adsb.fi-v3');
+                cbReset('adsb.fi-v3', vpStates.length, Math.round(performance.now() - t0));
+            } catch (e) {
+                if (e.message.includes('429')) cbTrip('adsb.fi-v3');
+            }
+        }
+
+        if (vpStates.length > 0) {
+            mergeStates(vpStates, 'merge');  // merge: preserve existing desc/year/typecode
+            pruneAndBroadcast();
+            logger.debug('SYNC', `Viewport overlay: ${vpStates.length} planes | sources: ${vpSources.join('+')} | ${Math.round(performance.now()-t0)}ms`);
+        }
+    } catch (e) {
+        logger.error('SYNC', `Viewport overlay error: ${e.message}`);
+    } finally {
+        _viewportRunning = false;
+    }
+}
+
+// ── Tier 3: Special Categories ─────────────────────────────────────────────
+let _specialRunning = false;
+async function fetchSpecialCategories() {
+    if (_specialRunning) return;
+    _specialRunning = true;
+    const t0 = performance.now();
+
+    try {
+        const [milR, laddR] = await Promise.allSettled([
+            cbOpen('al-mil')
+                ? Promise.reject(new Error('CB open'))
+                : fetch('https://api.airplanes.live/v2/mil', {
+                      headers: { 'User-Agent': 'AEROSTRAT/11.0' },
+                      signal: AbortSignal.timeout(10000),
+                  }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+
+            cbOpen('al-ladd')
+                ? Promise.reject(new Error('CB open'))
+                : fetch('https://api.airplanes.live/v2/ladd', {
+                      headers: { 'User-Agent': 'AEROSTRAT/11.0' },
+                      signal: AbortSignal.timeout(10000),
+                  }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+        ]);
+
+        let addedCount = 0;
+        const labels = [];
+
+        for (const [result, key, label] of [[milR, 'al-mil', 'mil'], [laddR, 'al-ladd', 'ladd']]) {
+            if (result.status === 'fulfilled') {
+                const states = (result.value.ac || []).map(p => normalizeAcRecord(p))
+                    .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+                mergeStates(states, 'merge');
+                addedCount += states.length;
+                labels.push(`${label}:${states.length}`);
+                cbReset(key, states.length, Math.round(performance.now() - t0));
+            } else {
+                const msg = result.reason?.message || '';
+                if (msg.includes('429')) cbTrip(key);
+            }
+        }
+
+        if (addedCount > 0) {
+            pruneAndBroadcast();
+            logger.info('SYNC', `Special categories: ${addedCount} planes | ${labels.join(', ')} | ${Math.round(performance.now()-t0)}ms`);
+        }
+    } catch (e) {
+        logger.error('SYNC', `Special categories error: ${e.message}`);
+    } finally {
+        _specialRunning = false;
+    }
+}
+
+// ── Enrichment + TrackPoint ingestion (called after global baseline) ───────
+let _enrichRunning = false;
+async function enrichAndIngest() {
+    if (_enrichRunning) return;
+    _enrichRunning = true;
+    const finalStates = Array.from(masterStateMap.values());
+
+    try {
+        // Phase 1: Write-back enriched fields to Aircraft DB
+        const writebackOps = finalStates
+            .filter(p => p.registration || p.operator || p.typecode || p.description)
+            .map(p => ({
+                updateOne: {
+                    filter: { $or: [{ icao24: p.icao24 }, { hex: p.icao24 }] },
+                    update: {
+                        $set: Object.fromEntries([
+                            ['icao24', p.icao24], ['hex', p.icao24],
+                            p.registration && ['registration', p.registration],
+                            p.typecode     && ['typecode',      p.typecode],
+                            p.typecode     && ['type_code',     p.typecode],
+                            p.operator     && ['operator',      p.operator],
+                            p.operator     && ['airline',       p.operator],
+                            p.description  && ['description',   p.description],
+                            p.year         && ['year',          p.year],
+                        ].filter(Boolean)),
+                    },
+                    upsert: true,
+                },
+            }));
+        if (writebackOps.length > 0) Aircraft.bulkWrite(writebackOps, { ordered: false }).catch(() => null);
+
+        // Phase 2: Fill missing typecode from Aircraft DB
+        const icaoList = finalStates.map(p => p.icao24);
+        const [dbMeta, dbReg] = await Promise.all([
+            Aircraft.find({ icao24: { $in: icaoList } }, { icao24: 1, typecode: 1 }).lean(),
+            Aircraft.find(
+                { icao24: { $in: finalStates.filter(p => !p.registration).map(p => p.icao24) } },
+                { icao24: 1, registration: 1, owner: 1, operatorCallsign: 1 }
+            ).lean(),
+        ]);
+        const metaMap = new Map(dbMeta.map(m => [m.icao24.toLowerCase(), m.typecode]));
+        const regMap  = new Map(dbReg.map(r => [r.icao24.toLowerCase(), r]));
+
+        let enrichedCount = 0;
+        finalStates.forEach(p => {
+            const k = p.icao24.toLowerCase();
+            let tc = p.typecode || metaMap.get(k);
+            if (!tc && aircraftMetadataIndex?.has(k)) {
+                tc = aircraftMetadataIndex.get(k);
+                if (p.callsign && p.callsign !== 'UNKNOWN') triggerBackgroundResolution(k, p.callsign);
+            }
+            if (tc) { p.typecode = tc; enrichedCount++; }
+            const reg = regMap.get(k);
+            if (reg) {
+                if (!p.registration && reg.registration) p.registration = reg.registration;
+                if (!p.operator && (reg.owner || reg.operatorCallsign))
+                    p.operator = reg.owner || reg.operatorCallsign;
+            }
+        });
+
+        // Phase 3: Ingest TrackPoints
+        await ingestTrackPoints(finalStates, Math.floor(Date.now() / 1000));
+
+        if (ingestionStats.totalBatches % 10 === 0 && ingestionStats.totalBatches > 0) {
+            logger.info('INGEST', `Cumulative: ${ingestionStats.totalPoints.toLocaleString()} pts | ${ingestionStats.totalBatches} batches | sessions: ${activeSessions.size} active`);
+        }
+
+    } catch (e) {
+        logger.warn('SYNC', `enrichAndIngest error: ${e.message}`);
+    } finally {
+        _enrichRunning = false;
+    }
+}
+
+// ── OBSOLETE — kept as dead reference only, replaced by three-tier engine ──
+// The original monolithic fetchGlobalPlanes() used a single 10s setInterval
+// with phase A/B/C sequential execution. This caused 3-5s total latency per
+// cycle and wasted OpenSky quota on live tracking. Replaced by v11.0 above.
 async function fetchGlobalPlanes() {
     if (isFetchingGlobal) return;
     isFetchingGlobal = true;
     const start = performance.now();
     syncCycleCount++;
     // OpenSky every 45s (every 4-5th cycle of 10s) = ~1920 calls/day.
-    // With 5 accounts (5×400=2000/day) this stays within quota with safe headroom.
-    // adsb.lol supplements when OpenSky is rate-limited (its /v2/all is unreliable, used opportunistically).
-    const isGlobalCycle = syncCycleCount % 5 === 0 || lastOpenSkyFetchTime === 0; // ~every 50s
+    // [v10.3] Global cycle every 2nd tick (20s) — adsb.lol/adsb.fi have no hard daily quota.
+    // adsb.fi snapshot (feeder IP): ~6260 ac global. adsb.lol fallback: ~5270 ac global.
+    const isGlobalCycle = syncCycleCount % 2 === 0 || lastOpenSkyFetchTime === 0; // ~every 20s
     logger.debug('SYNC', `Cycle #${syncCycleCount} started | cached: ${(globalPlanesCache.states || []).length} planes`);
 
     try {
@@ -1571,49 +1908,66 @@ async function fetchGlobalPlanes() {
         if (isGlobalCycle) {
             let gotGlobal = false;
 
-            // Opportunistically try adsb.lol first — richer data, no hard daily quota.
-            // If unavailable (503/429), fall through to OpenSky immediately.
+            // [v10.3] Priority 1: adsb.fi snapshot (feeder IP, ~6260 ac global, best coverage)
+            // Falls through to adsb.lol if unavailable (non-feeder IP or network change)
             try {
-                const res = await fetch('https://api.adsb.lol/v2/all', {
-                    headers: { 'User-Agent': 'AEROSTRAT/5.0' },
-                    signal: AbortSignal.timeout(8000)
+                const snapRes = await fetch('https://opendata.adsb.fi/api/v2/snapshot', {
+                    headers: { 'User-Agent': 'AEROSTRAT/10.3' },
+                    signal: AbortSignal.timeout(10000)
                 });
-                if (res.ok) {
-                    const data = await res.json();
-                    mergedStates = (data.aircraft || []).map(p => ({
-                        icao24: p.hex?.toLowerCase(),
-                        callsign: (p.flight || '').trim(),
-                        lng: p.lon, lat: p.lat,
-                        altitude: p.alt_baro === 'ground' ? 0 : (p.alt_baro || p.alt_geom || 0),
-                        velocity: (p.gs || 0) * 0.51444,
-                        heading: p.track || 0,
-                        vRate: (p.baro_rate || 0) * 0.00508,
-                        onGround: p.alt_baro === 'ground' || false,
-                        squawk: p.squawk || null,
-                        typecode: p.t || null,
-                        registration: p.r || null,
-                        operator: p.ownOp || null,
-                        isMil: !!(p.mil || p.dbFlags === 1)
-                    })).filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+                if (snapRes.ok) {
+                    const data = await snapRes.json();
+                    mergedStates = (data.ac || []).map(p => normalizeAcRecord(p));
                     lastOpenSkyFetchTime = now;
-                    sourceTags.push('adsb.lol');
+                    sourceTags.push('adsb.fi-snap');
                     gotGlobal = true;
-                    logger.info('SYNC', `adsb.lol fetch OK — ${mergedStates.length} planes | ${Math.round(performance.now() - start)}ms`);
+                    logger.info('SYNC', `adsb.fi snapshot OK — ${mergedStates.length} planes | ${Math.round(performance.now() - start)}ms`);
                 }
-            } catch (_) { /* fall through to OpenSky */ }
+            } catch (_) { /* fall through */ }
+
+            // [v10.3] Priority 2: adsb.lol global — no quota, ~5270 ac, safe at 1/s
+            // Fixed URL: /v2/all was 404; correct is /v2/lat/0/lon/0/dist/99999
+            if (!gotGlobal) {
+                try {
+                    const res = await fetch('https://api.adsb.lol/v2/lat/0/lon/0/dist/99999', {
+                        headers: { 'User-Agent': 'AEROSTRAT/10.3' },
+                        signal: AbortSignal.timeout(8000)
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        mergedStates = (data.ac || []).map(p => normalizeAcRecord(p));
+                        lastOpenSkyFetchTime = now;
+                        sourceTags.push('adsb.lol');
+                        gotGlobal = true;
+                        logger.info('SYNC', `adsb.lol global OK — ${mergedStates.length} planes | ${Math.round(performance.now() - start)}ms`);
+                    }
+                } catch (_) { /* fall through to OpenSky */ }
+            }
 
             // OpenSky — primary global source, always tried when adsb.lol is unavailable
-            if (!gotGlobal) {
+            // Circuit breaker: 429/503 → 5 分鐘 backoff，避免持續轟炸已過載的伺服器
+            if (!fetchGlobalPlanes._osCbUntil) fetchGlobalPlanes._osCbUntil = 0;
+            const osCircuitOpen = Date.now() < fetchGlobalPlanes._osCbUntil;
+
+            if (!gotGlobal && !osCircuitOpen) {
                 try {
                     const osData = await fetchOpenSky();
                     mergedStates = osData.states;
                     lastOpenSkyFetchTime = now;
                     sourceTags.push('OpenSky');
                     gotGlobal = true;
+                    fetchGlobalPlanes._osCbUntil = 0; // 成功則重置
                     logger.info('SYNC', `OpenSky fetch OK — ${mergedStates.length} planes | ${Math.round(performance.now() - start)}ms`);
                 } catch (osErr) {
-                    logger.warn('SYNC', `OpenSky failed (${osErr.message}) — keeping stale baseline`);
+                    if (osErr.message.includes('429') || osErr.message.includes('503')) {
+                        fetchGlobalPlanes._osCbUntil = Date.now() + 5 * 60 * 1000;
+                        logger.warn('SYNC', `OpenSky CB tripped (${osErr.message}) — backoff 5min`);
+                    } else {
+                        logger.warn('SYNC', `OpenSky failed (${osErr.message}) — keeping stale baseline`);
+                    }
                 }
+            } else if (!gotGlobal && osCircuitOpen) {
+                logger.debug('SYNC', `OpenSky CB open — skipping (retry at ${new Date(fetchGlobalPlanes._osCbUntil).toISOString()})`);
             }
 
             if (!gotGlobal) {
@@ -1625,8 +1979,7 @@ async function fetchGlobalPlanes() {
             sourceTags.push('Cache');
         }
 
-        // ── Phase B: TACTICAL OVERLAY (Every cycle = 10s) ───────────────
-        // Circuit breaker: if a source returns 429, back off for 5 minutes before retrying.
+        // ── [OBSOLETE BODY — replaced by v11.0 three-tier engine] ──────────
         const stateMap = new Map(mergedStates.map(p => [p.icao24, p]));
         const CB_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
         if (!fetchGlobalPlanes._cb) fetchGlobalPlanes._cb = {};
@@ -1642,7 +1995,7 @@ async function fetchGlobalPlanes() {
                 sourceTags.push('AL-Mil');
                 delete cb['al_mil']; // reset on success
             } catch (milErr) {
-                if (milErr.message.includes('429')) cbTrip('al_mil');
+                if (milErr.message.includes('429') || milErr.message.includes('503')) cbTrip('al_mil');
                 logger.warn('SYNC', `AL-Mil failed: ${milErr.message}`);
             }
         }
@@ -1664,7 +2017,7 @@ async function fetchGlobalPlanes() {
                 delete cb[cbKeyAL];
                 delete cb[cbKeyFi]; // AL back → adsb.fi circuit also reset
             } catch (regErr) {
-                if (regErr.message.includes('429')) cbTrip(cbKeyAL);
+                if (regErr.message.includes('429') || regErr.message.includes('503')) cbTrip(cbKeyAL);
                 if (!cbOpen(cbKeyFi)) {
                     try {
                         const regional = await fetchAdsbFi(centerLat, centerLon, 250);
@@ -1672,9 +2025,32 @@ async function fetchGlobalPlanes() {
                         sourceTags.push(`ADSBFI(${centerLat.toFixed(1)})`);
                         delete cb[cbKeyFi];
                     } catch (fiErr) {
-                        if (fiErr.message.includes('429')) cbTrip(cbKeyFi);
+                        if (fiErr.message.includes('429') || fiErr.message.includes('503')) cbTrip(cbKeyFi);
                     }
                 }
+            }
+        }
+
+        // 3. [v10.3] re-api.adsb.lol — feeder IP viewport overlay (uses "aircraft" key, not "ac")
+        if (!cbOpen('re_api')) {
+            try {
+                const reUrl = `https://re-api.adsb.lol?circle=${centerLat.toFixed(2)},${centerLon.toFixed(2)},500`;
+                const reRes = await fetch(reUrl, {
+                    headers: { 'User-Agent': 'AEROSTRAT/10.3' },
+                    signal: AbortSignal.timeout(8000)
+                });
+                if (reRes.ok) {
+                    const reData = await reRes.json();
+                    // re-api uses "aircraft" key (readsb native format)
+                    (reData.aircraft || [])
+                        .map(p => normalizeAcRecord(p))
+                        .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number')
+                        .forEach(p => stateMap.set(p.icao24, { ...stateMap.get(p.icao24), ...p }));
+                    sourceTags.push('re-api');
+                    delete cb['re_api'];
+                }
+            } catch (reErr) {
+                if (reErr.message.includes('429') || reErr.message.includes('403')) cbTrip('re_api');
             }
         }
 
@@ -1683,10 +2059,9 @@ async function fetchGlobalPlanes() {
         logger.debug('SYNC', `Merge complete — ${finalStates.length} total planes | fetch: ${fetchLatency}ms`);
 
         // ── Phase C: Metadata Enrichment ──────────────────────────────
-        // Write-back: states that came from Airplanes.Live / adsb.fi already carry
-        // registration (r) and operator (ownOp). Persist them to Aircraft DB in bulk
-        // so future lookups are served locally without hitting external APIs.
-        const enrichWriteback = finalStates.filter(p => p.registration || p.operator || p.typecode);
+        // Write-back: states from Airplanes.Live / adsb.fi / adsb.lol carry
+        // registration, operator, description, year. Persist to Aircraft DB in bulk.
+        const enrichWriteback = finalStates.filter(p => p.registration || p.operator || p.typecode || p.description);
         if (enrichWriteback.length > 0) {
             const writebackOps = enrichWriteback.map(p => ({
                 updateOne: {
@@ -1699,6 +2074,8 @@ async function fetchGlobalPlanes() {
                             p.typecode     && ['type_code', p.typecode],
                             p.operator     && ['operator', p.operator],
                             p.operator     && ['airline', p.operator],
+                            p.description  && ['description', p.description],
+                            p.year         && ['year', p.year],
                         ].filter(Boolean))
                     },
                     upsert: true
@@ -1752,40 +2129,22 @@ async function fetchGlobalPlanes() {
             logger.warn('METADATA', `Enrichment failed: ${dbErr.message}`);
         }
 
-        const totalLatency = Math.round(performance.now() - start);
-        globalPlanesCache = { states: finalStates, time: Math.floor(now/1000), stale: false };
-
-        broadcastPlanes(finalStates, globalPlanesCache.time);
-
-        const sourceStr = sourceTags.join('+');
-        logger.info('SYNC', `✅ Cycle #${syncCycleCount} complete | source: ${sourceStr} | planes: ${finalStates.length} | enriched: ${enrichedCount}/${finalStates.length} | latency: ${totalLatency}ms`);
-
-        // [v10.5] Broadcast precise global telemetry with version and source blend
-        broadcastTelemetry(apiStats, 10, `${AEROSTRAT_VERSION}: ${sourceStr}`);
-
+        // [OBSOLETE] This path is never reached in v11.0
+        logger.warn('SYNC', 'fetchGlobalPlanes() body reached — should not happen in v11.0');
     } catch (e) {
-        logger.error('SYNC', `Cycle #${syncCycleCount} failed: ${e.message}`);
-        globalPlanesCache.stale = true;
-    } finally {
-        isFetchingGlobal = false;
-    }
-
-    // [Audit Fix] Use centralized ingestion helper
-    await ingestTrackPoints(globalPlanesCache.states, globalPlanesCache.time);
-
-    // Periodic ingestion health log (every 10th batch = ~5 min at 30s OpenSky interval)
-    if (ingestionStats.totalBatches % 10 === 0 && ingestionStats.totalBatches > 0) {
-        logger.info('INGEST', `Cumulative: ${ingestionStats.totalPoints.toLocaleString()} pts | ${ingestionStats.totalBatches} batches | last batch: ${ingestionStats.lastBatchSize} pts in ${ingestionStats.lastBatchMs}ms | sessions: ${activeSessions.size} active / ${ingestionStats.sessionsCreated} created / ${ingestionStats.sessionsClosed} closed`);
+        logger.error('SYNC', `fetchGlobalPlanes (obsolete) error: ${e.message}`);
     }
 }
 
-// 啟動 10 秒全球資料輪詢機制 (v10.0 Accelerated Sync)
-setInterval(fetchGlobalPlanes, 10000);
+// ── [v11.0] Three-Tier Engine Startup ─────────────────────────────────────
+setInterval(fetchGlobalBaseline,    15_000);   // full global refresh
+setInterval(fetchViewportOverlay,    8_000);   // viewport high-frequency
+setInterval(fetchSpecialCategories, 60_000);   // military + LADD (slow)
 
-// [v7.0] Session timeout reaper — close stale sessions every 5 minutes
+// [v7.0] Session timeout reaper — in-memory cleanup every 5 minutes
 setInterval(() => {
     const now = Date.now();
-    const staleThreshold = 1200000; // 20 minutes (matches SESSION_TIMEOUT_MS)
+    const staleThreshold = 1200000; // 20 minutes
     const staleIds = [];
 
     for (const [icao24, session] of activeSessions) {
@@ -1796,25 +2155,46 @@ setInterval(() => {
 
     if (staleIds.length > 0) {
         for (const { icao24 } of staleIds) activeSessions.delete(icao24);
-
         const closeOps = staleIds.map(s => ({
             updateOne: {
                 filter: { sessionId: s.sessionId },
                 update: { $set: { status: 'TIMEOUT', endTime: new Date() } }
             }
         }));
-
         FlightSession.bulkWrite(closeOps, { ordered: false })
             .then(() => logger.info('SESSION', `Reaper closed ${staleIds.length} timed-out sessions`))
             .catch(err => logger.error('SESSION', `Reaper bulk write failed: ${err.message}`));
     }
-}, 300000); // Every 5 minutes
+}, 300000);
+
+// [v11.0] DB-level stale session reaper — bulk-closes ACTIVE sessions >2h old in DB.
+// Runs every 30 minutes. Handles sessions that accumulated from previous server runs.
+const DB_SESSION_STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
+async function reapStaleDbSessions() {
+    if (mongoose.connection.readyState !== 1) return;
+    try {
+        const cutoff = new Date(Date.now() - DB_SESSION_STALE_MS);
+        const result = await FlightSession.updateMany(
+            { status: 'ACTIVE', updatedAt: { $lt: cutoff } },
+            { $set: { status: 'TIMEOUT', endTime: cutoff } }
+        );
+        if (result.modifiedCount > 0)
+            logger.info('SESSION', `DB reaper: closed ${result.modifiedCount} stale ACTIVE sessions`);
+    } catch (e) {
+        logger.warn('SESSION', `DB reaper error: ${e.message}`);
+    }
+}
+setInterval(reapStaleDbSessions, 30 * 60 * 1000); // every 30 min
+// Run once at startup after DB connects (delayed 10s to let DB init complete)
+setTimeout(reapStaleDbSessions, 10_000);
 
 // 啟動時讀取快取並初始化（委派給 AccountPool）
 const isFreshQuota = accountPool.loadCache(QUOTA_CACHE_FILE);
 (async () => {
     await accountPool.warmup(isFreshQuota);
-    fetchGlobalPlanes();
+    // [v11.0] Immediate first-run: global baseline first, then special categories 3s later
+    fetchGlobalBaseline();
+    setTimeout(fetchSpecialCategories, 3_000);
 })();
 
 // [Surgical Patch] 極簡化 BBox 路由：整合 MongoDB 飛機情報融合
@@ -1880,58 +2260,41 @@ app.get('/api/flights/live', async (req, res) => {
             return res.json({ source: 'mongodb_cache', states: standardized });
         }
 
-        // 2. 【主線程 (OpenSky)】
-        console.log('🌐 [LIVE PUMP] Fetching from Primary Source (OpenSky)...');
+        // 2. 【主線程 (OpenSky)】— 統一走 fetchOpenSky() 避免雙路徑維護
         let standardizedStates = [];
         let sourceUsed = 'opensky';
 
         try {
-            const { headers: osHeaders, account: osAccount } = await accountPool.getHeaders();
-            const osRes = await fetch('https://opensky-network.org/api/states/all?lamin=20&lomin=120&lamax=26&lomax=124', {
-                headers: osHeaders,
-                signal: AbortSignal.timeout(3000)
-            });
-            accountPool.recordResponse(osAccount, osRes.status, osRes.headers);
-
-            if (!osRes.ok) {
-                throw new Error(`OpenSky failed with status ${osRes.status}`);
-            }
-            const data = await osRes.json();
-            
-            if (data.states) {
-                standardizedStates = data.states.map(p => ({
-                    hex: p[0],
-                    callsign: (p[1] || '').trim(),
-                    lon: p[5],
-                    lat: p[6],
-                    alt: p[7] || p[13] || 0,
-                    gs: p[9] || 0,
-                    hdg: p[10] || 0
-                })).filter(p => p.lat !== null && p.lon !== null && p.lat !== undefined && p.lon !== undefined);
-            }
-
+            const { states } = await fetchOpenSky({ lamin: 20, lomin: 120, lamax: 26, lomax: 124 });
+            standardizedStates = states.map(p => ({
+                hex: p.icao24,
+                callsign: p.callsign,
+                lat: p.lat,
+                lon: p.lng,
+                alt: p.altitude,
+                gs: Math.round((p.velocity || 0) / 0.51444),
+                hdg: p.heading
+            }));
         } catch (error) {
             // 3. 【備援切換 (ADSB.lol)】
-            console.warn(`⚠️ [CIRCUIT BREAKER] OpenSky failed (${error.message}). Switching to ADSB.lol...`);
+            console.warn(`⚠️ [LIVE PUMP] OpenSky failed (${error.message}). Switching to ADSB.lol...`);
             sourceUsed = 'adsb_lol';
             const fallbackRes = await fetch('https://api.adsb.lol/v2/lat/25.0330/lon/121.5654/dist/250', {
                 signal: AbortSignal.timeout(5000)
             });
             if (!fallbackRes.ok) throw new Error(`ADSB.lol failed with status ${fallbackRes.status}`);
             const data = await fallbackRes.json();
-            
-            if (data.ac) {
-                standardizedStates = data.ac.map(p => ({
+            standardizedStates = (data.ac || [])
+                .filter(p => p.lat != null && p.lon != null)
+                .map(p => ({
                     hex: p.hex,
                     callsign: (p.flight || '').trim(),
                     lat: p.lat,
                     lon: p.lon,
                     alt: p.alt_baro || p.alt_geom || 0,
                     gs: p.gs || 0,
-                    hdg: p.track || 0,
-                    typecode: p.t || p.type || null
-                })).filter(p => p.lat !== undefined && p.lon !== undefined && p.lat !== null && p.lon !== null);
-            }
+                    hdg: p.track || 0
+                }));
         }
 
         // 4. 【資料正規化與寫入 DB】
@@ -2113,8 +2476,8 @@ app.get('/api/metadata/:icao24', async (req, res) => {
 
         accountPool.recordResponse(metaAccount, response.status, response.headers);
 
-        if (!response.ok) {
-            // 記錄為「無資料」存入 DB 避免重複查詢
+        if (response.status === 404) {
+            // 404 = OpenSky 確認無此飛機資料，永久標記避免重複查詢
             await Aircraft.findOneAndUpdate(
                 { icao24 },
                 { icao24, noData: true, lastUpdated: new Date() },
@@ -2122,6 +2485,10 @@ app.get('/api/metadata/:icao24', async (req, res) => {
             );
             logMissingData(icao24, 'metadata');
             return res.json({ icao24, noData: true });
+        }
+        if (!response.ok) {
+            // 429/5xx 為暫時性錯誤，不標記 noData，讓下次請求重試
+            return res.json({ icao24, noData: false, error: `OpenSky HTTP ${response.status}` });
         }
 
         const data = await response.json();
@@ -2199,7 +2566,8 @@ app.post('/api/metadata/batch', async function (req, res) {
 
                 accountPool.recordResponse(bAccount, response.status, response.headers);
 
-                if (response.status === 429) {
+                if (response.status === 429 || response.status >= 500) {
+                    // 429 = 配額耗盡；5xx = 伺服器暫時錯誤 — 兩者皆停止批次，不標記 noData
                     break;
                 }
 
@@ -2684,7 +3052,9 @@ function getDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-app.get('/api/route/:icao24', async (req, res) => {
+app.get('/api/route/:icao24', async (req, res, next) => {
+    // 讓 /api/route/external 通過到下一個路由（Express 依定義順序匹配，external 會先被當成 :icao24）
+    if (req.params.icao24 === 'external') return next();
     const icao24 = req.params.icao24.toLowerCase();
     if (!isValidIcao24(icao24)) return res.status(400).json({ error: 'Invalid ICAO24 format' });
     const queryCallsign = (req.query.callsign || '').toUpperCase();
@@ -2940,7 +3310,8 @@ async function fetchOpenSkyHistoricalTrack(icao24) {
 
     try {
         if (accountPool._accounts.length === 0) return null;
-        const { headers: basicHeaders, account: histAccount } = accountPool.getBasicAuthHeaders();
+        // OpenSky 已全面改用 OAuth2 Bearer Token，Basic Auth 已棄用
+        const { headers: basicHeaders, account: histAccount } = await accountPool.getHeaders();
         const url = `https://opensky-network.org/api/tracks/all?icao24=${icao24}&time=0`;
 
         const res = await fetch(url, {

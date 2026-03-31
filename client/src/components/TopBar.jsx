@@ -15,8 +15,6 @@ export default function TopBar({
     onSearchSelect,
     filters,
     onFilterChange,
-    colorScheme,
-    onColorSchemeChange,
     mapLayer,
     onMapLayerChange,
 }) {
@@ -92,8 +90,6 @@ export default function TopBar({
                             <FilterPanel
                                 filters={filters}
                                 onFilterChange={onFilterChange}
-                                colorScheme={colorScheme}
-                                onColorSchemeChange={onColorSchemeChange}
                                 mapLayer={mapLayer}
                                 onMapLayerChange={onMapLayerChange}
                                 embedded={true}

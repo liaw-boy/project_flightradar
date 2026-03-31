@@ -67,16 +67,43 @@ body,
    Safe Area (iPhone notch / dynamic island)
    ========================================== */
 @supports (padding: env(safe-area-inset-top)) {
+    /* TopBar 左側 notch 保護 */
+    .top-bar {
+        padding-left: calc(24px + env(safe-area-inset-left));
+        padding-right: calc(24px + env(safe-area-inset-right));
+    }
+
+    /* Dashboard 右側 */
     .dashboard {
         padding-right: calc(20px + env(safe-area-inset-right));
     }
 
+    /* Sidebar 底部（底部抽屜模式）*/
     .sidebar .sb-content {
         padding-bottom: calc(20px + env(safe-area-inset-bottom));
     }
 
+    /* FilterPanel */
     .filter-panel {
         padding-left: calc(15px + env(safe-area-inset-left));
         padding-bottom: calc(15px + env(safe-area-inset-bottom));
+    }
+
+    /* Anomaly Panel */
+    .anomaly-panel {
+        right: calc(24px + env(safe-area-inset-right));
+    }
+
+    /* Settings Popover */
+    .settings-popover {
+        right: calc(0px + env(safe-area-inset-right));
+    }
+
+    /* 底部浮動的 Dashboard（手機模式）*/
+    @media (max-width: 768px) {
+        .dashboard {
+            bottom: calc(16px + env(safe-area-inset-bottom));
+            padding-right: 16px;
+        }
     }
 }

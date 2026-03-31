@@ -63,8 +63,15 @@ export default function HoverCard({ plane, pos }) {
     const arrCode = route?.arrivalAirport || null;
     const hasRoute = depCode || arrCode;
 
-    const depDisplay = depCode || '???';
-    const arrDisplay = arrCode || '???';
+    // 優先顯示 IATA 3 碼；若拿到的是 ICAO 4 碼則嘗試從 airport 查詢結果取 iata
+    const toIata = (code, info) => {
+        if (!code) return '???';
+        if (code.length === 3) return code;                    // 已是 IATA
+        if (code.length === 4 && info?.iata) return info.iata; // ICAO → IATA
+        return code;
+    };
+    const depDisplay = toIata(depCode, depInfo);
+    const arrDisplay = toIata(arrCode, arrInfo);
 
     const depName = route?.depCity || depInfo?.city || depInfo?.name || '';
     const arrName = route?.arrCity || arrInfo?.city || arrInfo?.name || '';

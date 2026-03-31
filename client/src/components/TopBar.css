@@ -124,14 +124,34 @@
     position: absolute;
     top: calc(100% + 12px);
     right: 0;
-    width: 320px;
+    width: min(320px, calc(100vw - 24px));
+    max-height: calc(100dvh - 80px);
+    overflow-y: auto;
     background: rgba(15, 23, 42, 0.95);
     border: 1px solid var(--color-glass-border);
     border-radius: 12px;
     box-shadow: var(--shadow-premium);
     backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     z-index: 2001;
     animation: popoverFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    /* 防止右側溢出 */
+    transform-origin: top right;
+}
+
+/* 超小螢幕：popover 左右撐滿，fixed 定位避免被裁切 */
+@media (max-width: 480px) {
+    .settings-dropdown-wrapper {
+        position: static;
+    }
+    .settings-popover {
+        position: fixed;
+        top: 68px;
+        right: 12px;
+        left: 12px;
+        width: auto;
+        max-height: calc(100dvh - 80px);
+    }
 }
 
 @keyframes popoverFadeIn {
@@ -181,10 +201,24 @@
 }
 
 /* ===== Responsive Design: Mobile & Tablet ===== */
+/* 平板（850px）：隱藏搜尋欄（可透過 Settings 存取） */
 @media (max-width: 850px) {
     .top-bar-center {
         display: none;
-        /* Hide search bar on very small screens to save space, or move into a popup */
+    }
+}
+
+/* 中等螢幕（768px）：隱藏時鐘節省空間 */
+@media (max-width: 768px) {
+    .top-bar {
+        padding: 0 16px;
+    }
+    .top-bar-left {
+        gap: 10px;
+    }
+    /* 隱藏時鐘 pill，保留飛機數與狀態 */
+    .top-stat-pill:first-of-type {
+        display: none;
     }
 }
 

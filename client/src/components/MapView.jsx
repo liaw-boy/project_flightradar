@@ -80,7 +80,8 @@ const PlaneCanvasLayer = L.Layer.extend({
 // Larger aircraft (B744, A380) render physically bigger at all zoom levels.
 
 const FR24_BASE_PX = 36; // Base icon size — PlaneFinder reference
-const TRAIL_LEN = 12;    // Ring buffer depth for gradient trail
+const TRAIL_LEN = 12;    // Ring buffer depth for gradient trail (非選中飛機短尾)
+const TRAIL_FPP = 2;     // Floats per trail point: [lat, lng]
 const TRAIL_MIN_DIST_SQ = 0.000004; // ~2m² — skip duplicate trail points
 
 // [v14.0] High-Performance Rendering Logic
@@ -512,7 +513,12 @@ export default function MapView({
             // [Project AERO-SYNC] Update hover box visibility
             if (foundPlane) {
                 setHoveredPlane(foundPlane);
-                setHoverPos({ x: mousePt.x, y: mousePt.y });
+                // 夾持座標，避免 HoverCard (240px × ~180px) 超出視口邊緣
+                const CARD_W = 240, CARD_H = 180;
+                const vw = window.innerWidth, vh = window.innerHeight;
+                const cx = Math.min(mousePt.x, vw - CARD_W / 2 - 8);
+                const cy = mousePt.y < CARD_H + 16 ? mousePt.y + CARD_H / 2 + 16 : mousePt.y;
+                setHoverPos({ x: cx, y: cy });
             } else {
                 setHoveredPlane(null);
             }
@@ -918,7 +924,7 @@ export default function MapView({
                 if (!lat || !lng) return;
 
                 if (!plane._trail) {
-                    plane._trail = new Float64Array(TRAIL_LEN * 2);
+                    plane._trail = new Float64Array(TRAIL_LEN * TRAIL_FPP);
                     plane._trailHead = 0;
                     plane._trailCount = 0;
                     plane._trail[0] = lat;
@@ -927,13 +933,13 @@ export default function MapView({
                     return;
                 }
 
-                const prevIdx = ((plane._trailHead + TRAIL_LEN - 1) % TRAIL_LEN) * 2;
+                const prevIdx = ((plane._trailHead + TRAIL_LEN - 1) % TRAIL_LEN) * TRAIL_FPP;
                 const dLat = lat - plane._trail[prevIdx];
                 const dLng = lng - plane._trail[prevIdx + 1];
                 if (dLat * dLat + dLng * dLng < TRAIL_MIN_DIST_SQ) return;
 
-                const writeIdx = plane._trailHead * 2;
-                plane._trail[writeIdx] = lat;
+                const writeIdx = plane._trailHead * TRAIL_FPP;
+                plane._trail[writeIdx]     = lat;
                 plane._trail[writeIdx + 1] = lng;
                 plane._trailHead = (plane._trailHead + 1) % TRAIL_LEN;
                 if (plane._trailCount < TRAIL_LEN) plane._trailCount++;
@@ -988,8 +994,19 @@ export default function MapView({
 
                     // [Fix] Immutable spread: build combined render path without mutating state.
                     // trackPoints format: [timestamp, lat, lng, altitude, heading, velocity]
+                    //
+                    // 問題：DB TrackPoints 由 globalPlanesCache 寫入，更新速度可能快於
+                    // 前端 WebSocket，導致軌跡末端超過飛機圖示位置。
+                    // 修法：以 livePlane.lastContact 作為截止點，過濾掉比前端 live
+                    // 資料更新的 DB 點，再接上 live 當前位置作為最終端點。
+                    const liveTime = livePlane?.lastContact || 0;
+                    const trimmedPath = (liveTime > 0)
+                        ? flightPath.filter(pt => !pt[0] || pt[0] <= liveTime + 10) // 10s 寬容
+                        : flightPath;
+                    const basePath = trimmedPath.length > 1 ? trimmedPath : flightPath;
+
                     const renderPath = livePlane?.renderLat
-                        ? [...flightPath, [
+                        ? [...basePath, [
                             Date.now() / 1000,
                             livePlane.renderLat,
                             livePlane.renderLng,
@@ -997,7 +1014,7 @@ export default function MapView({
                             livePlane.heading,
                             livePlane.velocity
                           ]]
-                        : flightPath;
+                        : basePath;
 
                     ctx.save();
                     ctx.lineCap = 'round';
@@ -1136,56 +1153,11 @@ export default function MapView({
                     ctx.restore();
                 }
 
-                // ── Live-Tail Ring-Buffer Trail ──
-                // Always renders the most recent 12 positions for the selected plane.
-                // When historical trackPoints are present, this acts as a high-resolution
-                // "live tail" appended after the altitude-colored historical path.
-                // When no historical data exists yet, it is the sole visual indicator.
-                // This prevents the "shrinking path" artifact caused by switching from a
-                // 12-point ring buffer to a shorter historical track on first load.
-                if (currentSelected && currentPlanes[currentSelected]) {
-                    const sp = currentPlanes[currentSelected];
-                    if (sp._trail && sp._trailCount > 1) {
-                        // When historical path exists, only draw the ring buffer portion
-                        // that extends PAST the last historical point to avoid duplicate rendering.
-                        const lastHistoricalPt = (flightPath && flightPath.length > 1)
-                            ? map.latLngToContainerPoint([
-                                flightPath[flightPath.length - 1][1],
-                                normalizeLongitude(flightPath[flightPath.length - 1][2])
-                              ])
-                            : null;
-
-                        ctx.save();
-                        ctx.lineCap = 'round';
-                        ctx.lineJoin = 'round';
-                        const startIdx = (sp._trailHead + TRAIL_LEN - sp._trailCount) % TRAIL_LEN;
-                        for (let pass = 0; pass < 2; pass++) {
-                            ctx.lineWidth = pass === 0 ? 4 : 2;
-                            ctx.strokeStyle = pass === 0 ? 'rgba(0,0,0,0.8)' : '#22d3ee';
-                            ctx.globalAlpha = pass === 0 ? 0.8 : 1.0;
-                            ctx.beginPath();
-                            let trailStarted = false;
-                            for (let k = 0; k < sp._trailCount; k++) {
-                                const idx = ((startIdx + k) % TRAIL_LEN) * 2;
-                                const tLat = sp._trail[idx];
-                                const tLng = sp._trail[idx + 1];
-                                if (!tLat || !tLng) continue;
-                                const tPt = map.latLngToContainerPoint([tLat, normalizeLongitude(tLng)]);
-                                // If historical path covers this position (within ~3px), skip
-                                // to avoid double-drawing the same segment in a different color.
-                                if (lastHistoricalPt && k < sp._trailCount - 3) {
-                                    const dx = tPt.x - lastHistoricalPt.x;
-                                    const dy = tPt.y - lastHistoricalPt.y;
-                                    if (dx * dx + dy * dy < 9) continue;
-                                }
-                                if (!trailStarted) { ctx.moveTo(tPt.x, tPt.y); trailStarted = true; }
-                                else { ctx.lineTo(tPt.x, tPt.y); }
-                            }
-                            if (trailStarted) ctx.stroke();
-                        }
-                        ctx.restore();
-                    }
-                }
+                // ── Live-Tail 短尾已移除 ──
+                // 選中飛機的路徑由「歷史軌跡 + Live Stitch 虛線」完整覆蓋：
+                //   - 歷史軌跡（高度梯度色）負責 DB 有記錄的部分
+                //   - Live Stitch 虛線彈性段（lines 996-1005）負責最後一個 DB 點到當前位置
+                // 短尾移除後消除了接縫不符的根本來源，視覺上無損失。
 
                 // [v6.0] FR24 Render Mode & Limits
                 const isSimple = renderModeRef.current === RENDER_MODE_SIMPLE;

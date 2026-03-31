@@ -101,33 +101,46 @@ async function fetchTar1090Fallback(hex) {
     }
 }
 
+// Normalize ADS-B callsign for RouteDictionary lookup.
+// ADS-B transmits "CAL006  " (trailing spaces, leading zeros).
+// RouteDictionary stores "CAL6" (no padding, no spaces).
+function normalizeCallsign(cs) {
+    if (!cs) return '';
+    const trimmed = cs.trim().toUpperCase();
+    const match = trimmed.match(/^([A-Z]{2,3})(\d+)(.*)$/);
+    if (!match) return trimmed;
+    return match[1] + parseInt(match[2], 10) + (match[3] || '');
+}
+
 // Local Route & Airport Dictionary Lookup
+// RouteDictionary stores ICAO airport codes (e.g. "RCTP", "KLAX").
+// AirportDictionary.icao = ICAO, AirportDictionary.iata = IATA display code.
 async function fetchLocalOSINTRoute(callsign) {
     try {
-        const routeDict = await RouteDictionary.findOne({ callsign }).lean();
+        const normalized = normalizeCallsign(callsign);
+        const routeDict = await RouteDictionary.findOne({ callsign: normalized }).lean();
         if (!routeDict) return null;
 
-        let origin = { iata: routeDict.originIata, name: null, city: null };
-        let destination = { iata: routeDict.destinationIata, name: null, city: null };
+        const originIcao = routeDict.originIata;      // field name is misleading — stores ICAO
+        const destIcao   = routeDict.destinationIata;
 
-        // Expand via AirportDictionary
-        if (origin.iata) {
-            const ap = await AirportDictionary.findOne({ iata: origin.iata }).lean();
-            if (ap) { origin.name = ap.name; origin.city = ap.city; }
-        }
-        if (destination.iata) {
-            const ap = await AirportDictionary.findOne({ iata: destination.iata }).lean();
-            if (ap) { destination.name = ap.name; destination.city = ap.city; }
-        }
+        // Parallel airport lookup by ICAO code
+        const [originAp, destAp] = await Promise.all([
+            originIcao ? AirportDictionary.findOne({ icao: originIcao }).lean() : null,
+            destIcao   ? AirportDictionary.findOne({ icao: destIcao   }).lean() : null,
+        ]);
 
         return {
-            origin_iata: origin.iata || 'N/A',
-            origin_name: origin.name,
-            origin_city: origin.city,
-            destination_iata: destination.iata || 'N/A',
-            destination_name: destination.name,
-            destination_city: destination.city,
-            destination_weather: null
+            origin_iata:        originAp?.iata  || originIcao || 'N/A',
+            origin_icao:        originIcao || 'N/A',
+            origin_name:        originAp?.name  || null,
+            origin_city:        originAp?.city  || null,
+            destination_iata:   destAp?.iata    || destIcao   || 'N/A',
+            destination_icao:   destIcao   || 'N/A',
+            destination_name:   destAp?.name    || null,
+            destination_city:   destAp?.city    || null,
+            destination_weather: null,
+            source: 'route_dictionary',
         };
     } catch (err) {
         logger.error('FUSION', `Failed to query local OSINT dictionaries: ${err.message}`);
@@ -252,18 +265,7 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
             let routeInfo = await fetchLocalOSINTRoute(callsign);
             if (routeInfo) return routeInfo;
             
-            // [v13.0] Tar1090-style Callsign Prefix Logic
-            const prefix = callsign.substring(0, 3);
-            if (CALLSIGN_PREFIX_AIRLINES[prefix]) {
-                const isTWAIR = ['CAL','EVA','MDA','UIA','TTW','SJX'].includes(prefix);
-                return {
-                    origin_iata: isTWAIR ? 'TPE' : 'LHR', 
-                    destination_iata: isTWAIR ? 'NRT' : 'JFK', 
-                    origin_name: isTWAIR ? 'Taiwan Taoyuan Int\'l' : 'London Heathrow',
-                    destination_name: isTWAIR ? 'Tokyo Narita Int\'l' : 'New York JFK',
-                    isPlaceholder: true
-                };
-            }
+            // No placeholder fallback — return N/A cleanly rather than fake data
 
             if (dbRoute) {
                 return {

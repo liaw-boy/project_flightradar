@@ -521,9 +521,36 @@
 }
 
 /* ===== Responsive Design: Right HUD ===== */
-@media (max-width: 1100px) {
+
+/* 1280px 以下縮小 HUD 寬度，保留更多地圖空間 */
+@media (max-width: 1280px) {
+    .right-hud {
+        width: 290px;
+        right: 16px;
+    }
+}
+
+/* 960px 以下隱藏 HUD（側邊欄 + HUD 同時顯示太擠） */
+@media (max-width: 960px) {
     .right-hud {
         display: none !important;
-        /* Hide dashboard HUD on smaller screens to prevent overlapping */
+    }
+}
+
+/* ===== Responsive Design: Anomaly Panel ===== */
+@media (max-width: 960px) {
+    .anomaly-panel {
+        right: 16px;
+        width: min(300px, calc(100vw - 32px));
+    }
+}
+
+@media (max-width: 600px) {
+    /* 手機上拉到頂部橫幅，左右撐滿 */
+    .anomaly-panel {
+        right: 12px;
+        left: 12px;
+        width: auto;
+        top: 68px;
     }
 }
