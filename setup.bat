@@ -34,9 +34,9 @@ if errorlevel 1 ( echo  [FAIL] backend npm install failed & pause & exit /b 1 )
 echo  [OK] Backend dependencies installed
 cd ..
 
-:: ── Check MongoDB (uses backend's mongodb module) ─────────
+:: ── Check MongoDB (TCP port check, no external modules) ───
 echo  Checking MongoDB...
-node -e "const p=require('path');const {MongoClient}=require(p.join(__dirname,'backend','node_modules','mongodb'));MongoClient.connect('mongodb://localhost:27017',{serverSelectionTimeoutMS:3000}).then(c=>{c.close();process.exit(0)}).catch(()=>process.exit(1))" >nul 2>&1
+node -e "const n=require('net');const s=n.createConnection({port:27017,host:'127.0.0.1'},()=>{s.destroy();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),3000);" >nul 2>&1
 if errorlevel 1 (
     echo  [FAIL] MongoDB not running on localhost:27017
     echo         Please start MongoDB ^(run as Admin: net start MongoDB^)
