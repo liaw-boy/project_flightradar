@@ -63,7 +63,7 @@ pw-report/
 !client/public/**/*.png
 !client/src/assets/**/*.png
 !backend/public/**/*.png
-!backend/public/**/*.svg
+backend/public/svg/
 
 # Data Sources & Raw Assets
 doc/
