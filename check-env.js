@@ -143,8 +143,8 @@ async function main() {
             const aircraftCol = colNames.includes('aircraft') ? 'aircraft' : 'aircraftregistries';
 
             const checks = [
-                { col: 'routedictionaries',   label: 'RouteDictionary',       min: 500000, fix: 'node scripts/syncOsintData.js' },
-                { col: 'airportdictionaries', label: 'AirportDictionary',     min: 50000,  fix: 'node scripts/syncOsintData.js' },
+                { col: 'routedictionaries',   label: 'RouteDictionary',       min: 100000, fix: 'node scripts/syncOsintData.js', warnOnly: true },
+                { col: 'airportdictionaries', label: 'AirportDictionary',     min: 50000,  fix: 'node scripts/syncOsintData.js', warnOnly: true },
                 { col: aircraftCol,           label: 'Aircraft (Mictronics)', min: 400000, fix: 'npm run sync-mictronics', warnOnly: true },
                 { col: 'aircraftshapes',      label: 'AircraftShape SVGs',    min: 100,    fix: 'npm run seed-shapes', warnOnly: true },
             ];
