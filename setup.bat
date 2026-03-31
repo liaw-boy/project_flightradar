@@ -17,16 +17,6 @@ if errorlevel 1 (
 )
 for /f %%v in ('node -v') do echo  [OK] Node.js %%v
 
-:: ── Check MongoDB ─────────────────────────────────────────
-echo  Checking MongoDB...
-node -e "const {MongoClient}=require('mongodb');MongoClient.connect('mongodb://localhost:27017',{serverSelectionTimeoutMS:3000}).then(c=>{c.close();process.exit(0)}).catch(()=>process.exit(1))" >nul 2>&1
-if errorlevel 1 (
-    echo  [FAIL] MongoDB not running on localhost:27017
-    echo         Please start MongoDB and re-run this script.
-    pause & exit /b 1
-)
-echo  [OK] MongoDB connected
-
 :: ── Check .env ────────────────────────────────────────────
 if not exist "backend\.env" (
     echo  [FAIL] backend\.env not found
@@ -35,7 +25,7 @@ if not exist "backend\.env" (
 )
 echo  [OK] .env found
 
-:: ── npm install backend ───────────────────────────────────
+:: ── npm install backend (needed before MongoDB check) ─────
 echo.
 echo  [1/6] Installing backend dependencies...
 cd backend
@@ -43,6 +33,16 @@ call npm install --silent
 if errorlevel 1 ( echo  [FAIL] backend npm install failed & pause & exit /b 1 )
 echo  [OK] Backend dependencies installed
 cd ..
+
+:: ── Check MongoDB (uses backend's mongodb module) ─────────
+echo  Checking MongoDB...
+node -e "const p=require('path');const {MongoClient}=require(p.join(__dirname,'backend','node_modules','mongodb'));MongoClient.connect('mongodb://localhost:27017',{serverSelectionTimeoutMS:3000}).then(c=>{c.close();process.exit(0)}).catch(()=>process.exit(1))" >nul 2>&1
+if errorlevel 1 (
+    echo  [FAIL] MongoDB not running on localhost:27017
+    echo         Please start MongoDB ^(run as Admin: net start MongoDB^)
+    pause & exit /b 1
+)
+echo  [OK] MongoDB connected
 
 :: ── npm install client ────────────────────────────────────
 echo  [2/6] Installing client dependencies...
