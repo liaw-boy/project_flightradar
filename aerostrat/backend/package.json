@@ -1,0 +1,36 @@
+{
+  "name": "project_flightradar",
+  "version": "5.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan.bold,magenta.bold\" \"node server.js\" \"cd client && npm run dev\"",
+    "seed-shapes": "node scripts/seedAircraftShapes.js",
+    "sync-mictronics": "node scripts/syncMictronics.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "better-sqlite3": "^12.8.0",
+    "compression": "^1.8.1",
+    "cors": "^2.8.6",
+    "csv-parser": "^3.2.0",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.0",
+    "helmet": "^8.1.0",
+    "mongoose": "^9.3.0",
+    "msgpack-lite": "^0.1.26",
+    "node-cache": "^5.1.2",
+    "node-cron": "^4.2.1",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
