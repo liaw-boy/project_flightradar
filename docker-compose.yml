@@ -1,0 +1,50 @@
+services:
+  mongodb:
+    image: mongo:4.4.18
+    container_name: aerostrat-mongo
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.runCommand({ping:1})", "--quiet"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 60s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: aerostrat-backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./.env
+    environment:
+      # Override MONGODB_URI to use container service name instead of localhost
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongodb:27017/aerostrat}
+    volumes:
+      # Credential files — kept on host, not baked into image
+      - ./credentials1.json:/app/credentials1.json:ro
+      - ./credentials2.json:/app/credentials2.json:ro
+      - ./credentials3.json:/app/credentials3.json:ro
+      - ./credentials4.json:/app/credentials4.json:ro
+      - ./credentials5.json:/app/credentials5.json:ro
+      # Persistent quota cache — preserves OpenSky quota state across restarts
+      - ./quota-cache.json:/app/quota-cache.json
+      # Logs
+      - ./logs:/app/logs
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/planes/bbox-ping').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+volumes:
+  mongodb_data:

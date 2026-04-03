@@ -1,0 +1,435 @@
+{
+  "EVA191": {
+    "dep": "RJTT",
+    "arr": "RCSS"
+  },
+  "EVA192": {
+    "dep": "RCSS",
+    "arr": "RJTT"
+  },
+  "CAL100": {
+    "dep": "RCTP",
+    "arr": "RJAA"
+  },
+  "CAL101": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "SJX800": {
+    "dep": "RCTP",
+    "arr": "RJAA"
+  },
+  "SJX801": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "UAE202": {
+    "dep": "JFK",
+    "arr": "DXB",
+    "name": "紐約 ✈️ 杜拜"
+  },
+  "UAE201": {
+    "dep": "DXB",
+    "arr": "JFK",
+    "name": "杜拜 ✈️ 紐約"
+  },
+  "UAE001": {
+    "dep": "DXB",
+    "arr": "LHR",
+    "name": "杜拜 ✈️ 倫敦"
+  },
+  "QTR701": {
+    "dep": "DOH",
+    "arr": "JFK",
+    "name": "多哈 ✈️ 紐約"
+  },
+  "DAL201": {
+    "dep": "JFK",
+    "arr": "LHR",
+    "name": "紐約 ✈️ 倫敦"
+  },
+  "UAL871": {
+    "dep": "KSFO",
+    "arr": "RCTP"
+  },
+  "SIA38": {
+    "dep": "SIN",
+    "arr": "LAX",
+    "name": "新加坡 ✈️ 洛杉磯"
+  },
+  "SIA317": {
+    "dep": "LHR",
+    "arr": "SIN",
+    "name": "倫敦 ✈️ 新加坡"
+  },
+  "BAW203": {
+    "dep": "LHR",
+    "arr": "EWR",
+    "name": "倫敦 ✈️ 紐華克"
+  },
+  "AFR006": {
+    "dep": "CDG",
+    "arr": "JFK",
+    "name": "巴黎 ✈️ 紐約"
+  },
+  "DLH400": {
+    "dep": "FRA",
+    "arr": "JFK",
+    "name": "法蘭克福 ✈️ 紐約"
+  },
+  "ANA851": {
+    "dep": "HND",
+    "arr": "TSA",
+    "name": "羽田 ✈️ 松山"
+  },
+  "ANA852": {
+    "dep": "TSA",
+    "arr": "HND",
+    "name": "松山 ✈️ 羽田"
+  },
+  "JAL96": {
+    "dep": "TSA",
+    "arr": "HND",
+    "name": "松山 ✈️ 羽田"
+  },
+  "JAL97": {
+    "dep": "HND",
+    "arr": "TSA",
+    "name": "羽田 ✈️ 松山"
+  },
+  "CPA400": {
+    "dep": "HKG",
+    "arr": "TPE",
+    "name": "香港 ✈️ 桃園"
+  },
+  "CPA401": {
+    "dep": "TPE",
+    "arr": "HKG",
+    "name": "桃園 ✈️ 香港"
+  },
+  "THA917": {
+    "dep": "EGLL",
+    "arr": "VTBS"
+  },
+  "DLH773": {
+    "dep": "VTBS",
+    "arr": "EDDM"
+  },
+  "KAL486": {
+    "dep": "VVDN",
+    "arr": "RKSI"
+  },
+  "SIA608": {
+    "dep": "WSSS",
+    "arr": "RKSI"
+  },
+  "CES508": {
+    "dep": "VHHH",
+    "arr": "ZSPD"
+  },
+  "JJA6163": {
+    "dep": "VTBS",
+    "arr": "RJFU"
+  },
+  "7C6163": {
+    "dep": "PUS",
+    "arr": "TPE",
+    "name": "釜山 ✈️ 桃園"
+  },
+  "CAL104": {
+    "dep": "RCTP",
+    "arr": "RJAA"
+  },
+  "CAL105": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "CAL156": {
+    "dep": "RCTP",
+    "arr": "RJBB"
+  },
+  "CAL157": {
+    "dep": "RJBB",
+    "arr": "RCTP"
+  },
+  "EVA198": {
+    "dep": "RCTP",
+    "arr": "RJAA"
+  },
+  "EVA197": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "TTW204": {
+    "dep": "RCTP",
+    "arr": "RJAA"
+  },
+  "TTW205": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "ICV4093": {
+    "dep": "VHHH",
+    "arr": "RCTP"
+  },
+  "CAL5118": {
+    "dep": "RCTP",
+    "arr": "KLAX"
+  },
+  "EVA12": {
+    "dep": "RCTP",
+    "arr": "KLAX"
+  },
+  "EVA11": {
+    "dep": "KLAX",
+    "arr": "RCTP"
+  },
+  "MDA345": {
+    "dep": "RCQC",
+    "arr": "RCKH"
+  },
+  "CAL131": {
+    "dep": "RJCC",
+    "arr": "RCTP"
+  },
+  "CAL584": {
+    "dep": "ZSPD",
+    "arr": "RCKH"
+  },
+  "EVA705": {
+    "dep": "ZSPD",
+    "arr": "RCKH"
+  },
+  "ANA479": {
+    "dep": "RJTT",
+    "arr": "ROAH"
+  },
+  "CEB188": {
+    "dep": "RPLL",
+    "arr": "RKSI"
+  },
+  "CAL936": {
+    "dep": "VHHH",
+    "arr": "RCKH"
+  },
+  "EVA721": {
+    "dep": "ZSPD",
+    "arr": "RCTP"
+  },
+  "CAL504": {
+    "dep": "ZSPD",
+    "arr": "RCTP"
+  },
+  "CAL163": {
+    "dep": "RKSI",
+    "arr": "RCTP"
+  },
+  "CAL117": {
+    "dep": "RJFF",
+    "arr": "RCTP"
+  },
+  "CAL784": {
+    "dep": "VVTS",
+    "arr": "RCTP"
+  },
+  "HKE685": {
+    "dep": "RJGG",
+    "arr": "VHHH"
+  },
+  "CAL518": {
+    "dep": "ZBAA",
+    "arr": "RCTP"
+  },
+  "EVA195": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "APJ627": {
+    "dep": "RJAA",
+    "arr": "RCTP"
+  },
+  "HVN440": {
+    "dep": "VVCR",
+    "arr": "RKSI"
+  },
+  "ANA849": {
+    "dep": "RJTT",
+    "arr": "VTBS"
+  },
+  "EVA696": {
+    "dep": "PANC",
+    "arr": "KDFW"
+  },
+  "XAX504": {
+    "dep": "WMKK",
+    "arr": "RKSI"
+  },
+  "JJA2108": {
+    "dep": "RKSI",
+    "arr": "RJFU"
+  },
+  "APJ620": {
+    "dep": "RCTP",
+    "arr": "RJAA"
+  },
+  "CAL838": {
+    "dep": "VTBS",
+    "arr": "RCTP"
+  },
+  "EVA206": {
+    "dep": "VTBS",
+    "arr": "RCTP"
+  },
+  "AFL1465": {
+    "dep": "UWPS",
+    "arr": "UUEE"
+  },
+  "HVN408": {
+    "dep": "VVTS",
+    "arr": "RKSI"
+  },
+  "ANA813": {
+    "dep": "RJAA",
+    "arr": "VYYY"
+  },
+  "CAL162": {
+    "dep": "RCTP",
+    "arr": "RKSI"
+  },
+  "CAL153": {
+    "dep": "RJBB",
+    "arr": "RCTP"
+  },
+  "EVA716": {
+    "dep": "RCTP",
+    "arr": "ZBAA"
+  },
+  "KAL442": {
+    "dep": "VVNB",
+    "arr": "RKSI"
+  },
+  "TLM539": {
+    "dep": "VTBD",
+    "arr": "VYKG"
+  },
+  "TLM628": {
+    "dep": "VTBD",
+    "arr": "VTUU"
+  },
+  "AIQ3520": {
+    "dep": "VTBD",
+    "arr": "VTUO"
+  },
+  "EVA805": {
+    "dep": "RCTP",
+    "arr": "VHHH"
+  },
+  "CAL116": {
+    "dep": "RCTP",
+    "arr": "RJFF"
+  },
+  "EVA266": {
+    "dep": "VDPP",
+    "arr": "RCTP"
+  },
+  "EVA392": {
+    "dep": "VVTS",
+    "arr": "RCTP"
+  },
+  "EVA647": {
+    "dep": "KDFW",
+    "arr": "RCTP"
+  },
+  "CPA531": {
+    "dep": "RCTP",
+    "arr": "VHHH"
+  },
+  "SJX851": {
+    "dep": "RCTP",
+    "arr": "RJCC"
+  },
+  "UIA8977": {
+    "dep": "RCSS",
+    "arr": "RCQC"
+  },
+  "MDA1277": {
+    "dep": "RCKH",
+    "arr": "RCWA"
+  },
+  "EVA809": {
+    "dep": "RCTP",
+    "arr": "VHHH"
+  },
+  "EVA396": {
+    "dep": "VVTS",
+    "arr": "RCTP"
+  },
+  "CRK261": {
+    "dep": "VHHH",
+    "arr": "ZSFZ"
+  },
+  "EVA238": {
+    "dep": "WIII",
+    "arr": "RCTP"
+  },
+  "CPA3083": {
+    "dep": "KLAX",
+    "arr": "KPDX"
+  },
+  "UIA8620": {
+    "dep": "RCKH",
+    "arr": "RCWA"
+  },
+  "MDA378": {
+    "dep": "RCMQ",
+    "arr": "RCQC"
+  },
+  "UIA9119": {
+    "dep": "RCKH",
+    "arr": "RCQC"
+  },
+  "UAL837": {
+    "dep": "KSFO",
+    "arr": "RJAA"
+  },
+  "EVA810": {
+    "dep": "VHHH",
+    "arr": "RCTP"
+  },
+  "CES2974": {
+    "dep": "ZBLA",
+    "arr": "ZSNJ"
+  },
+  "EVA715": {
+    "dep": "ZBAA",
+    "arr": "RCTP"
+  },
+  "EVA095": {
+    "dep": "RCTP",
+    "arr": "WBGJ"
+  },
+  "CPA2025": {
+    "dep": "RCTP",
+    "arr": "VHHH"
+  },
+  "JJA2104": {
+    "dep": "RKSI",
+    "arr": "RJFU"
+  },
+  "UAE387": {
+    "dep": "VHHH",
+    "arr": "OMDB"
+  },
+  "ANA850": {
+    "dep": "VTBS",
+    "arr": "RJTT"
+  },
+  "CEB310": {
+    "dep": "RPLL",
+    "arr": "RPVV"
+  },
+  "CAL6876": {
+    "dep": "RCTP",
+    "arr": "WMAU"
+  }
+}
