@@ -75,7 +75,7 @@ async function main() {
         await client.close();
         ok('MongoDB reachable at localhost:27017');
     } catch(e) {
-        bad(`MongoDB connection failed  →  start MongoDB service first  (${e.message.slice(0,60)})`);
+        caution(`MongoDB connection failed (Optional)  →  ${e.message.slice(0,60)}`);
     }
 
     // ── 3. .env ─────────────────────────────────────────────────────────────
@@ -121,56 +121,17 @@ async function main() {
         }
     }
 
-    // ── 6. MongoDB data ─────────────────────────────────────────────────────
+    // ── 6. Database content ─────────────────────────────────────────────────────
     section('6. Database content');
-    if (!fs.existsSync(path.join(BACKEND, 'node_modules', 'mongoose'))) {
-        caution('Skipping DB check — backend node_modules not installed');
+    if (fs.existsSync(path.join(ROOT, 'data', 'aerostrat.db'))) {
+        ok('SQLite (aerostrat.db) initialized');
     } else {
-        try {
-            // Load .env for MONGODB_URI
-            const envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath,'utf8') : '';
-            const envVars = {};
-            envContent.split(/\r?\n/).forEach(l => { const m=l.match(/^([^#=]+)=(.*)/); if(m) envVars[m[1].trim()]=m[2].trim(); });
-            const uri = envVars['MONGODB_URI'] || 'mongodb://localhost:27017/aerostrat';
-
-            const mongoose = require(path.join(BACKEND, 'node_modules', 'mongoose'));
-            await mongoose.connect(uri, { serverSelectionTimeoutMS: 4000 });
-            const db = mongoose.connection.db;
-
-            // Discover actual aircraft collection name (could be 'aircraft' or 'aircraftregistries')
-            const colList = await db.listCollections().toArray();
-            const colNames = colList.map(c => c.name);
-            const aircraftCol = colNames.includes('aircraft') ? 'aircraft' : 'aircraftregistries';
-
-            const checks = [
-                { col: 'routedictionaries',   label: 'RouteDictionary',       min: 100000, fix: 'node scripts/syncOsintData.js', warnOnly: true },
-                { col: 'airportdictionaries', label: 'AirportDictionary',     min: 50000,  fix: 'node scripts/syncOsintData.js', warnOnly: true },
-                { col: aircraftCol,           label: 'Aircraft (Mictronics)', min: 400000, fix: 'npm run sync-mictronics', warnOnly: true },
-                { col: 'aircraftshapes',      label: 'AircraftShape SVGs',    min: 100,    fix: 'npm run seed-shapes', warnOnly: true },
-            ];
-
-            for (const { col, label, min, fix, warnOnly } of checks) {
-                const n = await db.collection(col).estimatedDocumentCount().catch(() => 0);
-                if (n >= min) {
-                    ok(`${label}: ${n.toLocaleString()} records`);
-                } else if (warnOnly) {
-                    caution(`${label}: only ${n.toLocaleString()} records  →  run: ${fix}`);
-                } else {
-                    bad(`${label}: only ${n.toLocaleString()} records  →  run: ${fix}`);
-                }
-            }
-
-            // Stale sessions warning
-            const stale = await db.collection('flightsessions').countDocuments({
-                status: 'ACTIVE',
-                updatedAt: { $lt: new Date(Date.now() - 2 * 60 * 60 * 1000) }
-            }).catch(() => 0);
-            if (stale > 10000) caution(`${stale.toLocaleString()} stale ACTIVE sessions in DB (auto-cleaned on startup)`);
-
-            await mongoose.disconnect();
-        } catch(e) {
-            caution(`DB check skipped: ${e.message.slice(0, 60)}`);
-        }
+        caution('SQLite DB not found - will be created on startup');
+    }
+    if (fs.existsSync(path.join(ROOT, 'data', 'aircraft.csv.gz'))) {
+        ok('Aircraft metadata index (CSV/GZ) present');
+    } else {
+        caution('Aircraft metadata index missing - auto-completion might be limited');
     }
 
     // ── 7. Static assets ────────────────────────────────────────────────────
