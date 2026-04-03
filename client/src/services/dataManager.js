@@ -89,9 +89,13 @@ export const dataManager = {
      * [L2 -> API] 獲取歷史軌跡
      */
     async getTrack(icao24, lastContact, forceRefresh = false) {
-        const cacheKey = `track_${icao24}`;
+        // Use sessionId in the cache key when available so a new flight immediately
+        // gets its own cache slot — prevents stale previous-flight path being served.
+        // On the first call for an aircraft we don't know the sessionId yet, so we
+        // check the icao24-only key first, then upgrade once the API responds.
+        const baseKey = `track_${icao24}`;
         if (!forceRefresh) {
-            const cached = lruCache.get(cacheKey);
+            const cached = lruCache.get(baseKey);
             if (cached) return cached;
         }
 
@@ -100,7 +104,10 @@ export const dataManager = {
             const res = await fetch(`/api/tracks?icao24=${icao24}${timeParam}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            lruCache.put(cacheKey, data);
+            // Store under session-scoped key AND icao24-only key (for next lookup)
+            const sessionKey = data.sessionId ? `track_${icao24}_${data.sessionId}` : baseKey;
+            lruCache.put(sessionKey, data);
+            lruCache.put(baseKey, data);
             return data;
         } catch (err) {
             throw err;

@@ -100,6 +100,21 @@ const bulkUpdateSessions = db.transaction((ops) => {
     }
 });
 
+const stmtFindByIcaoActive = db.prepare(
+    "SELECT * FROM flight_sessions WHERE icao24 = ? AND status = 'ACTIVE' ORDER BY updated_at DESC LIMIT 1"
+);
+// Latest session for icao24 regardless of status (for recently-landed aircraft)
+const stmtFindLatestByIcao24 = db.prepare(
+    'SELECT * FROM flight_sessions WHERE icao24 = ? ORDER BY updated_at DESC LIMIT 1'
+);
+// All sessions for icao24 for the list endpoint
+const stmtFindAllByIcao24 = db.prepare(
+    'SELECT * FROM flight_sessions WHERE icao24 = ? ORDER BY updated_at DESC LIMIT ?'
+);
+const stmtFindAllByIcao24Status = db.prepare(
+    'SELECT * FROM flight_sessions WHERE icao24 = ? AND status = ? ORDER BY updated_at DESC LIMIT ?'
+);
+
 // ── Public API ────────────────────────────────────────────────────────────
 const SessionStore = {
     /** find({ status: 'ACTIVE' }) */
@@ -117,11 +132,15 @@ const SessionStore = {
         return [];
     },
 
-    /** findOne({ sessionId }) */
+    /** findOne({ sessionId }) OR findOne({ icao24, status: 'ACTIVE' }) */
     async findOne(query) {
-        const id = query?.sessionId;
-        if (!id) return null;
-        return rowToDoc(stmtFindById.get(id));
+        if (query?.sessionId) {
+            return rowToDoc(stmtFindById.get(query.sessionId));
+        }
+        if (query?.icao24 && query?.status === 'ACTIVE') {
+            return rowToDoc(stmtFindByIcaoActive.get(query.icao24.toLowerCase()));
+        }
+        return null;
     },
 
     /** insertMany(docs) */
@@ -151,6 +170,32 @@ const SessionStore = {
             cutoff,
         });
         return { modifiedCount: info.changes };
+    },
+
+    /**
+     * findLatestActiveByIcao24(icao24)
+     * Returns the latest ACTIVE session for an aircraft.
+     * Falls back to the most-recent session of any status so recently-landed
+     * aircraft still get their completed track rather than nothing.
+     */
+    async findLatestActiveByIcao24(icao24) {
+        const icao = icao24.toLowerCase();
+        const active = stmtFindByIcaoActive.get(icao);
+        if (active) return rowToDoc(active);
+        return rowToDoc(stmtFindLatestByIcao24.get(icao));
+    },
+
+    /**
+     * findAllByIcao24(icao24, status, limit)
+     * Returns all sessions for an aircraft sorted by most-recent first.
+     * Used by GET /api/sessions/:icao24.
+     */
+    async findAllByIcao24(icao24, status, limit = 20) {
+        const icao = icao24.toLowerCase();
+        const rows = status
+            ? stmtFindAllByIcao24Status.all(icao, status.toUpperCase(), limit)
+            : stmtFindAllByIcao24.all(icao, limit);
+        return rows.map(rowToDoc);
     },
 
     /** estimatedDocumentCount() for stats */

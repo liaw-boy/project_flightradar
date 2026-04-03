@@ -21,6 +21,10 @@ const stmtLatestBySession = db.prepare(`
 `);
 
 const stmtCountTotal = db.prepare('SELECT COUNT(*) AS cnt FROM track_points');
+// Fetch all track points for a single session ordered by time (session-scoped)
+const stmtFindBySession = db.prepare(
+    'SELECT * FROM track_points WHERE session_id = ? ORDER BY ts ASC'
+);
 
 // ── Batch insert (transaction) ────────────────────────────────────────────
 const insertBatch = db.transaction((points) => {
@@ -60,6 +64,27 @@ const TrackStore = {
         const row = stmtLatestBySession.get(sid);
         if (!row) return null;
         return { timestamp: new Date(row.ts * 1000), ts: row.ts };
+    },
+
+    /**
+     * findBySessionId(sessionId)
+     * Efficient single-session track retrieval via a prepared statement.
+     * This is the primary query path for fetchTracksInternal — never mixes sessions.
+     */
+    async findBySessionId(sessionId) {
+        return stmtFindBySession.all(sessionId).map(r => ({
+            sessionId:    r.session_id,
+            icao24:       r.icao24,
+            timestamp:    new Date(r.ts * 1000),
+            lat:          r.lat,
+            lng:          r.lng,
+            altitude:     r.altitude,
+            velocity:     r.velocity,
+            heading:      r.heading,
+            verticalRate: r.vertical_rate,
+            onGround:     !!r.on_ground,
+            squawk:       r.squawk,
+        }));
     },
 
     /** find({ sessionId: { $in: [...] } }) for playback */

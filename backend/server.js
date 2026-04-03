@@ -1561,7 +1561,7 @@ async function ingestTrackPoints(states, timeUnix) {
 
             // Create new session
             const newSessionId = `${icao24}_${now}_${Math.random().toString(36).slice(2, 6)}`;
-            session = { sessionId: newSessionId, callsign, lastSeen: now, onGround, groundIdleSince: null, groundCounter: 0, airborneCounter: 0 };
+            session = { sessionId: newSessionId, callsign, lastSeen: now, startTime: timeUnix, onGround, groundIdleSince: null, groundCounter: 0, airborneCounter: 0 };
             activeSessions.set(icao24, session);
 
             sessionCreateDocs.push({
@@ -3390,65 +3390,90 @@ async function fetchOpenSkyHistoricalTrack(icao24) {
 }
 
 /**
- * Fetch track for an aircraft using only locally stored TrackPoint data.
- * Points are keyed by FlightSession.sessionId to ensure current-flight isolation.
+ * Fetch track for an aircraft — always session-scoped to prevent mixing flights.
+ *
+ * Resolution order:
+ *   1. activeSessions Map (in-memory, O(1)) → sessionId + startTime
+ *   2. SessionStore.findLatestActiveByIcao24() → latest ACTIVE or most-recent DB session
+ *   3. TrackStore.findBySessionId(sessionId) → session-isolated track points
+ *   4. Session-bounded SQLite fallback (session_id = ?) if TrackStore returns < 5 pts
+ *   5. OpenSky historical augmentation filtered to session start time
+ *
+ * Cache key: `s_${sessionId}` — different keys across flights prevent stale data
+ * from a previous flight being served for a new session.
  */
 async function fetchTracksInternal(icao24) {
-    // Check short-term memory cache
-    const cached = trackCache.get(icao24);
+    const icao = icao24.toLowerCase();
+
+    // ── 1. Resolve current session — in-memory first (O(1)), then DB ───────
+    let sessionId        = null;
+    let sessionStartUnix = null;
+
+    const memSession = activeSessions.get(icao);
+    if (memSession) {
+        sessionId        = memSession.sessionId;
+        sessionStartUnix = memSession.startTime; // Unix seconds, set at session creation
+    } else {
+        // Aircraft not currently active — query DB for its latest session
+        // (handles recently-landed aircraft whose session was just COMPLETED)
+        const dbSession = await FlightSession.findLatestActiveByIcao24(icao);
+        if (dbSession) {
+            sessionId        = dbSession.sessionId;
+            sessionStartUnix = dbSession.startTime
+                ? Math.floor(new Date(dbSession.startTime).getTime() / 1000)
+                : null;
+        }
+    }
+
+    // ── 2. Session-scoped cache check ───────────────────────────────────────
+    const cacheKey = sessionId ? `s_${sessionId}` : `i_${icao}`;
+    const cached = trackCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < TRACK_CACHE_TTL)) {
         return cached.data;
     }
 
     try {
-        const icao = icao24.toLowerCase();
-        // 1. Get current local session
-        let session = await FlightSession.findOne({ icao24: icao });
-
+        // ── 3. Primary fetch — session-scoped prepared statement ────────────
         let localPoints = [];
-        if (session) {
-            localPoints = await TrackPoint.find({ sessionId: { $in: [session.sessionId] } });
+        if (sessionId) {
+            localPoints = await TrackPoint.findBySessionId(sessionId);
         }
 
-        if (localPoints.length < 5) {
-            const flightStartBound = session
-                ? session.startTime
-                : new Date(Date.now() - 2 * 60 * 60 * 1000);
+        // ── 4. Sparse-data fallback — still session-bounded ─────────────────
+        // If TrackStore returned < 5 pts (e.g. server just restarted),
+        // hit SQLite directly filtering on session_id — never on icao24 alone.
+        if (localPoints.length < 5 && sessionId) {
+            const sqliteDb = require('./db/sqlite');
+            const cutoff = sessionStartUnix
+                ? sessionStartUnix - 120  // 2-min tolerance for ADS-B sensor lag at takeoff
+                : Math.floor((Date.now() - 30 * 60 * 1000) / 1000);
 
-            // SQLite fallback: fetch by icao24 since session start
-            const db = require('./db/sqlite');
-            const cutoff = Math.floor(new Date(flightStartBound).getTime() / 1000);
-            const fallbackRows = db.prepare(
-                'SELECT * FROM track_points WHERE icao24 = ? AND ts >= ? ORDER BY ts ASC LIMIT 15000'
-            ).all(icao, cutoff);
-            const fallbackPoints = fallbackRows.map(r => ({
-                sessionId: r.session_id, icao24: r.icao24,
-                timestamp: new Date(r.ts * 1000),
-                lat: r.lat, lng: r.lng, altitude: r.altitude,
-                velocity: r.velocity, heading: r.heading, onGround: !!r.on_ground
-            }));
+            const fallbackRows = sqliteDb.prepare(
+                'SELECT * FROM track_points WHERE session_id = ? AND ts >= ? ORDER BY ts ASC LIMIT 15000'
+            ).all(sessionId, cutoff);
 
-            if (fallbackPoints.length > localPoints.length) {
-                console.log(`📡 [TRACK FALLBACK] ${icao24}: ${fallbackPoints.length} pts since session start (${flightStartBound.toISOString()})`);
-                localPoints = fallbackPoints;
+            if (fallbackRows.length > localPoints.length) {
+                logger.debug('TRACK', `${icao24}: sparse fallback ${fallbackRows.length} pts (session ${sessionId})`);
+                localPoints = fallbackRows.map(r => ({
+                    sessionId: r.session_id, icao24: r.icao24,
+                    timestamp: new Date(r.ts * 1000),
+                    lat: r.lat, lng: r.lng, altitude: r.altitude,
+                    velocity: r.velocity, heading: r.heading, onGround: !!r.on_ground,
+                }));
             }
         }
-        
-        // [v14] OpenSky Historical Track Augmentation
-        // When local data is sparse (< 20 pts), fetch the full current-flight track from
-        // OpenSky. This provides FR24-style path from takeoff, not just from server start.
-        // Filtered to current session only — never mixes in previous flights.
+
+        // ── 5. OpenSky Historical Track Augmentation ────────────────────────
+        // Only for sparse local data. Hard-filtered to session start so
+        // previous flights of the same aircraft are never included.
         if (localPoints.length < 20) {
             try {
                 const osTrack = await fetchOpenSkyHistoricalTrack(icao);
                 if (osTrack && Array.isArray(osTrack.path) && osTrack.path.length > 0) {
-                    // Use session.startTime as the flight boundary — exclude any earlier flights.
-                    // Add 2-minute tolerance for sensor lag at takeoff.
-                    const flightStartUnix = session
-                        ? Math.floor(session.startTime.getTime() / 1000) - 120
-                        : Math.floor((Date.now() - 2 * 60 * 60 * 1000) / 1000);
+                    const flightStartUnix = sessionStartUnix
+                        ? sessionStartUnix - 120
+                        : Math.floor((Date.now() - 30 * 60 * 1000) / 1000);
 
-                    // OpenSky path: [time, lat, lng, baro_altitude, true_track, on_ground]
                     const osFiltered = osTrack.path.filter(p =>
                         p[0] >= flightStartUnix &&
                         typeof p[1] === 'number' && p[1] !== 0 &&
@@ -3456,19 +3481,16 @@ async function fetchTracksInternal(icao24) {
                     );
 
                     if (osFiltered.length > localPoints.length) {
-                        // Convert to TrackPoint-like objects for uniform handling
                         const osConverted = osFiltered.map(p => ({
                             timestamp: new Date(p[0] * 1000),
-                            lat: p[1],
-                            lng: p[2],
+                            lat: p[1], lng: p[2],
                             altitude: typeof p[3] === 'number' ? p[3] : 0,
-                            heading: typeof p[4] === 'number' ? p[4] : 0,
+                            heading:  typeof p[4] === 'number' ? p[4] : 0,
                             velocity: 0,
-                            onGround: !!p[5]
+                            onGround: !!p[5],
                         }));
 
-                        // Merge: local points override OpenSky for the same second
-                        // (local data has higher update rate and precision)
+                        // Local points override OpenSky for the same second
                         const mergedMap = new Map();
                         osConverted.forEach(p => mergedMap.set(Math.round(p.timestamp.getTime() / 1000), p));
                         localPoints.forEach(p => mergedMap.set(Math.round(p.timestamp.getTime() / 1000), p));
@@ -3482,8 +3504,7 @@ async function fetchTracksInternal(icao24) {
             }
         }
 
-        // Build final path array — deduplicate consecutive identical coordinates
-        // (handles legacy data and OpenSky snapshots with repeated positions)
+        // ── 6. Build path array — deduplicate consecutive identical coordinates ─
         const rawPath = localPoints.map(pt => [
             Math.floor(pt.timestamp.getTime() / 1000),
             pt.lat, pt.lng, pt.altitude || 0, pt.heading || 0, pt.velocity || 0, pt.onGround ? 1 : 0
@@ -3494,13 +3515,13 @@ async function fetchTracksInternal(icao24) {
             return pt[1] !== prev[1] || pt[2] !== prev[2];
         });
 
-        const result = { icao24, path };
-        trackCache.set(icao24, { data: result, timestamp: Date.now() });
+        const result = { icao24, sessionId, path };
+        trackCache.set(cacheKey, { data: result, timestamp: Date.now() });
         return result;
 
     } catch (e) {
-        console.error(`❌ [TRACK ERROR] ${e.message}`);
-        return { icao24, path: [], noData: true, error: e.message };
+        logger.error('TRACK', `fetchTracksInternal failed for ${icao24}: ${e.message}`);
+        return { icao24, sessionId, path: [], noData: true, error: e.message };
     }
 }
 
@@ -3560,10 +3581,7 @@ app.get('/api/sessions/:icao24', async (req, res) => {
     if (req.query.status) filter.status = req.query.status.toUpperCase();
 
     try {
-        const allSessions = await FlightSession.find(filter);
-        const sessions = allSessions
-            .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
-            .slice(0, limit);
+        const sessions = await FlightSession.findAllByIcao24(icao24, req.query.status, limit);
 
         // Attach point count for each session (lightweight aggregate)
         const sessionIds = sessions.map(s => s.sessionId);

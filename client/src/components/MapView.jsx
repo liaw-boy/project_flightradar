@@ -1007,35 +1007,40 @@ export default function MapView({
                 if (!map || typeof map.getZoom !== 'function') return;
                 const zoom = map.getZoom();
 
-                // ── [v8.0] Professional Altitude-Colored Track with Outline ──
+                // ── [v15.0] Trajectory Path Pre-Processing ──────────
+                // Pre-calculate the trajectory for the selected plane once per frame. 
+                // This is shared by both the track-drawing and aircraft-heading loops.
                 const flightPath = trackPointsRef.current;
-                if (flightPath && flightPath.length > 1 && currentSelected) {
-                    const livePlane = currentPlanes[currentSelected];
+                let activeSelectedPath = null;
+                const livePlane = currentSelected ? currentPlanes[currentSelected] : null;
 
-                    // [Fix] Immutable spread: build combined render path without mutating state.
-                    // trackPoints format: [timestamp, lat, lng, altitude, heading, velocity]
-                    //
-                    // 問題：DB TrackPoints 由 globalPlanesCache 寫入，更新速度可能快於
-                    // 前端 WebSocket，導致軌跡末端超過飛機圖示位置。
-                    // 修法：以 livePlane.lastContact 作為截止點，過濾掉比前端 live
-                    // 資料更新的 DB 點，再接上 live 當前位置作為最終端點。
+                if (flightPath && flightPath.length > 1 && livePlane) {
                     const liveTime = livePlane?.lastContact || 0;
                     const trimmedPath = (liveTime > 0)
-                        ? flightPath.filter(pt => !pt[0] || pt[0] <= liveTime + 10) // 10s 寬容
+                        ? flightPath.filter(pt => !pt[0] || pt[0] <= liveTime + 10) // 10s tolerance
                         : flightPath;
                     const basePath = trimmedPath.length > 1 ? trimmedPath : flightPath;
 
-                    const renderPath = livePlane?.renderLat
+                    // Append live position to path. Use the actual ADS-B lat/lng (not
+                    // the smoothed renderLat/renderLng) so the path endpoint always
+                    // aligns with the heading direction reported by the transponder.
+                    // The icon itself is drawn at renderLat/renderLng for smooth animation.
+                    const livePathLat = livePlane?.lat ?? livePlane?.renderLat;
+                    const livePathLng = livePlane?.lng ?? livePlane?.renderLng;
+                    activeSelectedPath = (livePathLat && livePathLng)
                         ? [...basePath, [
-                            Date.now() / 1000,
-                            livePlane.renderLat,
-                            livePlane.renderLng,
+                            livePlane.lastContact || Date.now() / 1000,
+                            livePathLat,
+                            livePathLng,
                             livePlane.altitude,
                             livePlane.heading,
                             livePlane.velocity
                           ]]
                         : basePath;
+                }
 
+                // ── [v8.0] Professional Altitude-Colored Track with Outline ──
+                if (activeSelectedPath && activeSelectedPath.length > 1) {
                     ctx.save();
                     ctx.lineCap = 'round';
                     ctx.lineJoin = 'round';
@@ -1048,17 +1053,17 @@ export default function MapView({
                     //          → drawn as elastic band (thinner, lighter)
                     // Long segments (>GC_THRESHOLD_KM) are expanded to great circle arcs.
                     const segments = [];
-                    const lastRealIdx = renderPath.length - 2; // last DB-confirmed point index
-                    for (let pi = 0; pi < renderPath.length; pi++) {
-                        const seg = renderPath[pi];
-                        const isLastPoint = pi === renderPath.length - 1;
-                        const isLive = isLastPoint && livePlane?.renderLat;
+                    const lastRealIdx = activeSelectedPath.length - 2; // last DB-confirmed point index
+                    for (let pi = 0; pi < activeSelectedPath.length; pi++) {
+                        const seg = activeSelectedPath[pi];
+                        const isLastPoint = pi === activeSelectedPath.length - 1;
+                        const isLive = isLastPoint && (livePlane?.lat || livePlane?.renderLat);
                         const pt = map.latLngToContainerPoint([seg[1], normalizeLongitude(seg[2])]);
                         let stale = false;
                         let gap   = false;
 
                         if (pi > 0) {
-                            const prevSeg = renderPath[pi - 1];
+                            const prevSeg = activeSelectedPath[pi - 1];
                             const timeDeltaSec = seg[0] && prevSeg[0] ? seg[0] - prevSeg[0] : 0;
                             const dist = haversineKm(prevSeg[1], prevSeg[2], seg[1], seg[2]);
                             const isAntimeridian = Math.abs(pt.x - (segments[segments.length - 1]?.pt.x ?? pt.x)) > canvasCssW / 2;
@@ -1291,7 +1296,34 @@ export default function MapView({
                         }
                     }
                     const altColor = getAltitudeColor(plane.altitude, plane.onGround, plane.isEmergency, colorSchemeRef.current);
-                    const angleRad = (plane.heading || 0) * Math.PI / 180;
+                    const rawHeading = plane.heading || 0;
+                    let angleRad = rawHeading * Math.PI / 180;
+
+                    // [v15.0] Trajectory-Aligned Heading Synchronization (Hardened)
+                    if (isSelected && activeSelectedPath && activeSelectedPath.length >= 2) {
+                        const lastPt = activeSelectedPath[activeSelectedPath.length - 1];
+                        const prevPt = activeSelectedPath[activeSelectedPath.length - 2];
+                        
+                        if (lastPt && prevPt) {
+                            // Support both [ts, lat, lng] and {lat, lng} formats
+                            const getVal = (p, idx, key) => (Array.isArray(p) ? p[idx] : p[key]);
+                            const lat0 = getVal(prevPt, 1, 'lat');
+                            const lng0 = getVal(prevPt, 2, 'lng');
+                            const lat1 = getVal(lastPt, 1, 'lat');
+                            const lng1 = getVal(lastPt, 2, 'lng');
+
+                            if (lat0 !== undefined && lat1 !== undefined) {
+                                const dy = lat1 - lat0;
+                                const dx = (lng1 - lng0) * Math.cos(lat1 * Math.PI / 180);
+                                const pathAngle = Math.atan2(dx, dy);
+                                
+                                // SAFETY: Only apply if pathAngle is a valid number and dx/dy aren't zero
+                                if (Number.isFinite(pathAngle) && (dx !== 0 || dy !== 0)) {
+                                    angleRad = pathAngle;
+                                }
+                            }
+                        }
+                    }
 
                     // ── 3-Tier Render Pipeline ────────────────────────────────
                     // Tier 1: Tactical dot  — zoom ≤ 4, drawSize ≤ 6 px
