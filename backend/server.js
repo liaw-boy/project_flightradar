@@ -2907,18 +2907,31 @@ app.get('/api/photos/:icao24', async (req, res) => {
             }
         }
 
-        // 4. 合併與去重 (限量 3 張)
-        let finalPhotos = cachedPhoto ? [cachedPhoto] : [];
-        const seenUrls = new Set(finalPhotos.map(p => p.thumbnail_large?.src || p.thumbnail?.src));
+        // 4. 合併與去重 (限量 3 張，優先使用高品質的 Fresh Data)
+        let finalPhotos = [];
+        const seenUrls = new Set();
         
-        for (const p of freshPhotos) {
-            if (finalPhotos.length >= 3) break;
-            const url = p.thumbnail_large?.src || p.thumbnail?.src;
-            if (!seenUrls.has(url)) {
-                finalPhotos.push(p);
+        // Helper to add unique photos
+        const addPhoto = (p) => {
+            if (finalPhotos.length >= 3) return;
+            const url = p.thumbnail_large?.src || p.thumbnail?.src || p.link;
+            if (url && !seenUrls.has(url)) {
+                finalPhotos.push({
+                    thumbnail: { src: p.thumbnail?.src || url },
+                    thumbnail_large: { src: url },
+                    photographer: p.photographer,
+                    link: p.link,
+                    source: p.source || 'api'
+                });
                 seenUrls.add(url);
             }
-        }
+        };
+
+        // 優先從 Fresh API 抓取 (通常畫質較新)
+        freshPhotos.forEach(addPhoto);
+        
+        // 若不足 3 張，補充 cachedPhoto
+        if (cachedPhoto) addPhoto(cachedPhoto);
 
         // [DB CACHE Updates] 5. 持續更新快取資訊 (僅針對首張最優圖)
         if (finalPhotos.length > 0 && (!cachedPhoto)) {

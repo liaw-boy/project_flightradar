@@ -45,9 +45,51 @@ function getAirlineFromCallsign(callsign) {
     return CALLSIGN_PREFIX_AIRLINES[prefix] || null;
 }
 
-// [v13.0] Remove paid AeroDataBox API — use open data only
+// [v14.0] High-Fidelity Callsign-to-Route Resolution (ADSB.fi Feed)
 async function fetchRouteInfo(callsign) {
-    return null; // Force fallback to local/open-source logic
+    if (!callsign) return null;
+    const normalized = normalizeCallsign(callsign);
+    
+    try {
+        // [Primary Source] ADSB.fi dynamic callsign API (Free & Real-time)
+        const res = await fetch(`https://api.adsb.fi/v2/callsign/${normalized}`, {
+            headers: { 'User-Agent': 'AEROSTRAT/5.0' },
+            signal: AbortSignal.timeout(4000)
+        });
+        
+        if (!res.ok) return null;
+        const data = await res.json();
+        
+        // ADSB.fi returns { ac: [{ origin: "VHHH", destination: "RCTP", ... }] }
+        if (data.ac && data.ac.length > 0) {
+            const flight = data.ac[0];
+            if (flight.origin && flight.destination) {
+                logger.debug('FUSION', `ADSB.fi matched Route: ${normalized} -> ${flight.origin} to ${flight.destination}`);
+                
+                // Lookup full names from static dictionary
+                const [originAp, destAp] = await Promise.all([
+                    AirportDictionary.findOne({ icao: flight.origin.toUpperCase() }),
+                    AirportDictionary.findOne({ icao: flight.destination.toUpperCase() }),
+                ]);
+
+                return {
+                    origin_iata:      originAp?.iata || flight.origin.substring(1), // Fallback to ICAO trim
+                    origin_icao:      flight.origin.toUpperCase(),
+                    origin_name:      originAp ? originAp.name : null,
+                    origin_city:      originAp ? originAp.city : null,
+                    destination_iata: destAp?.iata   || flight.destination.substring(1),
+                    destination_icao: flight.destination.toUpperCase(),
+                    destination_name: destAp ? destAp.name : null,
+                    destination_city: destAp ? destAp.city : null,
+                    source: 'adsb_fi_live'
+                };
+            }
+        }
+        return null;
+    } catch (err) {
+        logger.debug('FUSION', `ADSB.fi Route lookup failed for ${normalized}: ${err.message}`);
+        return null;
+    }
 }
 
 // NOAA Aviation Weather Center API (Free & Open)
@@ -259,10 +301,13 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
 
         const metadataPromise = metadataWaterfall();
         const resolveRouteWaterfall = async () => {
-            let routeInfo = await fetchLocalOSINTRoute(callsign);
-            if (routeInfo) return routeInfo;
-            
-            // No placeholder fallback — return N/A cleanly rather than fake data
+            // Priority 1: Dynamic Community API (ADSB.fi) — Most up-to-date
+            let liveRoute = await fetchRouteInfo(callsign);
+            if (liveRoute) return liveRoute;
+
+            // Priority 2: Local Map (Airport/Route Dictionary)
+            let localRoute = await fetchLocalOSINTRoute(callsign);
+            if (localRoute) return localRoute;
 
             if (dbRoute) {
                 return {
