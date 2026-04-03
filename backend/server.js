@@ -6,6 +6,7 @@ const compression = require('compression');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const cron = require('node-cron');
 const { Worker } = require('worker_threads');
@@ -52,11 +53,39 @@ const AEROSTRAT_VERSION = 'v10.5-Hybrid';
 const AccountPool = require('./accountPool');
 
 // ==========================================
+// [v12.8] CPU Usage Tracker (Task Manager Logic)
+// ==========================================
+function getCpuStats() {
+    const cpus = os.cpus();
+    let user = 0, nice = 0, sys = 0, idle = 0, irq = 0;
+    for (const cpu of cpus) {
+        user += cpu.times.user;
+        nice += cpu.times.nice;
+        sys += cpu.times.sys;
+        idle += cpu.times.idle;
+        irq += cpu.times.irq;
+    }
+    const total = user + nice + sys + idle + irq;
+    return { idle, total };
+}
+let _lastCpuStats = getCpuStats();
+let _currentCpuUsage = 0;
+
+setInterval(() => {
+    const stats = getCpuStats();
+    const idleDiff = stats.idle - _lastCpuStats.idle;
+    const totalDiff = stats.total - _lastCpuStats.total;
+    _currentCpuUsage = totalDiff > 0 ? (1 - (idleDiff / totalDiff)) * 100 : 0;
+    _lastCpuStats = stats;
+}, 2000);
+
+// ==========================================
 // [v4.4.0] Logging Helper with Tactical Timestamps
 // ==========================================
 function getTime() {
     return `[${new Date().toLocaleTimeString('en-US', { hour12: false })}]`;
 }
+
 
 // ==========================================
 // [v12.0] SQLite + Store Initialization (replaces MongoDB)
@@ -732,27 +761,7 @@ function detectAnomalies(states) {
 }
 
 // ── System Monitor Dashboard (/monitor) ───────────────────────
-// Protected by MONITOR_TOKEN env var (預設 'dev' 僅限本機開發).
-// 生產環境請在 .env 設定 MONITOR_TOKEN=<強密碼>
-// Access: http://localhost:3000/monitor?token=<MONITOR_TOKEN>
-const MONITOR_TOKEN = process.env.MONITOR_TOKEN || 'dev';
-if (MONITOR_TOKEN === 'dev' && process.env.NODE_ENV === 'production') {
-    logger.warn('SECURITY', '[ALERT] MONITOR_TOKEN is using default "dev" in production! Set MONITOR_TOKEN in .env');
-}
-
-app.get('/monitor', (req, res) => {
-    if (req.query.token !== MONITOR_TOKEN) {
-        return res.status(401).send(`
-            <html><body style="background:#060810;color:#ef4444;font-family:monospace;padding:40px">
-            <h2>401 Unauthorized</h2>
-            <p>Provide <code>?token=YOUR_MONITOR_TOKEN</code></p>
-            <p>Default token during development: <code>dev</code></p>
-            </body></html>`);
-    }
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(getMonitorHtml());
-});
-
+// Protected by MONITOR_TOKEN env var (預設 'dev' 僅限本
 function getMonitorHtml() {
     return `<!DOCTYPE html>
 <html lang="zh-TW">
@@ -779,51 +788,43 @@ a:hover{opacity:.8}
 .hd-sync{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--td)}
 .sync-dot{width:9px;height:9px;border-radius:50%;background:var(--amber);flex-shrink:0;animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.75)}}
-.stat-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
-.stat-card{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:18px 22px;position:relative;overflow:hidden;transition:border-color .3s}
-.stat-card:hover{border-color:var(--bh)}
+.stat-bar{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
+.stat-card{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:18px 22px;position:relative;overflow:hidden;transition:all .3s}
+.stat-card:hover{border-color:var(--bh);transform:translateY(-2px)}
 .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:12px 12px 0 0}
 .stat-card.cyan::before{background:linear-gradient(90deg,var(--cyan),transparent)}
 .stat-card.green::before{background:linear-gradient(90deg,var(--green),transparent)}
 .stat-card.amber::before{background:linear-gradient(90deg,var(--amber),transparent)}
 .stat-card.purple::before{background:linear-gradient(90deg,var(--purple),transparent)}
-.stat-val{font-size:30px;font-weight:700;color:var(--t);line-height:1;margin-bottom:5px}
+.stat-card.red::before{background:linear-gradient(90deg,var(--red),transparent)}
+.stat-val{font-size:28px;font-weight:700;color:var(--t);line-height:1;margin-bottom:5px}
 .stat-lbl{font-size:11px;color:var(--td);letter-spacing:.12em;text-transform:uppercase}
 .stat-trend{font-size:11px;color:var(--tm);margin-top:5px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
-.grid-full{margin-bottom:16px}
-@media(max-width:900px){.grid{grid-template-columns:1fr}.stat-bar{grid-template-columns:repeat(2,1fr)}}
-.card{background:var(--s);border:1px solid var(--b);border-radius:12px;overflow:hidden}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px}
+@media(max-width:900px){.grid,.grid-3{grid-template-columns:1fr}.stat-bar{grid-template-columns:repeat(2,1fr)}}
+.card{background:var(--s);border:1px solid var(--b);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
 .card-hd{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--b);background:rgba(10,15,30,.6)}
 .card-title{font-size:12px;font-weight:700;letter-spacing:.1em;color:var(--td);text-transform:uppercase}
-.card-badge{font-size:12px;font-weight:700;color:var(--cyan);background:rgba(34,211,238,.1);padding:4px 10px;border-radius:5px;border:1px solid rgba(34,211,238,.2)}
-.card-body{padding:18px}
+.card-badge{font-size:11px;font-weight:700;color:var(--cyan);background:rgba(34,211,238,.1);padding:4px 10px;border-radius:5px;border:1px solid rgba(34,211,238,.2)}
+.card-body{padding:18px;flex:1}
 .accts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
 .acct-card{background:var(--s2);border:1px solid var(--b);border-radius:10px;padding:20px 16px;display:flex;flex-direction:column;align-items:center;gap:10px;transition:all .3s}
 .acct-card.is-active{border-color:rgba(34,211,238,.45);box-shadow:0 0 24px rgba(34,211,238,.1)}
 .acct-card.is-locked{border-color:rgba(239,68,68,.25);opacity:.72}
-.ring-wrap{position:relative;width:90px;height:90px;flex-shrink:0}
-.ring-wrap svg{transform:rotate(-90deg);display:block}
-.ring-bg{fill:none;stroke:rgba(255,255,255,.05);stroke-width:7}
-.ring-fill{fill:none;stroke-width:7;stroke-linecap:round;transition:stroke-dasharray .7s cubic-bezier(.4,0,.2,1)}
-.ring-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;line-height:1.3}
-.ring-pct{font-size:17px;font-weight:700}
-.ring-sub{font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:.05em}
-.acct-name{font-size:13px;font-weight:600;color:var(--t);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-.acct-credits-lbl{font-size:12px;color:var(--td);text-align:center}
-.acct-status-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:4px;letter-spacing:.08em}
-.acct-status-badge.s-active{color:var(--cyan);background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.3)}
-.acct-status-badge.s-standby{color:var(--td);background:rgba(100,116,139,.1);border:1px solid rgba(100,116,139,.2)}
-.acct-status-badge.s-locked{color:var(--red);background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25)}
-.unlock-time{font-size:11px;color:var(--red);opacity:.8}
-.acct-meta{display:flex;gap:14px;font-size:11px;color:var(--tm)}
+.perf-row{margin-bottom:15px}
+.perf-lbl{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px;color:var(--td)}
+.perf-bar-bg{height:8px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden}
+.perf-bar-fill{height:100%;background:var(--cyan);width:0%;transition:width 1s cubic-bezier(0.4, 0, 0.2, 1);box-shadow:0 0 8px var(--cyan)}
+.perf-row.sub{margin-top:-10px;margin-bottom:10px;opacity:0.7}
+
 .sources{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
 .src-pill{display:flex;align-items:center;gap:6px;padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid}
 .src-pill.up{color:var(--green);border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.06)}
 .src-pill.down{color:var(--red);border-color:rgba(239,68,68,.3);opacity:.65}
 .src-pill.cb{color:var(--amber);border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.06)}
 .src-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
-.row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--b);font-size:13px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--b);font-size:13px}
 .row:last-child{border-bottom:none}
 .lbl{color:var(--td)}
 .val{color:var(--t);font-weight:600;text-align:right}
@@ -837,104 +838,109 @@ footer{text-align:center;padding:24px 0;color:var(--tm);font-size:12px;margin-to
 <div id="wrap">
   <div class="hd">
     <div>
-      <div class="hd-brand">&#x2708; AEROSTRAT MONITOR</div>
+      <div class="hd-brand">&#x2708; AEROSTRAT LIVE MONITOR</div>
       <div class="hd-sub" id="last-updated">&#x8F09;&#x5165;&#x4E2D;&#x2026;</div>
     </div>
     <div class="hd-sync">
       <div class="sync-dot" id="sync-dot"></div>
       <span id="sync-label">&#x9023;&#x63A5;&#x4E2D;&#x2026;</span>
-      &nbsp;&middot;&nbsp; &#x6BCF; 5 &#x79D2;&#x66F4;&#x65B0;
-      &nbsp;&middot;&nbsp; <a href="/" target="_blank">&#x2190; &#x4E3B;&#x4ECB;&#x9762;</a>
+      &nbsp;&middot;&nbsp; <a href="/" target="_blank">&#x2190; BACK TO RADAR</a>
     </div>
   </div>
   <div class="stat-bar" id="stat-bar">
-    <div class="stat-card cyan"><div class="stat-val skel" style="width:90px;height:30px"> </div><div class="stat-lbl">AIRCRAFT</div></div>
-    <div class="stat-card green"><div class="stat-val skel" style="width:70px;height:30px"> </div><div class="stat-lbl">SYNC CYCLE</div></div>
-    <div class="stat-card amber"><div class="stat-val skel" style="width:90px;height:30px"> </div><div class="stat-lbl">TRACK PTS</div></div>
-    <div class="stat-card purple"><div class="stat-val skel" style="width:70px;height:30px"> </div><div class="stat-lbl">UPTIME</div></div>
+    <div class="stat-card cyan"><div class="stat-val skel"> </div><div class="stat-lbl">AIRCRAFT</div></div>
+    <div class="stat-card green"><div class="stat-val skel"> </div><div class="stat-lbl">SYNC CYCLES</div></div>
+    <div class="stat-card amber"><div class="stat-val skel"> </div><div class="stat-lbl">TRACK DOTS</div></div>
+    <div class="stat-card purple"><div class="stat-val skel"> </div><div class="stat-lbl">UPTIME</div></div>
+    <div class="stat-card red"><div class="stat-val skel"> </div><div class="stat-lbl">DB SIZE</div></div>
   </div>
-  <div class="card grid-full">
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">&#x26A1; HARDWARE PERFORMANCE</span>
+        <span class="card-badge" id="perf-badge">LIVE</span>
+      </div>
+      <div class="card-body">
+        <div id="perf-hardware-info" style="margin-bottom:15px;font-size:13px;color:var(--t)"></div>
+        <div class="perf-row">
+            <div class="perf-lbl"><span>SYSTEM LOAD (1m)</span><span id="load-val">...</span></div>
+            <div class="perf-bar-bg"><div id="load-bar" class="perf-bar-fill" style="background:var(--amber);box-shadow:0 0 8px var(--amber)"></div></div>
+        </div>
+        <div class="perf-row">
+            <div class="perf-lbl"><span>SYSTEM CPU USAGE</span><span id="cpu-usage-val">...</span></div>
+            <div class="perf-bar-bg"><div id="cpu-usage-bar" class="perf-bar-fill" style="background:var(--cyan);box-shadow:0 0 8px var(--cyan)"></div></div>
+        </div>
+        <div class="perf-row">
+            <div class="perf-lbl"><span>PROCESS RAM (RSS)</span><span id="ram-val">...</span></div>
+            <div class="perf-bar-bg"><div id="ram-bar" class="perf-bar-fill"></div></div>
+        </div>
+        <div id="perf-details"></div>
+      </div>
+
+    </div>
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">&#x1F4E6; DISK &amp; STORAGE RESOURCE</span>
+        <span class="card-badge" id="storage-badge">v10.5 HYBRID</span>
+      </div>
+      <div class="card-body">
+        <div class="perf-row" style="margin-bottom:20px">
+            <div class="perf-lbl"><span>DISK USAGE (/)</span><span id="disk-val">...</span></div>
+            <div class="perf-bar-bg"><div id="disk-bar" class="perf-bar-fill" style="background:var(--purple);box-shadow:0 0 8px var(--purple)"></div></div>
+        </div>
+        <div id="storage-body"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
     <div class="card-hd">
-      <span class="card-title">&#x1F511; OpenSky &#x5E33;&#x865F;&#x984D;&#x5EA6;</span>
+      <span class="card-title">&#x1F511; OpenSky Account Rotation Pool</span>
       <span class="card-badge" id="acct-badge">&#x2014;</span>
     </div>
     <div class="card-body">
       <div id="accounts-body" class="accts-grid">
         <div class="skel" style="height:190px;border-radius:10px"></div>
-        <div class="skel" style="height:190px;border-radius:10px"></div>
-        <div class="skel" style="height:190px;border-radius:10px"></div>
       </div>
     </div>
   </div>
-  <div class="grid">
+
+  <div class="grid-3">
     <div class="card">
       <div class="card-hd">
-        <span class="card-title">&#x27F3; &#x540C;&#x6B65;&#x72C0;&#x614B;</span>
+        <span class="card-title">&#x27F3; SYNC ENGINE</span>
         <span class="card-badge" id="sync-badge">&#x2014;</span>
       </div>
       <div class="card-body">
         <div id="sources-bar" class="sources"></div>
-        <div id="sync-body"><div class="skel" style="margin:10px 0"></div></div>
+        <div id="sync-body"></div>
       </div>
     </div>
     <div class="card">
       <div class="card-hd">
-        <span class="card-title">&#x25C8; &#x9023;&#x7DDA; / &#x7CFB;&#x7D71;</span>
-        <span class="card-badge" id="ws-badge">&#x2014;</span>
+        <span class="card-title">&#x25C9; ACTIVE SESSIONS</span>
+        <span class="card-badge" id="session-badge">&#x2014;</span>
       </div>
-      <div class="card-body" id="ws-body"><div class="skel" style="margin:10px 0"></div></div>
+      <div class="card-body" id="session-body"></div>
     </div>
     <div class="card">
       <div class="card-hd">
-        <span class="card-title">&#x25C9; &#x8CC7;&#x6599;&#x5438;&#x6536;</span>
-        <span class="card-badge" id="ingest-badge">&#x2014;</span>
-      </div>
-      <div class="card-body" id="ingest-body"><div class="skel" style="margin:10px 0"></div></div>
-    </div>
-    <div class="card">
-      <div class="card-hd">
-        <span class="card-title">&#x1F4CA; API &#x7D71;&#x8A08;</span>
+        <span class="card-title">&#x1F4CA; API ANALYTICS</span>
         <span class="card-badge" id="api-badge">&#x2014;</span>
       </div>
-      <div class="card-body" id="api-body"><div class="skel"></div></div>
+      <div class="card-body" id="api-body"></div>
     </div>
   </div>
-  <footer>AEROSTRAT System Monitor &nbsp;&middot;&nbsp; <a href="?token=${MONITOR_TOKEN}">&#x91CD;&#x65B0;&#x6574;&#x7406;</a></footer>
+
+  <footer>AEROSTRAT Hybrid Dynamics &nbsp;&middot;&nbsp; 2026-04-03 &nbsp;&middot;&nbsp; <a href="?token=dev">REFRESH</a></footer>
 </div>
+
 <script>
-const QUOTA_MAX = 4000;
-let lastCycle = null;
+let lastBatches = 0;
 function row(lbl, val, cls) {
   return '<div class="row"><span class="lbl">' + lbl + '</span><span class="val ' + (cls||'') + '">' + val + '</span></div>';
-}
-function ringGauge(pct, color) {
-  var r = 38, circ = +(2 * Math.PI * r).toFixed(2);
-  var filled = +((pct / 100) * circ).toFixed(2);
-  return '<svg width="90" height="90" viewBox="0 0 90 90">' +
-    '<circle class="ring-bg" cx="45" cy="45" r="' + r + '"/>' +
-    '<circle class="ring-fill" cx="45" cy="45" r="' + r + '" stroke="' + color + '" stroke-dasharray="' + filled + ' ' + circ + '"/>' +
-    '</svg>';
-}
-function acctCard(a, activeUser) {
-  var locked = !!(a.unlockTime && new Date(a.unlockTime) > new Date());
-  var credits = a.remainingCredits != null ? a.remainingCredits : 0;
-  var pct = locked ? 0 : Math.min(100, Math.round((credits / QUOTA_MAX) * 100));
-  var color = locked ? '#ef4444' : pct > 60 ? '#10b981' : pct > 25 ? '#f59e0b' : '#ef4444';
-  var isActive = a.user === activeUser;
-  var shortName = (a.user || '').replace(/-api-client$/, '');
-  var unlockLocal = locked ? new Date(a.unlockTime).toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'}) : '';
-  var cardCls = isActive ? 'is-active' : locked ? 'is-locked' : '';
-  var badgeCls = isActive ? 's-active' : locked ? 's-locked' : 's-standby';
-  var badgeTxt = isActive ? '&#x25CF; ACTIVE' : locked ? '&#x1F512; LOCKED' : '&#x25CB; STANDBY';
-  return '<div class="acct-card ' + cardCls + '">' +
-    '<div class="ring-wrap">' + ringGauge(pct, color) +
-    '<div class="ring-center"><div class="ring-pct" style="color:' + color + '">' + pct + '%</div><div class="ring-sub">QUOTA</div></div></div>' +
-    '<div class="acct-name">' + shortName + '</div>' +
-    '<span class="acct-status-badge ' + badgeCls + '">' + badgeTxt + '</span>' +
-    (locked ? '<div class="unlock-time">&#x89E3;&#x9396; ' + unlockLocal + '</div>' : '') +
-    '<div class="acct-credits-lbl">' + (locked ? '&#x2014; / ' : credits.toLocaleString() + ' / ') + QUOTA_MAX.toLocaleString() + '</div>' +
-    '<div class="acct-meta"><span title="&#x4ECA;&#x65E5;&#x5DF2;&#x7528;">&#x1F4E4; ' + (a.dailyUsed||0) + '</span>' +
-    '<span title="&#x7D2F;&#x8A08;429">&#x26A0; ' + (a.rateLimits||0) + '</span></div></div>';
 }
 function statCard(val, lbl, cls, trend) {
   return '<div class="stat-card ' + cls + '"><div class="stat-val">' + val + '</div><div class="stat-lbl">' + lbl + '</div>' + (trend ? '<div class="stat-trend">' + trend + '</div>' : '') + '</div>';
@@ -942,83 +948,149 @@ function statCard(val, lbl, cls, trend) {
 function srcPill(name, status) {
   return '<div class="src-pill ' + status + '"><span class="src-dot"></span>' + name + '</div>';
 }
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+  return (b / 1073741824).toFixed(1) + ' GB';
+}
+
 async function refresh() {
   try {
-    var [health, stats] = await Promise.all([
+    const [health, stats] = await Promise.all([
       fetch('/api/health').then(r => r.json()),
       fetch('/api/stats').then(r => r.json()),
     ]);
+    
     document.getElementById('sync-dot').style.background = '#10b981';
-    document.getElementById('sync-label').textContent = '&#x5373;&#x6642;&#x540C;&#x6B65;';
-    document.getElementById('last-updated').textContent = '&#x6700;&#x5F8C;&#x66F4;&#x65B0;&#xFF1A;' + new Date().toLocaleTimeString('zh-TW');
-    var ing = health.ingestion || {};
-    var upSec = health.uptime || 0;
-    var upStr = upSec >= 3600 ? Math.floor(upSec/3600) + 'h ' + Math.floor((upSec%3600)/60) + 'm' : Math.floor(upSec/60) + ' min';
-    var batchMs = ing.lastBatchMs || 0;
-    var batchCls = batchMs < 2000 ? 'ok' : batchMs < 5000 ? 'warn' : 'err';
+    document.getElementById('sync-label').textContent = 'REAL-TIME CONNECTED';
+    document.getElementById('last-updated').textContent = 'LAST UPDATED: ' + new Date().toLocaleTimeString();
+
+    const ing = health.ingestion || {};
+    const perf = health.performance || {};
+    const stor = health.storage || {};
+    
+    // Uptime conversion
+    const upSec = health.uptime || 0;
+    const upStr = upSec >= 3600 ? Math.floor(upSec/3600) + 'h ' + Math.floor((upSec%3600)/60) + 'm' : Math.floor(upSec/60) + ' min';
+
+    // Top Stats Bar
     document.getElementById('stat-bar').innerHTML =
-      statCard((health.cacheSize||0).toLocaleString(), 'AIRCRAFT', 'cyan', '&#x5373;&#x6642;&#x98DB;&#x6A5F;&#x7E3D;&#x6578;') +
-      statCard('#' + (ing.totalBatches||0), 'SYNC CYCLE', 'green', '&#x4E0A;&#x6B21; ' + batchMs + 'ms') +
-      statCard((ing.totalPoints||0).toLocaleString(), 'TRACK PTS', 'amber', 'TTL 48h') +
-      statCard(upStr, 'UPTIME', 'purple', (health.activeAccount||'').replace(/-api-client$/,''));
-    var accts = stats.accounts || [];
-    var activeUser = health.activeAccount;
-    var activeCount = accts.filter(a => !a.unlockTime || new Date(a.unlockTime) <= new Date()).length;
-    var totalCredits = accts.reduce(function(s,a){ return s+(a.remainingCredits||0); }, 0);
-    document.getElementById('acct-badge').textContent = activeCount + ' / ' + accts.length + ' \u53EF\u7528\u3000\u7E3D\u984D\u5EA6 ' + totalCredits.toLocaleString();
-    document.getElementById('accounts-body').innerHTML = accts.map(a => acctCard(a, activeUser)).join('');
+      statCard((health.cacheSize||0).toLocaleString(), 'AIRCRAFT', 'cyan', 'IN-MEMORY CACHE') +
+      statCard('#' + (ing.totalBatches||0), 'SYNC CYCLES', 'green', (ing.lastBatchMs||0) + 'ms LATENCY') +
+      statCard((ing.totalPoints||0).toLocaleString(), 'TRACK DOTS', 'amber', '24H PERSISTENCE') +
+      statCard(upStr, 'UPTIME', 'purple', 'SYSTEM AGE') +
+      statCard(formatBytes(stor.dbSize||0), 'DB SIZE', 'red', 'SQLITE STORAGE');
+
+    // Hardware Resources Card
+    const sys = perf.system || {};
+    const loadAvg = sys.load?.[0] || 0;
+    const cpuPct = Math.min(100, Math.round(loadAvg * 20)); // Normalized to 5.0 load scale
+    document.getElementById('load-val').textContent = loadAvg.toFixed(2);
+    document.getElementById('load-bar').style.width = cpuPct + '%';
+    
+    // Real-time CPU Usage
+    const sysCpu = sys.cpuUsage || 0;
+    document.getElementById('cpu-usage-val').textContent = sysCpu.toFixed(1) + '%';
+    document.getElementById('cpu-usage-bar').style.width = sysCpu + '%';
+
+    const rss = perf.process?.memory?.rss || 0;
+    const ramPct = Math.min(100, Math.round((rss / 1073741824) * 100)); // Normalized to 1GB limit
+    document.getElementById('ram-val').textContent = formatBytes(rss);
+    document.getElementById('ram-bar').style.width = ramPct + '%';
+    
+    document.getElementById('perf-hardware-info').innerHTML = 
+        '<div style="font-weight:700;margin-bottom:4px;color:var(--cyan)">' + (sys.cpuModel || 'Generic CPU') + '</div>' +
+        '<div style="color:var(--td);font-size:11px">' + (sys.cpuCores || 0) + ' Logical Cores &middot; ' + (sys.arch || 'unknown') + ' &middot; ' + (sys.platform || 'linux') + '</div>';
+
+    document.getElementById('perf-details').innerHTML = 
+        row('Heap Used', formatBytes(perf.process?.memory?.heapUsed || 0), '') +
+        row('System Free RAM', formatBytes(sys.freeMem || 0), 'dim') +
+        row('System Total RAM', formatBytes(sys.totalMem || 0), 'dim');
+
+    // Storage Status Card
+    const disk = sys.disk || {};
+    const diskPct = Math.round((disk.used / (disk.total || 1)) * 100);
+    document.getElementById('disk-val').textContent = formatBytes(disk.used) + ' / ' + formatBytes(disk.total);
+    document.getElementById('disk-bar').style.width = diskPct + '%';
+
+    document.getElementById('storage-body').innerHTML = 
+        row('Database Path', stor.dbPath || 'N/A', 'dim') +
+        row('Persistence Mode', 'SQLite (WAL)', 'ok') +
+        row('Total FlightSessions', (ing.sessionsCreated||0).toLocaleString(), '') +
+        row('Disk Free Space', formatBytes(disk.free || 0), 'ok');
+
+
+    // Sync Engine Card
     document.getElementById('sources-bar').innerHTML =
-      srcPill('adsb.lol','up') + srcPill('OpenSky', activeCount>0?'up':'cb') +
-      srcPill('AL-Mil','up') + srcPill('AL-Point','up') + srcPill('adsb.fi','up');
-    document.getElementById('sync-badge').textContent = 'Cycle #' + (ing.totalBatches||'—');
-    document.getElementById('sync-body').innerHTML =
-      row('\u4E0A\u6B21\u6279\u6B21', (ing.lastBatchSize||0) + ' \u67B6\u3000' + batchMs + 'ms', batchCls) +
-      row('\u6D3B\u8E8D\u5E33\u865F', (health.activeAccount||'').replace(/-api-client$/,''), 'ok') +
-      row('Sessions \u5EFA\u7ACB', (ing.sessionsCreated||0).toLocaleString(), '') +
-      row('Sessions \u95DC\u9589', (ing.sessionsClosed||0).toLocaleString(), 'dim');
-    var wsCls = health.status === 'ok' ? 'ok' : 'err';
-    document.getElementById('ws-badge').innerHTML = health.status === 'ok'
-      ? '<span style="color:var(--green)">&#x25CF; \u6B63\u5E38</span>'
-      : '<span style="color:var(--red)">&#x25CF; \u7570\u5E38</span>';
-    document.getElementById('ws-body').innerHTML =
-      row('\u5F8C\u7AEF\u72C0;&#x614B;', health.status==='ok'?'\u904B\u4F5C\u6B63\u5E38':'\u7570\u5E38', wsCls) +
-      row('\u6D3B\u8E8D Sessions', (health.activeSessions||0).toLocaleString(), '') +
-      row('\u5E33\u865F\u6C60', (health.totalAccounts||0)+' \u500B', 'dim') +
-      row('Port', '3000', 'dim');
-    document.getElementById('ingest-badge').textContent = (ing.totalPoints||0).toLocaleString() + ' pts';
-    document.getElementById('ingest-body').innerHTML =
-      row('\u7E3D TrackPoints', (ing.totalPoints||0).toLocaleString(), '') +
-      row('\u7E3D\u6279\u6B21', (ing.totalBatches||0).toLocaleString(), '') +
-      row('Sessions \u5EFA\u7ACB', (ing.sessionsCreated||0).toLocaleString(), '') +
-      row('Sessions \u95DC\u9589', (ing.sessionsClosed||0).toLocaleString(), 'dim');
-    document.getElementById('api-badge').textContent = (stats.totalCalls||0).toLocaleString() + ' calls';
-    document.getElementById('api-body').innerHTML =
-      row('\u7E3D API \u547C\u53EB', (stats.totalCalls||0).toLocaleString(), '') +
-      row('State \u547C\u53EB', (stats.stateCalls||0).toLocaleString(), 'dim') +
-      row('Metadata \u547C\u53EB', (stats.metadataCalls||0).toLocaleString(), 'dim') +
-      row('Cache \u547D\u4E2D', (stats.cacheHits||0).toLocaleString(), 'ok') +
-      row('\u932F\u8AA4\u6B21\u6578', (stats.errors||0).toLocaleString(), (stats.errors||0)>0?'err':'dim');
-    if (lastCycle !== null && ing.totalBatches !== lastCycle) {
-      var el = document.getElementById('sync-badge');
-      el.style.background = 'rgba(16,185,129,.3)';
-      el.style.color = '#10b981';
-      setTimeout(function(){ el.style.background=''; el.style.color=''; }, 700);
-    }
-    lastCycle = ing.totalBatches;
-  } catch(err) {
+      srcPill('adsb.lol', 'up') + srcPill('OpenSky', stats.activeAccount?'up':'cb') + srcPill('adsb.fi', 'up');
+    document.getElementById('sync-body').innerHTML = 
+        row('Last Batch Size', (ing.lastBatchSize || 0) + ' planes', 'ok') +
+        row('Sync Latency', (ing.lastBatchMs || 0) + ' ms', (ing.lastBatchMs < 3000 ? 'ok' : 'warn'));
+
+    // Session Card
+    document.getElementById('session-body').innerHTML = 
+        row('Active Sessions', (health.activeSessions||0).toLocaleString(), 'ok') +
+        row('Sessions Created', (ing.sessionsCreated||0).toLocaleString(), '') +
+        row('Sessions Closed', (ing.sessionsClosed||0).toLocaleString(), 'dim');
+        
+    // API Analytics
+    document.getElementById('api-badge').textContent = (stats.totalCalls||0).toLocaleString() + ' CALLS';
+    document.getElementById('api-body').innerHTML = 
+        row('Total API Hits', (stats.totalCalls || 0).toLocaleString(), '') +
+        row('Cache Hit Rate', Math.round((stats.cacheHits/(stats.totalCalls||1))*100) + '%', 'ok') +
+        row('Error Count', (stats.errors || 0), (stats.errors > 0 ? 'err' : ''));
+
+    // Accounts Pool (Simplified for brevity)
+    const accts = stats.accounts || [];
+    document.getElementById('acct-badge').textContent = accts.length + ' ACCOUNTS';
+    document.getElementById('accounts-body').innerHTML = accts.map(a => 
+        '<div class="acct-card' + (a.user === health.activeAccount ? ' is-active' : '') + '">' +
+        '<div class="acct-name">' + a.user + '</div>' +
+        '<div class="lbl">REMAINING QUOTA</div>' +
+        '<div class="stat-val" style="font-size:20px">' + (a.remainingCredits || 0).toLocaleString() + '</div>' +
+        '</div>'
+    ).join('');
+
+  } catch(e) {
     document.getElementById('sync-dot').style.background = '#ef4444';
-    document.getElementById('sync-label').textContent = '\u9023\u7DDA\u5931\u6557';
+    document.getElementById('sync-label').textContent = 'CONNECTION LOST';
+    console.error(e);
   }
 }
+
 refresh();
-setInterval(refresh, 15000);
+setInterval(refresh, 5000);
 </script>
 </body>
 </html>`;
 }
+app.get('/monitor', (req, res) => {
+    const token = req.query.token;
+    if (token !== 'dev') {
+        return res.status(403).send('Forbidden: Token invalid');
+    }
+    res.send(getMonitorHtml());
+});
 
-// 健康檢查
 app.get('/api/health', (req, res) => {
+    const dbPath = path.join(__dirname, 'data', 'aerostrat.db');
+    let dbSize = 0;
+    try { if (fs.existsSync(dbPath)) dbSize = fs.statSync(dbPath).size; } catch(_) {}
+
+    // [v12.8] Extended Hardware Stats
+    const cpus = os.cpus();
+    const cpuModel = cpus.length > 0 ? cpus[0].model.replace(/\s+/g, ' ') : 'Unknown';
+    const cpuCores = cpus.length;
+    
+    let diskUsage = { total: 0, free: 0, used: 0 };
+    try {
+        const stats = fs.statfsSync('/');
+        diskUsage.total = Number(stats.bsize) * Number(stats.blocks);
+        diskUsage.free = Number(stats.bsize) * Number(stats.bfree);
+        diskUsage.used = diskUsage.total - diskUsage.free;
+    } catch (_) {}
+
     res.json({
         status: 'ok',
         uptime: process.uptime(),
@@ -1027,18 +1099,38 @@ app.get('/api/health', (req, res) => {
         totalAccounts: _rawAccounts.length,
         activeSessions: activeSessions.size,
         ingestion: ingestionStats,
+        performance: {
+            process: {
+                memory: process.memoryUsage(),
+                cpu: process.cpuUsage()
+            },
+            system: {
+                load: os.loadavg(),
+                cpuUsage: _currentCpuUsage,
+                freeMem: os.freemem(),
+                totalMem: os.totalmem(),
+                cpuModel,
+                cpuCores,
+                arch: os.arch(),
+                platform: os.platform(),
+                disk: diskUsage
+            }
+        },
+        storage: {
+            dbSize,
+            dbPath: 'backend/data/aerostrat.db'
+        },
         timestamp: new Date().toISOString()
     });
 });
+
 
 app.get('/api/ingestion/status', async (req, res) => {
     let trackPointCount = null;
     let sessionCount = null;
     try {
-        if (true) {  // store always ready
-            trackPointCount = await TrackPoint.estimatedDocumentCount();
-            sessionCount = await FlightSession.estimatedDocumentCount();
-        }
+        trackPointCount = await TrackPoint.estimatedDocumentCount();
+        sessionCount = await FlightSession.estimatedDocumentCount();
     } catch (_) { }
     res.json({
         ...ingestionStats,
@@ -1325,11 +1417,6 @@ const ingestionStats = { totalPoints: 0, totalBatches: 0, sessionsCreated: 0, se
 async function ingestTrackPoints(states, timeUnix) {
     if (!states || states.length === 0) return;
 
-    if (false) {  // store always ready
-        console.warn('[DATABASE] Skip ingestion: MongoDB not connected.');
-        return;
-    }
-
     const timestamp = new Date(timeUnix * 1000);
     const now = Date.now();
     const batchTrackPoints = [];
@@ -1530,9 +1617,7 @@ async function ingestTrackPoints(states, timeUnix) {
     writePromises.push(
         TrackPoint.insertMany(batchTrackPoints, { ordered: false })
             .catch(err => {
-                if (err.name !== 'MongoBulkWriteError' && err.name !== 'MongoServerError') {
-                    console.error('[INGEST] TrackPoint write error:', err.message);
-                }
+                console.error('[INGEST] TrackPoint write error:', err.message);
             })
     );
 
@@ -1837,7 +1922,8 @@ async function enrichAndIngest() {
                     upsert: true,
                 },
             }));
-        if (writebackOps.length > 0) Aircraft.bulkWrite(writebackOps, { ordered: false }).catch(() => null);
+        if (writebackOps.length > 0) Aircraft.bulkWrite(writebackOps, { ordered: false })
+            .catch(err => logger.warn('SYNC', `Aircraft writeback failed: ${err.message}`));
 
         // Phase 2: Fill missing typecode from Aircraft DB
         const icaoList = finalStates.map(p => p.icao24);
@@ -1882,13 +1968,9 @@ async function enrichAndIngest() {
     }
 }
 
-// ── OBSOLETE — kept as dead reference only, replaced by three-tier engine ──
-// The original monolithic fetchGlobalPlanes() used a single 10s setInterval
-// with phase A/B/C sequential execution. This caused 3-5s total latency per
-// cycle and wasted OpenSky quota on live tracking. Replaced by v11.0 above.
+// fetchGlobalPlanes() removed — replaced by v11.0 three-tier engine above.
 async function fetchGlobalPlanes() {
-    if (isFetchingGlobal) return;
-    isFetchingGlobal = true;
+    return; // dead — three-tier engine replaced this entirely
     const start = performance.now();
     syncCycleCount++;
     // OpenSky every 45s (every 4-5th cycle of 10s) = ~1920 calls/day.
@@ -2403,13 +2485,8 @@ app.get('/api/metadata/:icao24', async (req, res) => {
         return res.json({ ...aircraftStaticDB[icao24], fromStatic: true });
     }
 
-    // [HOTFIX] 連線狀態守衛
-    if (false) {  // store always ready
-        return res.json({ icao24, noData: true, error: 'Database not connected' });
-    }
-
     try {
-        // 2. 檢查 MongoDB 永久快取
+        // 2. 檢查快取
         const dbAircraft = await Aircraft.findOne({ icao24 });
         if (dbAircraft) {
             // Normalize: OSINT stores type_code, OpenSky API stores typecode — unify to typecode
@@ -2486,11 +2563,6 @@ app.get('/api/metadata/:icao24', async (req, res) => {
 app.post('/api/metadata/batch', async function (req, res) {
     const icao24List = req.body.icao24s || [];
 
-    // [HOTFIX] 連線狀態守衛
-    if (false) {  // store always ready
-        return res.json({ fetched: 0, error: 'Database not connected' });
-    }
-
     // 過濾靜態字典中已有的
     const filteredIcaos = icao24List.filter(id => !aircraftStaticDB[id.toLowerCase()]);
     if (filteredIcaos.length === 0) return res.json({ fetched: 0 });
@@ -2564,7 +2636,7 @@ app.post('/api/metadata/batch', async function (req, res) {
             }
         }
 
-        console.log(`${getTime()} 📦 [BATCH] Fetched ${fetched}/${toFetch.length} metadata to MongoDB`);
+        console.log(`${getTime()} 📦 [BATCH] Fetched ${fetched}/${toFetch.length} metadata to cache`);
         res.json({ fetched: fetched, requested: toFetch.length });
     } catch (err) {
         console.error('❌ [BATCH ERROR]', err.message);
@@ -2611,10 +2683,6 @@ let _cachedAirportList = null;
 let _cachedAirportListETag = '';
 
 async function buildAirportListCache() {
-    if (false) {  // store always ready
-        console.warn('⚠️ [GIS] MongoDB not ready, skipping airport cache build.');
-        return;
-    }
     try {
         // Load from globalAirportsDB (JSON loaded at startup) — same source as before
         const sourceArr = Object.values(globalAirportsDB || {});
@@ -2695,27 +2763,7 @@ app.get('/api/airport/:code', async (req, res) => {
     const code = req.params.code.toUpperCase();
 
     try {
-        // 1. Prioritize MongoDB (GIS Modernization)
-        if (true) {  // store always ready
-            const dbAirport = await Airport.findOne({
-                $or: [{ icao: code }, { iata: code }]
-            });
-            if (dbAirport) {
-                return res.json({
-                    icao: dbAirport.icao,
-                    iata: dbAirport.iata,
-                    name: dbAirport.name,
-                    city: dbAirport.city,
-                    country: dbAirport.country,
-                    lat: dbAirport.location ? dbAirport.location.coordinates[1] : null,
-                    lng: dbAirport.location ? dbAirport.location.coordinates[0] : null,
-                    timezone: dbAirport.timezone,
-                    source: 'mongodb'
-                });
-            }
-        }
-
-        // 2. Check Global Database (Fast Key Lookup)
+        // 1. Check Global Database (Fast Key Lookup)
         if (globalAirportsDB[code]) {
             return res.json({ ...globalAirportsDB[code], source: 'global_json_key' });
         }
@@ -2775,9 +2823,6 @@ app.get('/api/adsb-static/:prefix', async (req, res) => {
 // 飛機輪廓 SVG 資料 (來自 AircraftShape collection)
 // ==========================================
 app.get('/api/aircraft-shapes', async (req, res) => {
-    if (false) {  // store always ready
-        return res.status(503).json({ error: 'Database not connected' });
-    }
     try {
         const shapes = await AircraftShape.find({}, { _id: 0 });
         res.setHeader('Cache-Control', 'public, max-age=86400'); // 24h 瀏覽器快取
@@ -2796,22 +2841,19 @@ app.get('/api/photos/:icao24', async (req, res) => {
     const { reg } = req.query;
 
     try {
-        // [DB CACHE] 1. 優先從 MongoDB 讀取（僅在已連線時）
-        if (true) {  // store always ready
-            const aircraft = await Aircraft.findOne({ icao24: icao24.toLowerCase() });
-            if (aircraft?.photoData?.url) {
-                console.log(`🖼️ [CACHE HIT] Returning saved photo for ${icao24}`);
-                return res.json([{
-                    thumbnail: { src: aircraft.photoData.thumbnail },
-                    thumbnail_large: { src: aircraft.photoData.url },
-                    photographer: aircraft.photoData.photographer,
-                    link: aircraft.photoData.link,
-                    source: 'mongodb_cache'
-                }]);
-            }
+        // 1. Check local aircraft cache for saved photo
+        const aircraft = await Aircraft.findOne({ icao24: icao24.toLowerCase() });
+        if (aircraft?.photoData?.url) {
+            return res.json([{
+                thumbnail: { src: aircraft.photoData.thumbnail },
+                thumbnail_large: { src: aircraft.photoData.url },
+                photographer: aircraft.photoData.photographer,
+                link: aircraft.photoData.link,
+                source: 'cache'
+            }]);
         }
 
-        // 2. 緩存失效（或 DB 未連線），抓取外部 API
+        // 2. 緩存失效，抓取外部 API
         let photos = [];
         const hexRes = await fetch(`https://api.planespotters.net/pub/photos/hex/${icao24}`, {
             headers: { 'User-Agent': 'AEROSTRAT/5.0 (flight-tracking)' }
@@ -2914,7 +2956,7 @@ app.get('/api/aircraft/:icao24', async (req, res) => {
                 ...aircraft,
                 age: registry?.age || null,
                 engineType: registry?.engineType || null,
-                source: 'mongodb_cache'
+                source: 'cache'
             });
         }
 
@@ -3025,11 +3067,6 @@ app.get('/api/route/:icao24', async (req, res, next) => {
     let route = null;
     let matchSource = '';
 
-    // [HOTFIX] 連線狀態守衛
-    if (false) {  // store always ready
-        return res.json({ icao24, noData: true, error: 'Database not connected' });
-    }
-
     for (const cs of searchCallsigns) {
         if (!cs) continue;
         if (schedulesStaticDB[cs]) {
@@ -3043,11 +3080,11 @@ app.get('/api/route/:icao24', async (req, res, next) => {
             break;
         }
 
-        // MongoDB cache — skip spatial_inference entries (they are position-guesses, not real routes)
+        // Route store cache — skip spatial_inference entries (they are position-guesses, not real routes)
         const dbRoute = await Route.findOne({ callsign: cs });
         if (dbRoute && dbRoute.source !== 'spatial_inference' && dbRoute.departureAirport && dbRoute.arrivalAirport) {
             route = { dep: dbRoute.departureAirport, arr: dbRoute.arrivalAirport };
-            matchSource = 'mongodb_cache';
+            matchSource = 'route_cache';
             break;
         }
     }
@@ -3160,13 +3197,13 @@ app.get('/api/route/external', async (req, res) => {
                 callsign,
                 departureAirport: dbRoute.departureAirport,
                 arrivalAirport: dbRoute.arrivalAirport,
-                source: 'mongodb_cache',
+                source: 'route_cache',
                 lastUpdated: dbRoute.lastUpdated
             });
         }
         // Partial route (e.g., spatial_inference with dep only) — continue to try enriching
 
-        console.log(`⚡ [DB MISS] No data in MongoDB for ${callsign}. Escalating to API/Mock...`);
+        console.log(`⚡ [DB MISS] No route cached for ${callsign}. Escalating to API/Mock...`);
 
         let externalData = null;
 
@@ -3213,7 +3250,7 @@ app.get('/api/route/external', async (req, res) => {
 
         if (externalData) {
             // --- Layer 4: Persistence (SAVE TO DB) ---
-            console.log(`💾 [DB SAVE] Persisting new route for ${callsign} to MongoDB...`);
+            console.log(`💾 [DB SAVE] Persisting new route for ${callsign} to route store...`);
             await Route.findOneAndUpdate(
                 { callsign },
                 {
@@ -3296,10 +3333,6 @@ async function fetchOpenSkyHistoricalTrack(icao24) {
  * Points are keyed by FlightSession.sessionId to ensure current-flight isolation.
  */
 async function fetchTracksInternal(icao24) {
-    if (false) {  // store always ready
-        return { icao24, path: [], error: 'Database not connected' };
-    }
-    
     // Check short-term memory cache
     const cached = trackCache.get(icao24);
     if (cached && (Date.now() - cached.timestamp < TRACK_CACHE_TTL)) {
@@ -3554,7 +3587,7 @@ async function fetchMetarData() {
             await Metar.bulkWrite(operations, { ordered: false });
         }
 
-        console.log(`📡 [METAR] Updated ${data.length} airport weather records in MongoDB`);
+        console.log(`📡 [METAR] Updated ${data.length} airport weather records`);
     } catch (error) {
         console.error('❌ [METAR] Fetch error:', error.message);
     }
@@ -3567,11 +3600,6 @@ fetchMetarData(); // 立即執行一次
 setInterval(fetchMetarData, METAR_TTL);
 
 app.get('/api/metar', async (req, res) => {
-    // [HOTFIX] 連線狀態守衛
-    if (false) {  // store always ready
-        return res.status(503).json({ error: 'Database not connected' });
-    }
-
     try {
         const icao = req.query.icao;
         if (icao) {

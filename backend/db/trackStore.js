@@ -79,7 +79,7 @@ const TrackStore = {
             altitude:     r.altitude,
             velocity:     r.velocity,
             heading:      r.heading,
-            vertical_rate: r.vertical_rate,
+            verticalRate: r.vertical_rate,
             onGround:     !!r.on_ground,
             squawk:       r.squawk,
         }));
