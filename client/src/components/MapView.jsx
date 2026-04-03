@@ -1053,7 +1053,6 @@ export default function MapView({
                     //          → drawn as elastic band (thinner, lighter)
                     // Long segments (>GC_THRESHOLD_KM) are expanded to great circle arcs.
                     const segments = [];
-                    const lastRealIdx = activeSelectedPath.length - 2; // last DB-confirmed point index
                     for (let pi = 0; pi < activeSelectedPath.length; pi++) {
                         const seg = activeSelectedPath[pi];
                         const isLastPoint = pi === activeSelectedPath.length - 1;

@@ -546,6 +546,8 @@ async function restoreActiveSessions() {
                     sessionId: session.sessionId,
                     callsign: session.callsign || 'N/A',
                     lastSeen: lastPoint.timestamp.getTime(),
+                    // Restore startTime so fetchTracksInternal can use the full session boundary
+                    startTime: session.startTime ? Math.floor(session.startTime.getTime() / 1000) : null,
                     onGround: !!lastPoint.onGround
                 });
                 restoredCount++;
@@ -3577,8 +3579,6 @@ app.get('/api/session/:id/track', async (req, res) => {
 app.get('/api/sessions/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-    const filter = { icao24 };
-    if (req.query.status) filter.status = req.query.status.toUpperCase();
 
     try {
         const sessions = await FlightSession.findAllByIcao24(icao24, req.query.status, limit);
