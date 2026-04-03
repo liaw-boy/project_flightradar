@@ -995,7 +995,13 @@ export default function MapView({
             if (canvasLayerRef.current) {
                 const canvas = canvasLayerRef.current.getCanvas();
                 const ctx = canvasLayerRef.current.ctx;
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                // Use CSS-pixel dimensions (map.getSize) so clearRect/culling/grid are
+                // DPR-invariant — canvas.width/height are physical pixels but all
+                // coordinate math (ptX/ptY, labels) lives in CSS-pixel space.
+                const mapSize = map.getSize();
+                const canvasCssW = mapSize.x;
+                const canvasCssH = mapSize.y;
+                ctx.clearRect(0, 0, canvasCssW, canvasCssH);
 
                 // [v9.0] Safety Guard: Ensure map is fully initialized before zoom lookup
                 if (!map || typeof map.getZoom !== 'function') return;
@@ -1055,7 +1061,7 @@ export default function MapView({
                             const prevSeg = renderPath[pi - 1];
                             const timeDeltaSec = seg[0] && prevSeg[0] ? seg[0] - prevSeg[0] : 0;
                             const dist = haversineKm(prevSeg[1], prevSeg[2], seg[1], seg[2]);
-                            const isAntimeridian = Math.abs(pt.x - (segments[segments.length - 1]?.pt.x ?? pt.x)) > canvas.width / 2;
+                            const isAntimeridian = Math.abs(pt.x - (segments[segments.length - 1]?.pt.x ?? pt.x)) > canvasCssW / 2;
 
                             if (isAntimeridian || (dist > 50 && !isLive) || timeDeltaSec > 1800) {
                                 gap = true;
@@ -1211,8 +1217,8 @@ export default function MapView({
                 // Grid cell = 60×30 px — slightly larger than a typical label bubble.
                 const CELL_W = 60;
                 const CELL_H = 30;
-                const gridCols = Math.ceil(canvas.width / CELL_W) + 1;
-                const gridRows = Math.ceil(canvas.height / CELL_H) + 1;
+                const gridCols = Math.ceil(canvasCssW / CELL_W) + 1;
+                const gridRows = Math.ceil(canvasCssH / CELL_H) + 1;
                 const labelGrid = new Uint8Array(gridCols * gridRows); // 0=free, 1=occupied
 
                 function labelFits(absX, absY, w, h) {
@@ -1246,7 +1252,7 @@ export default function MapView({
                     const ptY = pt.y;
 
                     // Frustum culling
-                    if (ptX < -100 || ptX > canvas.width + 100 || ptY < -100 || ptY > canvas.height + 100) continue;
+                    if (ptX < -100 || ptX > canvasCssW + 100 || ptY < -100 || ptY > canvasCssH + 100) continue;
 
                     drawnCount++;
                     const isSelected = plane.icao24 === currentSelected;
