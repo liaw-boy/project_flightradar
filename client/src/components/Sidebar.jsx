@@ -155,34 +155,47 @@ export default function Sidebar({
     // ── Image Resolution: Planespotters (multiple) ──────
     const [photos, setPhotos] = useState([]);
     const [currentPhotoIdx, setCurrentPhotoIdx] = useState(0);
+    const [isImageLoaded, setIsImageLoaded] = useState(false);
+    const [isFetching, setIsFetching] = useState(false);
+    const [prevPhotoUrl, setPrevPhotoUrl] = useState(''); // [v6.9] Backdrop mirror for zero-flicker
 
     useEffect(() => {
         let active = true;
-        setPhotos([]);
-        setCurrentPhotoIdx(0);
+        
+        // [v6.8] Do NOT clear current photos immediately to prevent "Black Flash"
+        // Instead, we just start the new fetch in the background.
+        setIsFetching(true); 
 
         dataManager.getPhotos(icao24, displayRegistration !== '--' ? displayRegistration : undefined)
             .then(results => {
-                if (!active || !results || results.length === 0) return;
+                if (!active) return;
                 
                 // Format photos for carousel
-                const formatted = results.map(p => ({
+                const formatted = (results || []).map(p => ({
                     url: p.thumbnail_large?.src || p.thumbnail?.src || p.link || null,
                     photographer: p.photographer || 'Planespotters.net'
                 })).filter(h => h.url);
                 
+                // [v6.8] BOMB FIX: Only update UI when we actually have the new set
                 setPhotos(formatted);
+                setCurrentPhotoIdx(0);
+                setIsImageLoaded(false); 
+                setIsFetching(false);
             })
-            .catch(() => {});
+            .catch(() => {
+                if (active) setIsFetching(false);
+            });
         return () => { active = false; };
     }, [icao24, displayRegistration]);
 
     const nextPhoto = (e) => {
         e.stopPropagation();
+        setIsImageLoaded(false); // [v6.6] Reset for seamless transition
         setCurrentPhotoIdx(prev => (prev + 1) % photos.length);
     };
     const prevPhoto = (e) => {
         e.stopPropagation();
+        setIsImageLoaded(false); // [v6.6] Reset for seamless transition
         setCurrentPhotoIdx(prev => (prev - 1 + photos.length) % photos.length);
     };
 
@@ -264,9 +277,38 @@ export default function Sidebar({
                         // Priority 1: Real photo (Planespotters) — photographer's actual aircraft photo
                         const activePhoto = photos[currentPhotoIdx];
 
-                        if (activePhoto?.url) {
+                        // Double-Buffered Image Display (Zero-Flicker)
+                        if (photos.length > 0) {
+                            const activePhoto = photos[currentPhotoIdx];
                             return (
-                                <div className="sb-photo-carousel">
+                                <div 
+                                    className="sb-photo-carousel"
+                                    style={{ 
+                                        backgroundImage: prevPhotoUrl ? `url(${prevPhotoUrl})` : 'none',
+                                        backgroundSize: 'cover',
+                                        backgroundPosition: 'center'
+                                    }}
+                                >
+                                    {/* Layering: The image only fades in AFTER loading, staying transparent otherwise */}
+                                    <img 
+                                        key={activePhoto.url} 
+                                        src={activePhoto.url} 
+                                        alt={aircraftModel} 
+                                        className={`aircraft-photo ${isImageLoaded ? 'fade-in' : 'loading-hidden'}`}
+                                        onLoad={() => {
+                                            setIsImageLoaded(true);
+                                            setPrevPhotoUrl(activePhoto.url); // [v6.9] Update backdrop only on success
+                                        }}
+                                        onError={(e) => { e.target.style.display = 'none'; }}
+                                    />
+
+                                    {/* Loading indication (only if we have NOTHING to show yet) */}
+                                    {(!isImageLoaded || isFetching) && !prevPhotoUrl && (
+                                        <div className="sb-photo-loading-overlay">
+                                            <PlaneIcon size={32} className="sb-photo-loading-icon-mini" />
+                                        </div>
+                                    )}
+
                                     {photos.length > 1 && (
                                         <>
                                             <button className="carousel-nav prev" onClick={prevPhoto} aria-label="Previous photo">
@@ -289,13 +331,7 @@ export default function Sidebar({
                                             </div>
                                         </>
                                     )}
-                                    <img 
-                                        key={activePhoto.url} 
-                                        src={activePhoto.url} 
-                                        alt={aircraftModel} 
-                                        className="aircraft-photo fade-in"
-                                        onError={(e) => { e.target.style.display = 'none'; }}
-                                    />
+                                    
                                     <a href={activePhoto.url} target="_blank" rel="noopener noreferrer" className="sb-photo-credit">
                                         © {activePhoto.photographer} <span>↗</span>
                                     </a>
@@ -346,22 +382,22 @@ export default function Sidebar({
 
                     <div className="sb-airport-names-row">
                         <div className="airport-name-item left" title={depName}>
-                            <span className="badge dep">DEP</span>
+                            <span className="badge dep">🛫 FROM</span>
                             <span className="text">{depName || 'Origin'}</span>
                         </div>
                         <div className="airport-name-item right" title={arrName}>
                             <span className="text">{arrName || 'Destination'}</span>
-                            <span className="badge arr">ARR</span>
+                            <span className="badge arr">TO 🛬</span>
                         </div>
                     </div>
 
                     <div className="sb-route-time-v2">
                         <div className={`time-item ${!routeInfo.departure_time ? 'dim' : ''}`}>
-                            <span className="label">SCHED DEP</span>
+                            <span className="label">🛫 SCHED. OUT</span>
                             <span className="val">{routeInfo.departure_time || '--:--'}</span>
                         </div>
                         <div className={`time-item ${!routeInfo.arrival_time ? 'dim' : ''}`} style={{ textAlign: 'right' }}>
-                            <span className="label">SCHED ARR</span>
+                            <span className="label">🛬 SCHED. IN</span>
                             <span className="val" style={{ color: '#4ade80' }}>{routeInfo.arrival_time || '--:--'}</span>
                         </div>
                     </div>

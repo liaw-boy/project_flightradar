@@ -176,6 +176,35 @@
     opacity: 0.5;
 }
 
+/* [v6.7] Seamless Photo Overlay Fix */
+.sb-photo-loading-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+    animation: sb-pulse 1.5s ease-in-out infinite;
+}
+
+.sb-photo-loading-icon-mini {
+    color: var(--color-accent-blue);
+    opacity: 0.4;
+    filter: drop-shadow(0 0 8px var(--color-accent-blue-glow));
+}
+
+.aircraft-photo.loading {
+    opacity: 0;
+}
+
+.aircraft-photo.fade-in {
+    opacity: 1;
+    animation: photoFadeIn 0.3s ease-out forwards;
+}
+
 .sb-photo-placeholder-icon {
     color: #475569;
     opacity: 0.25;
