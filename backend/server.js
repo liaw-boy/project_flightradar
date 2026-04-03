@@ -205,6 +205,17 @@ if (fs.existsSync(publicReactPath)) {
     logger.info('SERVER', `Serving built frontend from ${publicReactPath}`);
 }
 
+// [v5.0.1] Serve favicon.svg to System Monitor and other backend routes
+app.get('/favicon.svg', (req, res) => {
+    const faviconPath = path.join(__dirname, '..', 'client', 'public', 'favicon.svg');
+    if (fs.existsSync(faviconPath)) {
+        res.setHeader('Content-Type', 'image/svg+xml');
+        res.sendFile(faviconPath);
+    } else {
+        res.status(404).send('Not Found');
+    }
+});
+
 // [v12.5] Aircraft SVG silhouettes served locally (avoids GitHub CDN 404s/rate-limits)
 // Known-missing types get a generic jet silhouette instead of a 404 to suppress console noise.
 app.use('/api/svg', express.static(path.join(__dirname, 'public/svg'), {
@@ -767,9 +778,12 @@ function getMonitorHtml() {
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
+<title>AEROSTRAT SYSTEM MONITOR</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AEROSTRAT &mdash; System Monitor</title>
 <style>
+
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --bg:#04060d;--s:#0a0f1e;--s2:#0f1628;
@@ -838,16 +852,19 @@ footer{text-align:center;padding:24px 0;color:var(--tm);font-size:12px;margin-to
 <div id="wrap">
   <div class="hd">
     <div>
-      <div class="hd-brand">&#x2708; AEROSTRAT LIVE MONITOR</div>
+      <div class="hd-brand">&#x2708; AEROSTRAT LIVE MONITOR <span style="font-size:12px;opacity:0.5;margin-left:8px;font-family:var(--font-mono)">${AEROSTRAT_VERSION}</span></div>
+
       <div class="hd-sub" id="last-updated">&#x8F09;&#x5165;&#x4E2D;&#x2026;</div>
     </div>
     <div class="hd-sync">
       <div class="sync-dot" id="sync-dot"></div>
       <span id="sync-label">&#x9023;&#x63A5;&#x4E2D;&#x2026;</span>
-      &nbsp;&middot;&nbsp; <a href="/" target="_blank">&#x2190; BACK TO RADAR</a>
+      &nbsp;&middot;&nbsp; <a href="javascript:void(0)" onclick="goBackToRadar()">&#x2190; BACK TO RADAR</a>
     </div>
   </div>
+
   <div class="stat-bar" id="stat-bar">
+
     <div class="stat-card cyan"><div class="stat-val skel"> </div><div class="stat-lbl">AIRCRAFT</div></div>
     <div class="stat-card green"><div class="stat-val skel"> </div><div class="stat-lbl">SYNC CYCLES</div></div>
     <div class="stat-card amber"><div class="stat-val skel"> </div><div class="stat-lbl">TRACK DOTS</div></div>
@@ -1059,7 +1076,23 @@ async function refresh() {
   }
 }
 
-refresh();
+  function goBackToRadar() {
+    // Current monitor is on 3001, we want back to 3005
+    const radarUrl = window.location.protocol + '//' + window.location.hostname + ':3005';
+    if (window.opener && !window.opener.closed) {
+      try {
+        window.opener.focus();
+        window.close();
+      } catch(e) {
+        window.location.href = radarUrl;
+      }
+    } else {
+      window.location.href = radarUrl;
+    }
+  }
+
+  refresh();
+
 setInterval(refresh, 5000);
 </script>
 </body>
@@ -2841,41 +2874,55 @@ app.get('/api/photos/:icao24', async (req, res) => {
     const { reg } = req.query;
 
     try {
-        // 1. Check local aircraft cache for saved photo
+        // 2. 緩存資料獲取（優先作為首張）
+        let cachedPhoto = null;
         const aircraft = await Aircraft.findOne({ icao24: icao24.toLowerCase() });
         if (aircraft?.photoData?.url) {
-            return res.json([{
+            cachedPhoto = {
                 thumbnail: { src: aircraft.photoData.thumbnail },
                 thumbnail_large: { src: aircraft.photoData.url },
                 photographer: aircraft.photoData.photographer,
                 link: aircraft.photoData.link,
                 source: 'cache'
-            }]);
+            };
         }
 
-        // 2. 緩存失效，抓取外部 API
-        let photos = [];
+        // 3. 抓取外部 API (Planespotters)
+        let freshPhotos = [];
         const hexRes = await fetch(`https://api.planespotters.net/pub/photos/hex/${icao24}`, {
             headers: { 'User-Agent': 'AEROSTRAT/5.0 (flight-tracking)' }
         });
         if (hexRes.ok) {
             const data = await hexRes.json();
-            if (data.photos?.length) photos = data.photos;
+            if (data.photos?.length) freshPhotos = data.photos;
         }
 
-        if (photos.length === 0 && reg && reg !== 'N/A') {
+        if (freshPhotos.length < 3 && reg && reg !== 'N/A') {
             const regRes = await fetch(`https://api.planespotters.net/pub/photos/reg/${reg}`, {
                 headers: { 'User-Agent': 'AEROSTRAT/5.0 (flight-tracking)' }
             });
             if (regRes.ok) {
                 const data = await regRes.json();
-                if (data.photos?.length) photos = data.photos;
+                if (data.photos?.length) freshPhotos = [...freshPhotos, ...(data.photos || [])];
             }
         }
 
-        // [DB CACHE] 3. 若抓到圖片，非同步存入資料庫（僅在已連線時）
-        if (photos.length > 0) {
-            const p = photos[0];
+        // 4. 合併與去重 (限量 3 張)
+        let finalPhotos = cachedPhoto ? [cachedPhoto] : [];
+        const seenUrls = new Set(finalPhotos.map(p => p.thumbnail_large?.src || p.thumbnail?.src));
+        
+        for (const p of freshPhotos) {
+            if (finalPhotos.length >= 3) break;
+            const url = p.thumbnail_large?.src || p.thumbnail?.src;
+            if (!seenUrls.has(url)) {
+                finalPhotos.push(p);
+                seenUrls.add(url);
+            }
+        }
+
+        // [DB CACHE Updates] 5. 持續更新快取資訊 (僅針對首張最優圖)
+        if (finalPhotos.length > 0 && (!cachedPhoto)) {
+            const p = finalPhotos[0];
             Aircraft.findOneAndUpdate(
                 { icao24: icao24.toLowerCase() },
                 {
@@ -2892,7 +2939,8 @@ app.get('/api/photos/:icao24', async (req, res) => {
         }
 
         res.setHeader('Cache-Control', 'public, max-age=3600');
-        res.json(photos);
+        res.json(finalPhotos);
+
     } catch (err) {
         console.error('[PHOTOS] Proxy error:', err.message);
         res.status(500).json({ error: 'Photo fetch failed' });
