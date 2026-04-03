@@ -23,21 +23,21 @@ services:
     ports:
       - "3000:3000"
     env_file:
-      - ./.env
+      - ./backend/.env
     environment:
       # Override MONGODB_URI to use container service name instead of localhost
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongodb:27017/aerostrat}
     volumes:
       # Credential files — kept on host, not baked into image
-      - ./credentials1.json:/app/credentials1.json:ro
-      - ./credentials2.json:/app/credentials2.json:ro
-      - ./credentials3.json:/app/credentials3.json:ro
-      - ./credentials4.json:/app/credentials4.json:ro
-      - ./credentials5.json:/app/credentials5.json:ro
+      - ./backend/credentials1.json:/app/credentials1.json:ro
+      - ./backend/credentials2.json:/app/credentials2.json:ro
+      - ./backend/credentials3.json:/app/credentials3.json:ro
+      - ./backend/credentials4.json:/app/credentials4.json:ro
+      - ./backend/credentials5.json:/app/credentials5.json:ro
       # Persistent quota cache — preserves OpenSky quota state across restarts
-      - ./quota-cache.json:/app/quota-cache.json
+      - ./backend/quota-cache.json:/app/quota-cache.json
       # Logs
-      - ./logs:/app/logs
+      - ./backend/logs:/app/logs
     depends_on:
       mongodb:
         condition: service_healthy

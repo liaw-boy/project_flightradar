@@ -9,7 +9,7 @@ const path = require('path');
 const { execSync, spawn } = require('child_process');
 
 const ROOT    = __dirname;
-const BACKEND = ROOT;
+const BACKEND = path.join(ROOT, 'backend');
 const CLIENT  = path.join(ROOT, 'client');
 const AUTO_START = process.argv.includes('--start');
 

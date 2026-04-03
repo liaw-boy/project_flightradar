@@ -13,6 +13,8 @@ echo " Port 3001  /  MongoDB Local"
 echo " =========================================="
 echo
 
+cd backend
+
 if [ ! -f ".env" ]; then
     echo " [ERROR] .env not found!"
     echo " Please create .env with MONGODB_URI, PORT, OPENSKY credentials."
