@@ -31,6 +31,7 @@ mongo-data/
 *.csv
 temp_*.csv
 *-cache.json
+*_cache.json
 track_data.json
 missing-data.json
 metar-cache.json
