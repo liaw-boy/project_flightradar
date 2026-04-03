@@ -19,7 +19,7 @@ RUN npm ci --omit=dev
 COPY backend/ ./
 
 # Copy root scripts and assets for data seeding
-COPY ./scripts/ /app/scripts-root/
+COPY ./backend/scripts/ /app/scripts-root/
 COPY ./assets/ /app/assets/
 
 # Copy built frontend from Stage 1

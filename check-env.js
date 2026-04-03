@@ -123,15 +123,16 @@ async function main() {
 
     // ── 6. Database content ─────────────────────────────────────────────────────
     section('6. Database content');
-    if (fs.existsSync(path.join(ROOT, 'data', 'aerostrat.db'))) {
-        ok('SQLite (aerostrat.db) initialized');
+    const backendDataDir = path.join(BACKEND, 'data');
+    if (fs.existsSync(path.join(backendDataDir, 'aerostrat.db'))) {
+        ok('SQLite (aerostrat.db) present in backend/data/');
     } else {
-        caution('SQLite DB not found - will be created on startup');
+        caution('SQLite DB not found in backend/data/ - will be created on startup');
     }
-    if (fs.existsSync(path.join(ROOT, 'data', 'aircraft.csv.gz'))) {
-        ok('Aircraft metadata index (CSV/GZ) present');
+    if (fs.existsSync(path.join(backendDataDir, 'aircraft.csv.gz'))) {
+        ok('Aircraft metadata index (CSV/GZ) present in backend/data/');
     } else {
-        caution('Aircraft metadata index missing - auto-completion might be limited');
+        caution('Aircraft metadata index missing from backend/data/ - auto-completion might be limited');
     }
 
     // ── 7. Static assets ────────────────────────────────────────────────────

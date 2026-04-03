@@ -1,0 +1,13 @@
+{
+  "name": "aerostrat-root",
+  "version": "10.5.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan.bold,magenta.bold\" \"cd backend && npm start\" \"cd client && npm run dev\"",
+    "check": "node check-env.js",
+    "setup": "./setup.bat"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
