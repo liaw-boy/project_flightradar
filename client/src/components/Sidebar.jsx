@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, AlertTriangle, Plane as PlaneIcon, Map, Fingerprint, Activity, MapPin } from 'lucide-react';
+import { X, AlertTriangle, Plane as PlaneIcon, Map, Fingerprint, Activity, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
     getAirlineLogoUrl, getAirlineName, getCountryFlag, getCategoryName,
     getNearestAirport, formatVerticalRate, getAirportDisplayData,
@@ -152,22 +152,39 @@ export default function Sidebar({
                           (metadata ? [metadata.manufacturerName, metadata.model].filter(_isKnown).join(' ') : '') ||
                           '';
 
-    // ── Image Resolution: Planespotters (direct) → fusion photo_url ──────
-    // Falls back when SVG unavailable and fusion API's photo_url is null/missing.
-    const [directPhoto, setDirectPhoto] = useState(null);
+    // ── Image Resolution: Planespotters (multiple) ──────
+    const [photos, setPhotos] = useState([]);
+    const [currentPhotoIdx, setCurrentPhotoIdx] = useState(0);
+
     useEffect(() => {
         let active = true;
-        setDirectPhoto(null);
+        setPhotos([]);
+        setCurrentPhotoIdx(0);
+
         dataManager.getPhotos(icao24, displayRegistration !== '--' ? displayRegistration : undefined)
-            .then(photos => {
-                if (!active || !photos || photos.length === 0) return;
-                const p = photos[0];
-                const url = p.thumbnail_large?.src || p.thumbnail?.src || p.link || null;
-                if (url) setDirectPhoto({ url, photographer: p.photographer || 'Planespotters.net' });
+            .then(results => {
+                if (!active || !results || results.length === 0) return;
+                
+                // Format photos for carousel
+                const formatted = results.map(p => ({
+                    url: p.thumbnail_large?.src || p.thumbnail?.src || p.link || null,
+                    photographer: p.photographer || 'Planespotters.net'
+                })).filter(h => h.url);
+                
+                setPhotos(formatted);
             })
             .catch(() => {});
         return () => { active = false; };
     }, [icao24, displayRegistration]);
+
+    const nextPhoto = (e) => {
+        e.stopPropagation();
+        setCurrentPhotoIdx(prev => (prev + 1) % photos.length);
+    };
+    const prevPhoto = (e) => {
+        e.stopPropagation();
+        setCurrentPhotoIdx(prev => (prev - 1 + photos.length) % photos.length);
+    };
 
 
     // [Phase 20] Aggressive Airport Resolution (Bypassing literal "N/A" truthy trap)
@@ -212,15 +229,22 @@ export default function Sidebar({
     return (
         <div className="sidebar active">
             <div className="sb-header">
+                {logoUrl && (
+                    <div className="sb-header-watermark">
+                        <img src={logoUrl} alt="" />
+                    </div>
+                )}
                 <div className="sb-header-main" style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+
                     <h2 className="sb-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {fusionData?.route?.flightNumber || plane.callsign || 'UNKNOWN'}
                         {typecode && <span className="sb-badge" style={{ marginLeft: '8px' }}>{typecode}</span>}
                     </h2>
                     <div className="sb-subtitle" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {logoUrl && <img src={logoUrl} alt="" className="sb-airline-logo-mini" style={{ display: 'inline-block', marginRight: '4px' }} onError={(e) => e.target.style.display = 'none'} />}
+                        {logoUrl && <img src={logoUrl} alt="" className="sb-airline-logo-mini" onError={(e) => e.target.style.display = 'none'} />}
                         {(aircraft.airline && aircraft.airline !== 'Unknown') ? aircraft.airline : (airlineName || '')}
                     </div>
+
                 </div>
                 <div className="sb-header-actions">
                     <div className="sb-close" onClick={onClose}><X size={24} /></div>
@@ -238,17 +262,42 @@ export default function Sidebar({
                 <div className="sb-photo-container">
                     {(() => {
                         // Priority 1: Real photo (Planespotters) — photographer's actual aircraft photo
-                        const photoUrl = aircraft.photo_url || directPhoto?.url;
-                        const photographer = aircraft.photographer || directPhoto?.photographer || 'Planespotters.net';
+                        const activePhoto = photos[currentPhotoIdx];
 
-                        if (photoUrl) {
+                        if (activePhoto?.url) {
                             return (
                                 <div className="sb-photo-carousel">
-                                    <img src={photoUrl} alt={aircraftModel} className="aircraft-photo"
+                                    {photos.length > 1 && (
+                                        <>
+                                            <button className="carousel-nav prev" onClick={prevPhoto} aria-label="Previous photo">
+                                                <ChevronLeft size={20} />
+                                            </button>
+                                            <button className="carousel-nav next" onClick={nextPhoto} aria-label="Next photo">
+                                                <ChevronRight size={20} />
+                                            </button>
+                                            <div className="carousel-counter">
+                                                {currentPhotoIdx + 1} / {photos.length}
+                                            </div>
+                                            <div className="carousel-dots">
+                                                {photos.map((_, i) => (
+                                                    <div 
+                                                        key={i} 
+                                                        className={`dot ${i === currentPhotoIdx ? 'active' : ''}`}
+                                                        onClick={(e) => { e.stopPropagation(); setCurrentPhotoIdx(i); }}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </>
+                                    )}
+                                    <img 
+                                        key={activePhoto.url} 
+                                        src={activePhoto.url} 
+                                        alt={aircraftModel} 
+                                        className="aircraft-photo fade-in"
                                         onError={(e) => { e.target.style.display = 'none'; }}
                                     />
-                                    <a href={photoUrl} target="_blank" rel="noopener noreferrer" className="sb-photo-credit">
-                                        © {photographer} <span>↗</span>
+                                    <a href={activePhoto.url} target="_blank" rel="noopener noreferrer" className="sb-photo-credit">
+                                        © {activePhoto.photographer} <span>↗</span>
                                     </a>
                                 </div>
                             );
@@ -270,6 +319,9 @@ export default function Sidebar({
                                 <span className="sb-photo-placeholder-text">NO PHOTO AVAILABLE</span>
                             </div>
                         );
+
+
+
                     })()}
                 </div>
 

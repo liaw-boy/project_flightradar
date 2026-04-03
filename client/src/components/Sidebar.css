@@ -33,11 +33,36 @@
     justify-content: space-between;
     align-items: flex-start;
     flex-shrink: 0;
+    position: relative; /* For watermark */
+    overflow: hidden; /* Contain the watermark */
+}
+
+.sb-header-watermark {
+    position: absolute;
+    right: 15px; /* Offset to prevent cutting at the edge */
+    top: 56%; /* Slightly lower to balance with multi-line subtitle */
+    transform: translateY(-50%);
+    height: 75%; /* Smaller height to keep it fully within the header */
+    width: auto;
+    opacity: 0.18; /* Increased opacity for better visibility */
+    pointer-events: none;
+    z-index: 0;
+    filter: brightness(1.1); /* Brighter and subtle brand colors */
+}
+
+
+.sb-header-watermark img {
+    height: 100%;
+    width: auto;
+    object-fit: contain;
 }
 
 .sb-header-main {
     flex: 1;
+    position: relative;
+    z-index: 1; /* Stay above watermark */
 }
+
 
 .sb-title {
     font-size: 26px;
@@ -124,11 +149,12 @@
 }
 
 .sb-photo-carousel {
+    position: relative;
     width: 100%;
     height: 200px;
     background: #000;
-    position: relative;
     overflow: hidden;
+    border-bottom: 2px solid var(--color-glass-border);
 }
 
 /* Loading skeleton state */
@@ -169,6 +195,92 @@
     height: 100%;
     object-fit: cover;
     display: block;
+    transition: opacity 0.5s ease;
+}
+
+.aircraft-photo.fade-in {
+    animation: photoFadeIn 0.5s ease-out;
+}
+
+@keyframes photoFadeIn {
+    from { opacity: 0; transform: scale(1.05); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+/* Carousel Controls */
+.carousel-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: white;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    z-index: 10;
+}
+
+.carousel-nav:hover {
+    background: var(--color-accent-blue);
+    box-shadow: 0 0 15px var(--color-accent-blue-glow);
+    transform: translateY(-50%) scale(1.1);
+}
+
+.carousel-nav.prev { left: 12px; }
+.carousel-nav.next { right: 12px; }
+
+.carousel-counter {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    color: #cbd5e1;
+    font-weight: 500;
+    letter-spacing: 1px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 10;
+}
+
+.carousel-dots {
+    position: absolute;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 10;
+}
+
+.carousel-dots .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.carousel-dots .dot:hover {
+    background: rgba(255, 255, 255, 0.6);
+}
+
+.carousel-dots .dot.active {
+    background: var(--color-accent-cyan);
+    box-shadow: 0 0 10px var(--color-accent-cyan-glow);
+    width: 20px;
+    border-radius: 4px;
 }
 
 /* RexKramer1 SVG silhouette view — tactical yellow on dark */
@@ -207,15 +319,6 @@
     color: var(--color-accent-cyan);
 }
 
-.sb-logo-container {
-    padding: 16px;
-    margin: 20px;
-    background: #fff;
-    border-radius: 12px;
-    text-align: center;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-}
-
 .sb-logo-placeholder {
     height: 200px;
     background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
@@ -225,35 +328,50 @@
     justify-content: center;
     position: relative;
     overflow: hidden;
-}
-
-.sb-logo-placeholder::before {
-    content: '✈';
-    position: absolute;
-    font-size: 120px;
-    color: rgba(255, 255, 255, 0.03);
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%) rotate(-45deg);
-    z-index: 0;
-}
-
-.sb-logo-container {
-    position: relative;
-    z-index: 1;
-    width: 100%;
     padding: 20px;
 }
 
+.sb-logo-watermark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 85%;
+    height: 85%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.1; /* High-end watermark opacity */
+    filter: brightness(0.8) contrast(1.2);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.sb-logo-watermark img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.sb-photo-placeholder-icon,
+.sb-photo-placeholder-text {
+    position: relative;
+    z-index: 1; /* Stay above the watermark */
+}
+
+
 .sb-logo-container img {
     max-height: 80px;
-    max-width: 80%;
-    width: auto;
-    display: block;
-    margin: 0 auto;
-    filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.2));
+    max-width: 100%;
+    object-fit: contain;
+    filter: drop-shadow(0 2px 8px rgba(0,0,0,0.1));
     transition: transform 0.3s ease;
 }
+
+.sb-logo-container img:hover {
+    transform: scale(1.08);
+}
+
 
 .sb-logo-container img:hover {
     transform: scale(1.05);
@@ -767,9 +885,17 @@
 
 /* [Airline Identity] Mini Logo */
 .sb-airline-logo-mini {
-    height: 18px;
+    height: 20px;
     width: auto;
     object-fit: contain;
-    filter: drop-shadow(0 0 2px rgba(0,0,0,0.5));
-    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 2px 6px;
+    border-radius: 4px;
+    box-shadow: 0 0 10px rgba(34, 211, 238, 0.2);
+    margin-right: 8px;
+    transition: transform 0.2s ease;
+}
+
+.sb-airline-logo-mini:hover {
+    transform: scale(1.1);
 }

@@ -34,11 +34,13 @@ export const MAP_LAYERS = [
 export default function FilterPanel({ filters, onFilterChange, mapLayer, onMapLayerChange, embedded }) {
     const { t } = useI18n();
     const [isLayersExpanded, setIsLayersExpanded] = useState(false);
-    const monitorUrl = `${window.location.protocol}//${window.location.hostname}:${window.location.port === '3005' ? '3000' : window.location.port}/monitor?token=dev`;
-
     const openMonitor = () => {
-        window.open(monitorUrl, 'aerostrat-monitor', 'width=1200,height=800,resizable=yes,scrollbars=yes');
+        // Points to our backend at port 3001
+        const monitorUrl = `${window.location.protocol}//${window.location.hostname}:3001/monitor?token=dev`;
+        // Open in a new tab next to the current one
+        window.open(monitorUrl, '_blank');
     };
+
 
     return (
         <div className={`filter-panel ${embedded ? 'embedded' : ''}`}>

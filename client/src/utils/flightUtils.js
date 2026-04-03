@@ -59,7 +59,7 @@ const AIRLINE_DB = {
     // China
     'CCA': 'Air China 中國國際航空', 'CES': 'China Eastern 中國東方航空', 'CSN': 'China Southern 中國南方航空',
     'CRK': 'Hong Kong Airlines 香港航空', 'HXA': 'Hong Kong Airlines 香港航空',
-    'CPA': 'Cathay Pacific 國泰航空', 'HDA': 'Cathay Dragon 國泰港龍', 'HKE': 'Cathay Pacific 國泰航空',
+    'CPA': 'Cathay Pacific 國泰航空', 'HDA': 'Cathay Dragon 國泰港龍', 'HKE': 'HK Express 香港快運',
     'SHQ': 'Spring Airlines 春秋航空', 'CSZ': 'Shenzhen Airlines 深圳航空', 'CDG': 'Shandong Airlines 山東航空',
     'CHH': 'Hainan Airlines 海南航空',
     // Southeast Asia
@@ -101,7 +101,7 @@ export const ICAO_TO_IATA = {
     // Korea
     'KAL': 'KE', 'AAR': 'OZ', 'JNA': 'LJ', 'TWB': 'TW', 'JJA': '7C', 'ABL': 'BX', 'ESR': 'ZE',
     // China
-    'CCA': 'CA', 'CES': 'MU', 'CSN': 'CZ', 'HXA': 'HX', 'CPA': 'CX', 'HDA': 'LD', 'SHQ': '9C',
+    'CCA': 'CA', 'CES': 'MU', 'CSN': 'CZ', 'HXA': 'HX', 'CPA': 'CX', 'HDA': 'KA', 'HKE': 'UO', 'SHQ': '9C',
     'CSZ': 'ZH', 'CDG': 'SC', 'CHH': 'HU',
     // Southeast Asia
     'SIA': 'SQ', 'THA': 'TG', 'MAS': 'MH', 'AXM': 'AK', 'GIA': 'GA', 'PAL': 'PR',

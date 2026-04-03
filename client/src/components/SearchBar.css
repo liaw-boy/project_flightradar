@@ -21,11 +21,12 @@
 
 .search-box:focus {
     border-color: var(--color-accent-cyan);
-    box-shadow: 0 0 20px rgba(34, 211, 238, 0.2);
+    box-shadow: 0 0 15px rgba(34, 211, 238, 0.4), inset 0 0 10px rgba(34, 211, 238, 0.1);
     width: 100%;
-    background: rgba(15, 23, 42, 0.9);
+    background: rgba(10, 15, 30, 0.95);
     border-radius: 20px;
 }
+
 
 .search-box::placeholder {
     color: var(--color-text-dim);

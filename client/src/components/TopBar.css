@@ -45,25 +45,40 @@
 
 .brand-logo h2 {
     margin: 0;
-    font-size: 18px;
-    /* Added 2px */
-    font-weight: 800;
-    letter-spacing: 1px;
+    font-size: 19px;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    background: linear-gradient(135deg, var(--color-accent-blue), var(--color-accent-cyan));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.brand-subtitle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+}
+
+.brand-monitor-text {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--color-text-dim);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
 }
 
 .brand-version {
-    font-size: 11px;
-    /* Added 1px */
+    font-size: 10px;
     font-family: var(--font-mono);
     color: var(--color-accent-cyan);
     background: rgba(34, 211, 238, 0.1);
-    padding: 2px 6px;
+    padding: 1px 5px;
     border-radius: 4px;
     border: 1px solid rgba(34, 211, 238, 0.2);
-    margin-left: 8px;
-    align-self: flex-end;
-    margin-bottom: 2px;
 }
+
 
 .top-stat-pill {
     display: flex;
@@ -114,7 +129,9 @@
     background: rgba(34, 211, 238, 0.15);
     border-color: var(--color-accent-cyan);
     color: var(--color-accent-cyan);
+    box-shadow: 0 0 12px rgba(34, 211, 238, 0.2);
 }
+
 
 .settings-dropdown-wrapper {
     position: relative;
