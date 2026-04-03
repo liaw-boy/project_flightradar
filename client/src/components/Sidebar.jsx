@@ -327,53 +327,31 @@ export default function Sidebar({
 
                 {/* [Phase 16] Restored High-Fidelity Flight Progress View */}
                 <div className="sb-route-card">
-                    <div className="sb-route-hero">
-                        <div className="sb-route-node">
-                            <span className={`route-iata ${displayDepCode === 'N/A' || displayDepCode === '---' ? 'empty' : ''}`}>
-                                {displayDepCode}
-                            </span>
+                    <div className="sb-route-hero-v2">
+                        <div className="sb-route-node left">
+                            <div className="node-iata">{displayDepCode}</div>
+                            <div className="node-city">{depCity || (displayDepCode !== '---' ? 'Departing...' : '')}</div>
                         </div>
 
-                        {/* [Phase 20] Perfectly centered directional indicator. Removed duplicate progress track. */}
-                        <div className="sb-route-center">
-                            <PlaneIcon
-                                size={24}
-                                className="text-slate-400"
-                                style={{
-                                    transform: 'rotate(90deg)',
-                                    opacity: 0.8
-                                }}
-                            />
+                        <div className="sb-route-center-v2">
+                             <div className="route-path-line"></div>
+                             <PlaneIcon size={18} className="route-plane-icon" />
                         </div>
 
-                        <div className="sb-route-node">
-                            <span className={`route-iata ${displayArrCode === 'N/A' || displayArrCode === '---' ? 'empty' : ''}`}>
-                                {displayArrCode}
-                            </span>
+                        <div className="sb-route-node right">
+                            <div className="node-iata">{displayArrCode}</div>
+                            <div className="node-city">{arrCity || (displayArrCode !== '---' ? 'Arriving...' : '')}</div>
                         </div>
                     </div>
 
-                    <div className="sb-details-grid">
-                        <div className="sb-airport-info">
-                            <div className="sb-airport-meta" style={{ marginBottom: '4px' }}>
-                                <span className="sb-tz-badge" style={{ background: 'rgba(34, 211, 238, 0.15)', color: 'var(--color-accent-cyan)' }}>DEP</span>
-                                {depInfo?.timezone !== undefined && <span className="sb-tz-badge">UTC{depInfo.timezone >= 0 ? '+' : ''}{depInfo.timezone}</span>}
-                            </div>
-                            <div className={`sb-airport-name ${(!depInfo && !routeInfo.origin_name) ? 'dim' : ''}`} title={depName}>
-                                {depName || (isLoadingDetails ? 'Loading...' : 'Origin Pending')}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--color-text-dim)', fontWeight: 600, marginTop: '2px' }}>{depCity}</div>
+                    <div className="sb-airport-names-row">
+                        <div className="airport-name-item left" title={depName}>
+                            <span className="badge dep">DEP</span>
+                            <span className="text">{depName || 'Origin'}</span>
                         </div>
-
-                        <div className="sb-airport-info" style={{ textAlign: 'right', alignItems: 'flex-end' }}>
-                            <div className="sb-airport-meta" style={{ marginBottom: '4px' }}>
-                                {arrInfo?.timezone !== undefined && <span className="sb-tz-badge">UTC{arrInfo.timezone >= 0 ? '+' : ''}{arrInfo.timezone}</span>}
-                                <span className="sb-tz-badge" style={{ background: 'rgba(34, 255, 128, 0.15)', color: '#4ade80' }}>ARR</span>
-                            </div>
-                            <div className={`sb-airport-name ${(!arrInfo && !routeInfo.destination_name) ? 'dim' : ''}`} title={arrName}>
-                                {arrName || (isLoadingDetails ? 'Loading...' : 'Destination Pending')}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--color-text-dim)', fontWeight: 600, marginTop: '2px' }}>{arrCity}</div>
+                        <div className="airport-name-item right" title={arrName}>
+                            <span className="text">{arrName || 'Destination'}</span>
+                            <span className="badge arr">ARR</span>
                         </div>
                     </div>
 
