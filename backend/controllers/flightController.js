@@ -162,14 +162,17 @@ async function fetchLocalOSINTRoute(callsign) {
         const routeDict = await RouteDictionary.findOne({ callsign: normalized });
         if (!routeDict) return null;
 
-        const originIcao = routeDict.originIata;      // field name is misleading — stores ICAO
-        const destIcao   = routeDict.destinationIata;
+        const originCode = routeDict.originIata;      // field name is misleading — may store ICAO or IATA
+        const destCode   = routeDict.destinationIata;
 
-        // Parallel airport lookup by ICAO code
-        const [originAp, destAp] = await Promise.all([
-            originIcao ? AirportDictionary.findOne({ icao: originIcao }) : null,
-            destIcao   ? AirportDictionary.findOne({ icao: destIcao   }) : null,
-        ]);
+        // Try ICAO lookup first, fall back to IATA (schedules_static.json stores IATA codes)
+        const lookupAirport = async (code) => {
+            if (!code) return null;
+            return (await AirportDictionary.findOne({ icao: code })) || (await AirportDictionary.findOne({ iata: code }));
+        };
+        const [originAp, destAp] = await Promise.all([lookupAirport(originCode), lookupAirport(destCode)]);
+        const originIcao = originAp?.icao || originCode;
+        const destIcao   = destAp?.icao   || destCode;
 
         return {
             origin_iata:        originAp?.iata  || originIcao || 'N/A',

@@ -12,12 +12,12 @@ export default defineConfig({
         allowedHosts: ['flyradar.spkuan.cc'],
         proxy: {
             '/api': {
-                target: 'http://localhost:3001',
+                target: 'http://localhost:3000',
                 changeOrigin: true,
             },
             // [v5.0.0] WebSocket proxy — 讓 FlightDataWorker 的 WS 連線穿透到後端
             '/ws': {
-                target: 'ws://localhost:3001',
+                target: 'ws://localhost:3000',
                 ws: true,
             },
         },

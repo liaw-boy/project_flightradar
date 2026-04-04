@@ -158,7 +158,7 @@ export function getAirlineName(callsign) {
     if (!match) return '';
 
     const prefix = match[0];
-    return AIRLINE_DB[prefix] || `Airline (${prefix})`;
+    return AIRLINE_DB[prefix] || '';
 }
 
 /**

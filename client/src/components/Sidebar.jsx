@@ -29,7 +29,7 @@ function AltitudeChart({ history, icao24 }) {
     if (!data || data.length < 2) return null;
 
     const points = data.slice(-60);
-    const altitudes = points.map((p, i) => ({ x: i, alt: p[3] ? 0 : (p[4] || 0) }));
+    const altitudes = points.map((p, i) => ({ x: i, alt: p[6] ? 0 : (p[3] || 0) }));
     const trueMax = Math.max(...altitudes.map(p => p.alt));
     if (trueMax < 10) return null;
 
@@ -61,7 +61,7 @@ function AltitudeChart({ history, icao24 }) {
                     <path d={fillD} fill="url(#altGrad)" />
                     <path d={pathD} fill="none" stroke="#22d3ee" strokeWidth="1.5" strokeLinejoin="round" />
                     <text x="4" y="14" fill="rgba(255,255,255,0.7)" fontSize="10" fontFamily="JetBrains Mono, monospace" fontWeight="600">
-                        {Math.round(maxAlt)}m
+                        {Math.round(maxAlt).toLocaleString()}ft
                     </text>
                 </svg>
             </div>
@@ -363,42 +363,45 @@ export default function Sidebar({
 
                 {/* [Phase 16] Restored High-Fidelity Flight Progress View */}
                 <div className="sb-route-card">
-                    <div className="sb-route-hero-v2">
-                        <div className="sb-route-node left">
-                            <div className="node-iata">{displayDepCode}</div>
-                            <div className="node-city">{depCity || (displayDepCode !== '---' ? 'Departing...' : '')}</div>
+                    {/* [v7.0] High-Fidelity Terminal Node Layout */}
+                    <div className="sb-route-layout-v3">
+                        {/* Origin Column */}
+                        <div className="route-column origin">
+                            <div className="column-header">
+                                <span className="column-dot"></span>
+                                <span className="column-label">FROM</span>
+                            </div>
+                            <div className="column-iata">{displayDepCode}</div>
+                            <div className="column-city">{depCity || depName || 'Origin'}</div>
+                            <div className="column-footer">
+                                <span className="footer-label">SCHED OUT</span>
+                                <span className="footer-time">{routeInfo.departure_time || '--:--'}</span>
+                            </div>
                         </div>
 
-                        <div className="sb-route-center-v2">
-                             <div className="route-path-line"></div>
-                             <PlaneIcon size={18} className="route-plane-icon" />
+                        {/* Central Connector Overlay */}
+                        <div className="route-connector-v3">
+                            <div className="connector-line-v3">
+                                <div className="connector-pulse"></div>
+                                <div className="connector-plane-icon">
+                                    <PlaneIcon size={14} style={{ transform: 'rotate(90deg)', color: 'var(--color-accent-cyan)' }} />
+                                </div>
+                            </div>
+                            <div className="connector-status">IN FLIGHT</div>
                         </div>
 
-                        <div className="sb-route-node right">
-                            <div className="node-iata">{displayArrCode}</div>
-                            <div className="node-city">{arrCity || (displayArrCode !== '---' ? 'Arriving...' : '')}</div>
-                        </div>
-                    </div>
-
-                    <div className="sb-airport-names-row">
-                        <div className="airport-name-item left" title={depName}>
-                            <span className="badge dep">🛫 FROM</span>
-                            <span className="text">{depName || 'Origin'}</span>
-                        </div>
-                        <div className="airport-name-item right" title={arrName}>
-                            <span className="text">{arrName || 'Destination'}</span>
-                            <span className="badge arr">TO 🛬</span>
-                        </div>
-                    </div>
-
-                    <div className="sb-route-time-v2">
-                        <div className={`time-item ${!routeInfo.departure_time ? 'dim' : ''}`}>
-                            <span className="label">🛫 SCHED. OUT</span>
-                            <span className="val">{routeInfo.departure_time || '--:--'}</span>
-                        </div>
-                        <div className={`time-item ${!routeInfo.arrival_time ? 'dim' : ''}`} style={{ textAlign: 'right' }}>
-                            <span className="label">🛬 SCHED. IN</span>
-                            <span className="val" style={{ color: '#4ade80' }}>{routeInfo.arrival_time || '--:--'}</span>
+                        {/* Destination Column */}
+                        <div className="route-column destination">
+                            <div className="column-header">
+                                <span className="column-label">TO</span>
+                                <span className="column-dot"></span>
+                            </div>
+                            <div className="column-iata">{displayArrCode}</div>
+                            <div className="column-city">{arrCity || arrName || 'Destination'}</div>
+                            <div className="column-footer">
+                                <span className="footer-label">SCHED IN</span>
+                                <span className="footer-time" style={{ color: '#4ade80' }}>{routeInfo.arrival_time || '--:--'}</span>
+                            </div>
                         </div>
                     </div>
 
@@ -460,7 +463,7 @@ export default function Sidebar({
                 </div>
                 {openSections.spatial && (
                     <div className="sb-section-content">
-                        <DataRow label={t('altitude')} value={plane.onGround ? 'GROUND' : (plane.altitude != null ? `${plane.altitude} m` : 'N/A')} />
+                        <DataRow label={t('altitude')} value={plane.onGround ? 'GROUND' : (plane.altitude != null ? `${Math.round(plane.altitude).toLocaleString()} ft` : 'N/A')} />
                         <DataRow label={t('speed')} value={plane.velocity != null ? `${Math.round(plane.velocity * 3.6)} km/h` : 'N/A'} />
                         <DataRow label={t('heading')} value={plane.heading != null ? `${Math.round(plane.heading)}°` : 'N/A'} />
                         <DataRow label={t('vertRate')} value={plane.vRate != null ? formatVerticalRate(plane.vRate) : 'N/A'} />

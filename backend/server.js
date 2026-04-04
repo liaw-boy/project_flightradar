@@ -2743,6 +2743,8 @@ async function buildAirportListCache() {
 }
 
 loadGlobalData();
+// Feed airports into staticMaps so flightController route resolution can resolve ICAO→IATA and names
+staticMaps.loadAirports(Object.values(globalAirportsDB));
 buildAirportGrid(); // [v2.8.4] 建立空間格狀索引
 buildAirportListCache(); // [OPT 1.1] 預計算機場清單快取
 
@@ -2771,6 +2773,15 @@ try {
     if (fs.existsSync(SCHEDULES_STATIC_FILE)) {
         schedulesStaticDB = JSON.parse(fs.readFileSync(SCHEDULES_STATIC_FILE, 'utf8'));
         console.log(`🗺️ [SCHEDULES STATIC] Loaded ${Object.keys(schedulesStaticDB).length} routes from static DB`);
+    }
+    // Feed routes into staticMaps so flightController fetchLocalOSINTRoute can resolve callsign→airports
+    const combinedRoutes = [
+        ...Object.entries(localRoutesDB).map(([cs, pair]) => ({ callsign: cs, originIata: pair[0], destinationIata: pair[1] })),
+        ...Object.entries(schedulesStaticDB).map(([cs, r]) => ({ callsign: cs, originIata: r.dep, destinationIata: r.arr })),
+    ];
+    if (combinedRoutes.length > 0) {
+        staticMaps.loadRoutes(combinedRoutes);
+        console.log(`🗺️ [ROUTE DICT] Seeded ${combinedRoutes.length} routes into RouteDictionary`);
     }
 } catch (e) {
     console.error('❌ [ROUTE DB] Failed to load route JSONs:', e.message);
