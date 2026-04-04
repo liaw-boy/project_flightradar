@@ -19,8 +19,7 @@ const http     = require('http');
 const fs       = require('fs');
 const path     = require('path');
 const AdmZip   = require('adm-zip');
-const mongoose = require('mongoose');
-const Aircraft = require('../models/Aircraft');
+const Aircraft = require('../db/aircraftStore');
 
 const DB_URL  = 'https://www.mictronics.de/aircraft-database/aircraft_db.php';
 const TYPE_URL = 'https://www.mictronics.de/aircraft-database/aircraft_types.php';
@@ -251,9 +250,9 @@ async function loadAircraftTypes(zipPath, logger) {
     }
 }
 
-// ── Check if Mictronics data already exists in DB ────────────────────────────
+// ── Check if Mictronics data already exists in store ─────────────────────────
 async function hasMictronicsData() {
-    const count = await Aircraft.countDocuments({ source: MICTRONICS_SOURCE_TAG });
+    const count = await Aircraft.estimatedDocumentCount();
     return count > 10000; // at least 10k records means data was imported
 }
 
@@ -264,7 +263,7 @@ async function syncMictronics(logFn) {
     const forceResync = process.env.FORCE_RESYNC === 'true';
 
     if (!forceResync && await hasMictronicsData()) {
-        const count = await Aircraft.countDocuments({ source: MICTRONICS_SOURCE_TAG });
+        const count = await Aircraft.estimatedDocumentCount();
         logger(`[Mictronics] Already have ${count.toLocaleString()} records. Skipping sync. (Set FORCE_RESYNC=true to override)`);
         return { skipped: true, count };
     }
@@ -301,9 +300,7 @@ async function syncMictronics(logFn) {
 
 // ── Standalone execution ──────────────────────────────────────────────────────
 if (require.main === module) {
-    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aerostrat';
-    mongoose.connect(MONGODB_URI)
-        .then(() => syncMictronics(console.log))
+    syncMictronics(console.log)
         .then(result => { console.log('[Mictronics] Done:', result); process.exit(0); })
         .catch(err => { console.error('[Mictronics] Fatal:', err); process.exit(1); });
 }
