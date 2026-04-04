@@ -1,11 +1,10 @@
 .sidebar {
     position: absolute;
-    top: 60px;
-    /* Offset for TopBar */
+    top: var(--topbar-h);
     left: 0;
-    width: 380px;
-    height: calc(100vh - 60px);
-    height: calc(100dvh - 60px);
+    width: var(--sidebar-w);
+    height: calc(100vh - var(--topbar-h));
+    height: calc(100dvh - var(--topbar-h));
     z-index: 2000;
     background: var(--color-glass-panel);
     border-right: 1px solid var(--color-glass-border);
@@ -151,7 +150,7 @@
 .sb-photo-carousel {
     position: relative;
     width: 100%;
-    height: 200px;
+    height: var(--carousel-h);
     background: #000;
     overflow: hidden;
     border-bottom: 2px solid var(--color-glass-border);
@@ -964,19 +963,48 @@
     box-shadow: 0 5px 20px rgba(34, 211, 238, 0.4);
 }
 
-/* 平板（768-960px）：Sidebar 稍微窄一點，保留地圖空間 */
-@media (max-width: 960px) and (min-width: 769px) {
-    .sidebar {
-        width: 340px;
-    }
+/* 平板直式（769-960px）：sidebar 已由 --sidebar-w clamp 自動縮小，不需要覆寫 */
+
+/* Mobile backdrop overlay — hidden on desktop */
+.sidebar-backdrop {
+    display: none;
 }
 
 /* 手機底部抽屜 */
 @media (max-width: 768px) {
+    /* Backdrop: semi-transparent overlay so tapping outside closes the drawer */
+    .sidebar-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
+        z-index: 1999; /* just below sidebar z-index 2000 */
+        animation: backdropFadeIn 0.25s ease;
+    }
+
+    @keyframes backdropFadeIn {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+    }
+
+    /* Drag handle pill at top of bottom drawer */
+    .sidebar::before {
+        content: '';
+        display: block;
+        width: 40px;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.25);
+        border-radius: 2px;
+        margin: 10px auto 4px;
+        flex-shrink: 0;
+    }
+
     .sidebar {
         width: 100vw;
         height: 62vh;
-        max-height: calc(100dvh - 60px);
+        max-height: calc(100dvh - var(--topbar-h));
         top: auto;
         bottom: 0;
         left: 0;
@@ -985,7 +1013,6 @@
         border-top: 1px solid var(--color-glass-border);
         border-radius: 24px 24px 0 0;
         box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
-        /* iOS safe area */
         padding-bottom: env(safe-area-inset-bottom, 0px);
     }
 
@@ -1004,7 +1031,15 @@
     }
 }
 
-/* 超小手機（<480px）：Sidebar 高度稍小，避免擋住整個畫面 */
+/* 橫向手機：底部抽屜高度縮小避免擋住地圖 */
+@media (max-width: 768px) and (orientation: landscape) {
+    .sidebar {
+        height: 80vh;
+        max-height: calc(100dvh - var(--topbar-h));
+    }
+}
+
+/* 超小手機（<480px）：Sidebar 高度稍小 */
 @media (max-width: 480px) {
     .sidebar {
         height: 55vh;

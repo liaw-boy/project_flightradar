@@ -411,19 +411,23 @@ export default function App() {
             )}
 
             {selectedPlane && (
-                <Sidebar
-                    plane={selectedPlane}
-                    icao24={selectedIcao24}
-                    metadata={selectedMetadata}
-                    route={selectedRoute}
-                    trackPoints={trackPoints}
-                    playbackTime={playbackTime}
-                    onPlaybackChange={handlePlaybackChange}
-                    flightHistoryRef={flightHistoryRef}
-                    onClose={handleDeselectPlane}
-                    trackMode={trackMode}
-                    onToggleTrack={handleToggleTrackMode}
-                />
+                <>
+                    {/* Mobile backdrop — tap outside to close bottom drawer */}
+                    <div className="sidebar-backdrop" onClick={handleDeselectPlane} />
+                    <Sidebar
+                        plane={selectedPlane}
+                        icao24={selectedIcao24}
+                        metadata={selectedMetadata}
+                        route={selectedRoute}
+                        trackPoints={trackPoints}
+                        playbackTime={playbackTime}
+                        onPlaybackChange={handlePlaybackChange}
+                        flightHistoryRef={flightHistoryRef}
+                        onClose={handleDeselectPlane}
+                        trackMode={trackMode}
+                        onToggleTrack={handleToggleTrackMode}
+                    />
+                </>
             )}
 
             <PerformanceMonitor usageStats={usageStats} />

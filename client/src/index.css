@@ -15,6 +15,16 @@
     --font-mono: 'Share Tech Mono', monospace;
     --blur-intensity: 12px;
     --shadow-premium: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+
+    /* ── Responsive Layout Tokens ─────────────────────────────
+       clamp(min, fluid, max) scales panels between 1280px
+       laptops and 4K monitors without hard breakpoints.
+    ────────────────────────────────────────────────────────── */
+    --topbar-h:   60px;
+    --panel-gap:  clamp(12px, 1vw, 20px);
+    --hud-w:      clamp(290px, 20vw, 380px);
+    --sidebar-w:  clamp(320px, 22vw, 440px);
+    --carousel-h: clamp(160px, 13vw, 220px);
 }
 
 *,

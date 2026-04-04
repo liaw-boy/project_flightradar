@@ -14,15 +14,14 @@
 
 .right-hud {
     position: absolute;
-    top: 76px;
-    /* 60px TopBar + 16px padding */
-    right: 24px;
-    bottom: 24px;
-    width: 320px;
+    top: calc(var(--topbar-h) + var(--panel-gap));
+    right: var(--panel-gap);
+    bottom: var(--panel-gap);
+    width: var(--hud-w);
     z-index: 1000;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--panel-gap);
     pointer-events: none;
 }
 
@@ -522,18 +521,22 @@
 
 /* ===== Responsive Design: Right HUD ===== */
 
-/* 1280px 以下縮小 HUD 寬度，保留更多地圖空間 */
-@media (max-width: 1280px) {
-    .right-hud {
-        width: 290px;
-        right: 16px;
-    }
-}
-
 /* 960px 以下隱藏 HUD（側邊欄 + HUD 同時顯示太擠） */
 @media (max-width: 960px) {
     .right-hud {
         display: none !important;
+    }
+}
+
+/* 橫向手機（高度小、寬度夠）：縮小 HUD，仍顯示 */
+@media (max-height: 500px) and (orientation: landscape) and (min-width: 700px) {
+    .right-hud {
+        display: flex !important;
+        --hud-w: clamp(220px, 18vw, 280px);
+        top: calc(var(--topbar-h) + 8px);
+        bottom: 8px;
+        right: 8px;
+        gap: 8px;
     }
 }
 

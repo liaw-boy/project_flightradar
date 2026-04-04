@@ -7,9 +7,9 @@
     box-shadow: var(--shadow-premium);
     backdrop-filter: blur(var(--blur-intensity));
     -webkit-backdrop-filter: blur(var(--blur-intensity));
-    width: 320px;
-    min-width: 320px;
-    max-width: 320px;
+    width: 100%;
+    min-width: unset;
+    max-width: unset;
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     animation: slideInRight 0.6s ease-out;
 }
@@ -296,14 +296,7 @@
 
 /* RWD */
 
-/* 1280px 以下：跟隨 right-hud 縮小 */
-@media (max-width: 1280px) {
-    .dashboard {
-        width: 100%;
-        min-width: unset;
-        max-width: 290px;
-    }
-}
+/* Dashboard inherits width from .right-hud via width:100% — no override needed */
 
 /* 768px 以下：移到底部浮動卡片（right-hud 已隱藏） */
 @media (max-width: 768px) {

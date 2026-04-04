@@ -3,7 +3,7 @@
     top: 0;
     left: 0;
     width: 100vw;
-    height: 60px;
+    height: var(--topbar-h);
     z-index: 2000;
     background: rgba(10, 15, 30, 0.85);
     border-bottom: 1px solid var(--color-glass-border);

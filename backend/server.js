@@ -1177,12 +1177,17 @@ async function refresh() {
     const upStr = upSec >= 3600
       ? Math.floor(upSec/3600) + 'h ' + Math.floor((upSec%3600)/60) + 'm'
       : Math.floor(upSec/60) + ' min';
+    const startedAt = new Date(Date.now() - upSec * 1000);
+    const startedStr = (startedAt.getMonth()+1).toString().padStart(2,'0') + '/'
+      + startedAt.getDate().toString().padStart(2,'0') + ' '
+      + startedAt.getHours().toString().padStart(2,'0') + ':'
+      + startedAt.getMinutes().toString().padStart(2,'0');
 
     document.getElementById('stat-bar').innerHTML =
       statCard((health.cacheSize||0).toLocaleString(), 'AIRCRAFT', 'c-teal', 'In-memory cache') +
       statCard('#' + (ing.totalBatches||0), 'SYNC CYCLES', 'c-green', (ing.lastBatchMs||0) + 'ms last latency') +
       statCard((ing.totalPoints||0).toLocaleString(), 'TRACK DOTS', 'c-amber', '24h persistence') +
-      statCard(upStr, 'UPTIME', 'c-purple', 'System age') +
+      statCard(upStr, 'UPTIME', 'c-purple', 'Started ' + startedStr) +
       statCard(formatBytes(stor.dbSize||0), 'DB SIZE', 'c-red', 'SQLite storage');
 
     // ── Hardware ──

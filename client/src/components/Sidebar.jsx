@@ -113,6 +113,16 @@ export default function Sidebar({
 
     const toggleSection = (s) => setOpenSections(prev => ({ ...prev, [s]: !prev[s] }));
 
+    // Swipe-down to close (mobile bottom drawer)
+    const touchStartY = useRef(null);
+    const handleTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
+    const handleTouchEnd = (e) => {
+        if (touchStartY.current === null) return;
+        const delta = e.changedTouches[0].clientY - touchStartY.current;
+        touchStartY.current = null;
+        if (delta > 80) onClose(); // swipe down ≥80px closes drawer
+    };
+
     // [Phase 16] Ultimate Data Fusion Hook with Skeletons
     const [fusionData, setFusionData] = useState(null);
     const [isLoadingDetails, setIsLoadingDetails] = useState(true);
@@ -240,7 +250,7 @@ export default function Sidebar({
     const posSourceMap = { 0: 'ADS-B', 1: 'ASTERIX', 2: 'MLAT', 3: 'FLARM' };
 
     return (
-        <div className="sidebar active">
+        <div className="sidebar active" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
             <div className="sb-header">
                 {logoUrl && (
                     <div className="sb-header-watermark">

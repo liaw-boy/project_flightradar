@@ -492,8 +492,8 @@ export const ICON_SCALE_VERSION = 4;
 const _SCALE_REF = 1.45; // B738 / A320 catalog scale — rendered as 1× base
 export function getDrawSize(_plane, zoom, _typeScale = 1.0) {
     let base;
-    if      (zoom <= 4)  base = 5;
-    else if (zoom <= 5)  base = 9;
+    if      (zoom <= 4)  base = 10; // min ~14px — always a recognizable shape, never a dot
+    else if (zoom <= 5)  base = 13; // ~19px
     else if (zoom <= 6)  base = 15;
     else if (zoom <= 7)  base = 21;
     else if (zoom <= 8)  base = 26;
@@ -525,7 +525,7 @@ const _GH_BASE   = '/api/svg/';
 
 // Persist known-missing typecodes in localStorage so they are never re-requested
 // after a page refresh. Key includes a version stamp to auto-invalidate on SVG repo updates.
-const _SVG_MISS_KEY = 'aerostrat_svg_miss_v1';
+const _SVG_MISS_KEY = 'aerostrat_svg_miss_v2';
 try {
     const stored = JSON.parse(localStorage.getItem(_SVG_MISS_KEY) || '[]');
     stored.forEach(tc => exactImageCache.set(tc, null));

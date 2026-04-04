@@ -904,7 +904,7 @@ export default function MapView({
                 // === Interpolation (Phase 8) ===
                 const currentLat = plane.renderLat || plane.lat;
                 const currentLng = plane.renderLng || plane.lng;
-                const lerpFactor = 0.5;
+                const lerpFactor = 0.15;
 
                 if (plane.onGround || plane.velocity <= 0 || plane.altitude === 'GROUND') {
                     if (plane.targetLat && plane.targetLng) {
@@ -912,21 +912,15 @@ export default function MapView({
                         plane.renderLng = currentLng + (plane.targetLng - currentLng) * lerpFactor;
                     }
                 } else if (plane.targetLat && plane.targetLng) {
-                    if (!plane.simTime) {
-                        plane.simTime = plane.lastContact || (plane.targetUpdatedAt ? plane.targetUpdatedAt / 1000 : Date.now() / 1000);
-                    }
-                    plane.simTime += dt;
-
-                    const anchorSec = plane.lastContact || (plane.targetUpdatedAt ? plane.targetUpdatedAt / 1000 : Date.now() / 1000);
-                    const elapsedSec = Math.min(plane.simTime - anchorSec, 120);
-                    const predictedPos = predictPosition(plane.targetLat, plane.targetLng, plane.velocity, plane.heading, Math.max(0, elapsedSec));
+                    // [Fix] Use wall-clock elapsed time instead of accumulated simTime.
+                    // The old simTime += dt approach never reset (dt === 0.1 was always false
+                    // at 60fps), causing up to 120s of position prediction error = visible jitter.
+                    const anchorMs = plane.targetUpdatedAt || ((plane.lastContact || 0) * 1000) || Date.now();
+                    const elapsedSec = Math.min(Math.max(0, (Date.now() - anchorMs) / 1000), 30);
+                    const predictedPos = predictPosition(plane.targetLat, plane.targetLng, plane.velocity, plane.heading, elapsedSec);
 
                     plane.renderLat = currentLat + (predictedPos.lat - currentLat) * lerpFactor;
                     plane.renderLng = currentLng + (predictedPos.lng - currentLng) * lerpFactor;
-
-                    if (plane.targetUpdatedAt && dt === 0.1) {
-                        plane.simTime = plane.targetUpdatedAt / 1000;
-                    }
                 } else {
                     plane.renderLat = plane.lat;
                     plane.renderLng = plane.lng;
@@ -1298,11 +1292,14 @@ export default function MapView({
                     const rawHeading = plane.heading || 0;
                     let angleRad = rawHeading * Math.PI / 180;
 
-                    // [v15.0] Trajectory-Aligned Heading Synchronization (Hardened)
-                    if (isSelected && activeSelectedPath && activeSelectedPath.length >= 2) {
+                    // [v15.1] Trajectory-Aligned Heading Synchronization (Hardened)
+                    // Only use path-derived angle when ADS-B heading is unavailable (rawHeading === 0).
+                    // Using pathAngle to OVERRIDE a valid ADS-B heading caused 180° flips when
+                    // the last two track points lagged behind the actual turn direction.
+                    if (isSelected && rawHeading === 0 && activeSelectedPath && activeSelectedPath.length >= 2) {
                         const lastPt = activeSelectedPath[activeSelectedPath.length - 1];
                         const prevPt = activeSelectedPath[activeSelectedPath.length - 2];
-                        
+
                         if (lastPt && prevPt) {
                             // Support both [ts, lat, lng] and {lat, lng} formats
                             const getVal = (p, idx, key) => (Array.isArray(p) ? p[idx] : p[key]);
@@ -1315,7 +1312,7 @@ export default function MapView({
                                 const dy = lat1 - lat0;
                                 const dx = (lng1 - lng0) * Math.cos(lat1 * Math.PI / 180);
                                 const pathAngle = Math.atan2(dx, dy);
-                                
+
                                 // SAFETY: Only apply if pathAngle is a valid number and dx/dy aren't zero
                                 if (Number.isFinite(pathAngle) && (dx !== 0 || dy !== 0)) {
                                     angleRad = pathAngle;
@@ -1325,12 +1322,11 @@ export default function MapView({
                     }
 
                     // ── 3-Tier Render Pipeline ────────────────────────────────
-                    // Tier 1: Tactical dot  — zoom ≤ 4, drawSize ≤ 6 px
+                    // Tier 1: Safety dot    — only if drawSize ≤ 3 (should never happen with new minimums)
                     // Tier 2: GitHub SVG    — exact 1:1 shape (async pre-warmed)
                     // Tier 3: Path2D embed  — instant, always available fallback
-                    // Tier 4: Safety dot    — should never fire after resolveTypecodeKey fix
 
-                    if (drawSize <= 6) {
+                    if (drawSize <= 3) {
                         // ── Tier 1: Tactical Dot ─────────────────────────────
                         const dotR = Math.max(2, drawSize / 2);
                         ctx.save();
@@ -1378,16 +1374,16 @@ export default function MapView({
                                 ctx.scale(canvasScale, canvasScale);
                                 ctx.translate(-(vb[0] + vbW / 2), -(vb[1] + vbH / 2));
                                 ctx.lineJoin = 'round';
-                                // Pass 1: dark shadow outline
-                                ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-                                ctx.lineWidth = Math.max(1.8, 8 / canvasScale);
+                                // Pass 1: dark shadow outline (3px normalized)
+                                ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+                                ctx.lineWidth = Math.max(1.0, 3.5 / canvasScale);
                                 ctx.stroke(path);
                                 // Pass 2: colored fill
                                 ctx.fillStyle = altColor;
                                 ctx.fill(path);
-                                // Pass 3: thin white outline (refined for High-DPI)
+                                // Pass 3: thin white outline (1.2px normalized)
                                 ctx.strokeStyle = isSelected ? '#00ffff' : 'rgba(255,255,255,0.95)';
-                                ctx.lineWidth = isSelected ? Math.max(1.5, 6 / canvasScale) : Math.max(0.6, 2.5 / canvasScale);
+                                ctx.lineWidth = isSelected ? Math.max(1.0, 2.5 / canvasScale) : Math.max(0.4, 1.2 / canvasScale);
                                 ctx.stroke(path);
                                 ctx.restore();
                             } else {
