@@ -780,198 +780,378 @@ function getMonitorHtml() {
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<title>AEROSTRAT SYSTEM MONITOR</title>
+<title>AEROSTRAT MONITOR</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#04060d;--s:#0a0f1e;--s2:#0f1628;
-  --b:rgba(148,163,184,.08);--bh:rgba(148,163,184,.16);
-  --t:#e2e8f0;--td:#64748b;--tm:#3d4f63;
-  --cyan:#22d3ee;--green:#10b981;--amber:#f59e0b;--red:#ef4444;--purple:#a855f7;
-  --font:'JetBrains Mono',Consolas,monospace;
+  --bg:#171821;
+  --panel:#21222d;
+  --panel2:#2a2b3d;
+  --border:rgba(255,255,255,0.07);
+  --teal:#a9dfd8;
+  --amber:#fcb859;
+  --red:#ef4444;
+  --green:#34d399;
+  --t:#ffffff;
+  --tm:#a0a0a0;
+  --td:#87888c;
+  --font:'Inter',sans-serif;
 }
-html,body{min-height:100vh;background:var(--bg);color:var(--t);font-family:var(--font);font-size:15px}
-a{color:var(--cyan);text-decoration:none}
-a:hover{opacity:.8}
-#wrap{max-width:1280px;margin:0 auto;padding:24px 20px}
-.hd{display:flex;align-items:center;justify-content:space-between;padding:0 0 20px;border-bottom:1px solid var(--b);margin-bottom:24px}
-.hd-brand{font-size:22px;font-weight:700;letter-spacing:.15em;background:linear-gradient(135deg,var(--cyan),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.hd-sub{font-size:12px;color:var(--td);margin-top:3px}
-.hd-sync{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--td)}
-.sync-dot{width:9px;height:9px;border-radius:50%;background:var(--amber);flex-shrink:0;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.75)}}
-.stat-bar{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
-.stat-card{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:18px 22px;position:relative;overflow:hidden;transition:all .3s}
-.stat-card:hover{border-color:var(--bh);transform:translateY(-2px)}
-.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:12px 12px 0 0}
-.stat-card.cyan::before{background:linear-gradient(90deg,var(--cyan),transparent)}
-.stat-card.green::before{background:linear-gradient(90deg,var(--green),transparent)}
-.stat-card.amber::before{background:linear-gradient(90deg,var(--amber),transparent)}
-.stat-card.purple::before{background:linear-gradient(90deg,var(--purple),transparent)}
-.stat-card.red::before{background:linear-gradient(90deg,var(--red),transparent)}
-.stat-val{font-size:28px;font-weight:700;color:var(--t);line-height:1;margin-bottom:5px}
-.stat-lbl{font-size:11px;color:var(--td);letter-spacing:.12em;text-transform:uppercase}
-.stat-trend{font-size:11px;color:var(--tm);margin-top:5px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
-.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px}
-@media(max-width:900px){.grid,.grid-3{grid-template-columns:1fr}.stat-bar{grid-template-columns:repeat(2,1fr)}}
-.card{background:var(--s);border:1px solid var(--b);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
-.card-hd{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--b);background:rgba(10,15,30,.6)}
-.card-title{font-size:12px;font-weight:700;letter-spacing:.1em;color:var(--td);text-transform:uppercase}
-.card-badge{font-size:11px;font-weight:700;color:var(--cyan);background:rgba(34,211,238,.1);padding:4px 10px;border-radius:5px;border:1px solid rgba(34,211,238,.2)}
-.card-body{padding:18px;flex:1}
-.accts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
-.acct-card{background:var(--s2);border:1px solid var(--b);border-radius:10px;padding:20px 16px;display:flex;flex-direction:column;align-items:center;gap:10px;transition:all .3s}
-.acct-card.is-active{border-color:rgba(34,211,238,.45);box-shadow:0 0 24px rgba(34,211,238,.1)}
-.acct-card.is-locked{border-color:rgba(239,68,68,.25);opacity:.72}
-.perf-row{margin-bottom:15px}
-.perf-lbl{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px;color:var(--td)}
-.perf-bar-bg{height:8px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden}
-.perf-bar-fill{height:100%;background:var(--cyan);width:0%;transition:width 1s cubic-bezier(0.4, 0, 0.2, 1);box-shadow:0 0 8px var(--cyan)}
-.perf-row.sub{margin-top:-10px;margin-bottom:10px;opacity:0.7}
+html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--font);font-size:14px;overflow:hidden}
+a{color:var(--teal);text-decoration:none}
+a:hover{opacity:.75}
 
-.sources{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
-.src-pill{display:flex;align-items:center;gap:6px;padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid}
-.src-pill.up{color:var(--green);border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.06)}
-.src-pill.down{color:var(--red);border-color:rgba(239,68,68,.3);opacity:.65}
-.src-pill.cb{color:var(--amber);border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.06)}
-.src-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
-.row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--b);font-size:13px}
-.row:last-child{border-bottom:none}
-.lbl{color:var(--td)}
-.val{color:var(--t);font-weight:600;text-align:right}
-.val.ok{color:var(--green)}.val.warn{color:var(--amber)}.val.err{color:var(--red)}.val.dim{color:var(--tm)}
-.skel{background:linear-gradient(90deg,var(--s) 25%,var(--s2) 50%,var(--s) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:5px;height:15px;opacity:.5}
+/* ── Layout ── */
+.layout{display:flex;height:100vh;overflow:hidden}
+
+/* ── Sidebar ── */
+.sidebar{width:220px;min-width:220px;background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:0;overflow-y:auto;flex-shrink:0}
+.sb-brand{padding:24px 20px 20px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)}
+.sb-brand-icon{font-size:18px}
+.sb-brand-text{font-size:13px;font-weight:700;letter-spacing:.08em;color:var(--t)}
+.sb-brand-ver{font-size:10px;color:var(--td);margin-top:2px}
+.sb-nav{padding:16px 12px;flex:1;display:flex;flex-direction:column;gap:2px}
+.sb-nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;font-size:12px;font-weight:500;color:var(--td);cursor:pointer;transition:all .18s;text-decoration:none;border:none;background:none;width:100%;text-align:left}
+.sb-nav-item:hover{color:var(--t);background:rgba(255,255,255,0.05)}
+.sb-nav-item.active{background:var(--teal);color:#171821;font-weight:600}
+.sb-nav-item.active .sb-nav-icon{color:#171821}
+.sb-nav-icon{width:14px;height:14px;flex-shrink:0;font-size:13px;display:flex;align-items:center;justify-content:center}
+.sb-divider{height:1px;background:var(--border);margin:8px 12px}
+.sb-section-lbl{padding:8px 12px 4px;font-size:10px;font-weight:600;color:var(--td);letter-spacing:.1em;text-transform:uppercase}
+.sb-footer{padding:16px 20px;border-top:1px solid var(--border);font-size:11px;color:var(--td)}
+
+/* ── Main ── */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg)}
+.topbar-left{display:flex;flex-direction:column}
+.topbar-title{font-size:15px;font-weight:700;color:var(--t)}
+.topbar-sub{font-size:11px;color:var(--td);margin-top:2px}
+.topbar-right{display:flex;align-items:center;gap:16px}
+.sync-badge{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--td);background:var(--panel);padding:6px 12px;border-radius:20px;border:1px solid var(--border)}
+.sync-dot{width:7px;height:7px;border-radius:50%;background:var(--amber);flex-shrink:0;transition:background .3s}
+.sync-dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
+.sync-dot.err{background:var(--red)}
+.btn-back{font-size:12px;font-weight:500;color:var(--teal);background:rgba(169,223,216,.1);padding:6px 14px;border-radius:20px;border:1px solid rgba(169,223,216,.2);cursor:pointer;transition:all .18s}
+.btn-back:hover{background:rgba(169,223,216,.18)}
+
+/* ── Scroll area ── */
+.scroll{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:18px}
+.scroll::-webkit-scrollbar{width:6px}
+.scroll::-webkit-scrollbar-track{background:transparent}
+.scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
+
+/* ── Section label ── */
+.section-hd{font-size:13px;font-weight:600;color:var(--tm);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.section-hd::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* ── KPI Cards ── */
+.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.kpi-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 16px;position:relative;overflow:hidden;transition:transform .2s}
+.kpi-card:hover{transform:translateY(-2px)}
+.kpi-card::after{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:12px 12px 0 0}
+.kpi-card.c-teal::after{background:var(--teal)}
+.kpi-card.c-amber::after{background:var(--amber)}
+.kpi-card.c-green::after{background:var(--green)}
+.kpi-card.c-red::after{background:var(--red)}
+.kpi-card.c-purple::after{background:#a855f7}
+.kpi-val{font-size:26px;font-weight:700;line-height:1;margin-bottom:6px;color:var(--t)}
+.kpi-lbl{font-size:10px;font-weight:600;color:var(--td);letter-spacing:.12em;text-transform:uppercase;margin-bottom:4px}
+.kpi-trend{font-size:10px;color:var(--tm)}
+.skel{background:linear-gradient(90deg,var(--panel) 25%,var(--panel2) 50%,var(--panel) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:4px;height:26px;width:70%;opacity:.6}
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
-footer{text-align:center;padding:24px 0;color:var(--tm);font-size:12px;margin-top:8px;border-top:1px solid var(--b)}
+
+/* ── Cards ── */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.card-hd{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)}
+.card-title{font-size:13px;font-weight:600;color:var(--t)}
+.card-badge{font-size:11px;font-weight:600;color:var(--teal);background:rgba(169,223,216,.1);padding:3px 10px;border-radius:20px;border:1px solid rgba(169,223,216,.2)}
+.card-body{padding:18px;flex:1}
+
+/* ── Progress bars ── */
+.bar-row{margin-bottom:14px}
+.bar-row:last-child{margin-bottom:0}
+.bar-hd{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px;color:var(--tm)}
+.bar-hd .bar-lbl{font-weight:500;color:var(--td)}
+.bar-bg{height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden}
+.bar-fill{height:100%;border-radius:3px;width:0%;transition:width 1s cubic-bezier(.4,0,.2,1)}
+
+/* ── Donut charts ── */
+.donut-row{display:flex;gap:20px;margin-bottom:16px;align-items:center}
+.donut-wrap{position:relative;display:flex;align-items:center;justify-content:center}
+.donut-wrap svg{display:block}
+.donut-center{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;top:0;left:0;right:0;bottom:0}
+.donut-pct{font-size:15px;font-weight:700;color:var(--t)}
+.donut-sub{font-size:9px;color:var(--td);margin-top:1px}
+.donut-info{flex:1}
+.donut-title{font-size:13px;font-weight:600;color:var(--t);margin-bottom:3px}
+.donut-detail{font-size:11px;color:var(--tm)}
+
+/* ── Data rows ── */
+.row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px}
+.row:last-child{border-bottom:none}
+.lbl{color:var(--td);font-size:12px}
+.val{color:var(--t);font-weight:600;font-size:12px;text-align:right}
+.val.ok{color:var(--green)}.val.warn{color:var(--amber)}.val.err{color:var(--red)}.val.dim{color:var(--tm)}
+
+/* ── Source pills ── */
+.sources{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px}
+.src-pill{display:flex;align-items:center;gap:5px;padding:4px 11px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid}
+.src-pill.up{color:var(--green);border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.08)}
+.src-pill.down{color:var(--red);border-color:rgba(239,68,68,.3);opacity:.65}
+.src-pill.cb{color:var(--amber);border-color:rgba(252,184,89,.3);background:rgba(252,184,89,.08)}
+.src-dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
+
+/* ── OpenSky accounts ── */
+.acct-table{display:flex;flex-direction:column;gap:0}
+.acct-hd-row{display:grid;grid-template-columns:160px 90px 1fr 80px;gap:12px;padding:0 0 8px;border-bottom:1px solid var(--border);font-size:10px;font-weight:600;color:var(--td);text-transform:uppercase;letter-spacing:.08em}
+.acct-row{display:grid;grid-template-columns:160px 90px 1fr 80px;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);align-items:center;font-size:12px}
+.acct-row:last-child{border-bottom:none}
+.acct-row.is-active .acct-name{color:var(--teal);font-weight:600}
+.acct-name{font-weight:500;color:var(--t);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acct-status{display:flex;align-items:center;gap:6px}
+.acct-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.acct-bar-wrap{height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden}
+.acct-bar-fill{height:100%;border-radius:3px;transition:width 1s cubic-bezier(.4,0,.2,1)}
+.acct-credits{font-weight:600;text-align:right;color:var(--t)}
+
+/* ── Hardware info strip ── */
+.hw-strip{background:var(--panel2);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px}
+.hw-model{font-weight:600;color:var(--t);margin-bottom:3px}
+.hw-detail{color:var(--td);font-size:11px}
+
+/* ── Footer ── */
+.page-footer{padding:14px 24px;border-top:1px solid var(--border);font-size:11px;color:var(--td);flex-shrink:0;display:flex;align-items:center;justify-content:space-between;background:var(--bg)}
+
+/* ── Responsive ── */
+@media(max-width:1100px){.kpi-grid{grid-template-columns:repeat(3,1fr)}.sidebar{width:180px;min-width:180px}}
+@media(max-width:800px){.sidebar{display:none}.grid-2,.grid-3{grid-template-columns:1fr}.kpi-grid{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
-<div id="wrap">
-  <div class="hd">
-    <div>
-      <div class="hd-brand">&#x2708; AEROSTRAT LIVE MONITOR <span style="font-size:12px;opacity:0.5;margin-left:8px;font-family:var(--font-mono)">${AEROSTRAT_VERSION}</span></div>
+<div class="layout">
 
-      <div class="hd-sub" id="last-updated">&#x8F09;&#x5165;&#x4E2D;&#x2026;</div>
-    </div>
-    <div class="hd-sync">
-      <div class="sync-dot" id="sync-dot"></div>
-      <span id="sync-label">&#x9023;&#x63A5;&#x4E2D;&#x2026;</span>
-      &nbsp;&middot;&nbsp; <a href="javascript:void(0)" onclick="goBackToRadar()">&#x2190; BACK TO RADAR</a>
-    </div>
-  </div>
-
-  <div class="stat-bar" id="stat-bar">
-
-    <div class="stat-card cyan"><div class="stat-val skel"> </div><div class="stat-lbl">AIRCRAFT</div></div>
-    <div class="stat-card green"><div class="stat-val skel"> </div><div class="stat-lbl">SYNC CYCLES</div></div>
-    <div class="stat-card amber"><div class="stat-val skel"> </div><div class="stat-lbl">TRACK DOTS</div></div>
-    <div class="stat-card purple"><div class="stat-val skel"> </div><div class="stat-lbl">UPTIME</div></div>
-    <div class="stat-card red"><div class="stat-val skel"> </div><div class="stat-lbl">DB SIZE</div></div>
-  </div>
-
-  <div class="grid">
-    <div class="card">
-      <div class="card-hd">
-        <span class="card-title">&#x26A1; HARDWARE PERFORMANCE</span>
-        <span class="card-badge" id="perf-badge">LIVE</span>
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+    <div class="sb-brand">
+      <span class="sb-brand-icon">✈</span>
+      <div>
+        <div class="sb-brand-text">AEROSTRAT</div>
+        <div class="sb-brand-ver">${AEROSTRAT_VERSION}</div>
       </div>
-      <div class="card-body">
-        <div id="perf-hardware-info" style="margin-bottom:15px;font-size:13px;color:var(--t)"></div>
-        <div class="perf-row">
-            <div class="perf-lbl"><span>SYSTEM LOAD (1m)</span><span id="load-val">...</span></div>
-            <div class="perf-bar-bg"><div id="load-bar" class="perf-bar-fill" style="background:var(--amber);box-shadow:0 0 8px var(--amber)"></div></div>
+    </div>
+    <nav class="sb-nav">
+      <div class="sb-section-lbl">Overview</div>
+      <a class="sb-nav-item active" href="#kpi" onclick="setActive(this)">
+        <span class="sb-nav-icon">▣</span> Dashboard
+      </a>
+      <div class="sb-divider"></div>
+      <div class="sb-section-lbl">System</div>
+      <a class="sb-nav-item" href="#hardware" onclick="setActive(this)">
+        <span class="sb-nav-icon">⚡</span> Hardware
+      </a>
+      <a class="sb-nav-item" href="#storage" onclick="setActive(this)">
+        <span class="sb-nav-icon">◫</span> Storage
+      </a>
+      <div class="sb-divider"></div>
+      <div class="sb-section-lbl">Operations</div>
+      <a class="sb-nav-item" href="#opensky" onclick="setActive(this)">
+        <span class="sb-nav-icon">🔑</span> OpenSky Pool
+      </a>
+      <a class="sb-nav-item" href="#sync" onclick="setActive(this)">
+        <span class="sb-nav-icon">⟳</span> Sync Engine
+      </a>
+      <a class="sb-nav-item" href="#sessions" onclick="setActive(this)">
+        <span class="sb-nav-icon">◉</span> Sessions
+      </a>
+      <a class="sb-nav-item" href="#api" onclick="setActive(this)">
+        <span class="sb-nav-icon">◈</span> API Analytics
+      </a>
+    </nav>
+    <div class="sb-footer">AEROSTRAT Hybrid Dynamics</div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <div class="main">
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="topbar-title">System Monitor</div>
+        <div class="topbar-sub" id="last-updated">Loading...</div>
+      </div>
+      <div class="topbar-right">
+        <div class="sync-badge">
+          <span class="sync-dot" id="sync-dot"></span>
+          <span id="sync-label">Connecting...</span>
         </div>
-        <div class="perf-row">
-            <div class="perf-lbl"><span>SYSTEM CPU USAGE</span><span id="cpu-usage-val">...</span></div>
-            <div class="perf-bar-bg"><div id="cpu-usage-bar" class="perf-bar-fill" style="background:var(--cyan);box-shadow:0 0 8px var(--cyan)"></div></div>
+        <a class="btn-back" href="javascript:void(0)" onclick="goBackToRadar()">← Back to Radar</a>
+      </div>
+    </div>
+
+    <!-- Scroll area -->
+    <div class="scroll">
+
+      <!-- KPI Cards -->
+      <div id="kpi">
+        <div class="section-hd">Overview</div>
+        <div class="kpi-grid" id="stat-bar">
+          <div class="kpi-card c-teal"><div class="kpi-lbl">AIRCRAFT</div><div class="skel"></div><div class="kpi-trend">In-memory cache</div></div>
+          <div class="kpi-card c-green"><div class="kpi-lbl">SYNC CYCLES</div><div class="skel"></div><div class="kpi-trend">&mdash;</div></div>
+          <div class="kpi-card c-amber"><div class="kpi-lbl">TRACK DOTS</div><div class="skel"></div><div class="kpi-trend">24h persistence</div></div>
+          <div class="kpi-card c-purple"><div class="kpi-lbl">UPTIME</div><div class="skel"></div><div class="kpi-trend">System age</div></div>
+          <div class="kpi-card c-red"><div class="kpi-lbl">DB SIZE</div><div class="skel"></div><div class="kpi-trend">SQLite storage</div></div>
         </div>
-        <div class="perf-row">
-            <div class="perf-lbl"><span>PROCESS RAM (RSS)</span><span id="ram-val">...</span></div>
-            <div class="perf-bar-bg"><div id="ram-bar" class="perf-bar-fill"></div></div>
+      </div>
+
+      <!-- Hardware + Storage -->
+      <div class="grid-2">
+        <div id="hardware" class="card">
+          <div class="card-hd">
+            <span class="card-title">Hardware Performance</span>
+            <span class="card-badge">LIVE</span>
+          </div>
+          <div class="card-body">
+            <div id="hw-strip" class="hw-strip">
+              <div class="hw-model">Loading CPU info...</div>
+            </div>
+            <div class="donut-row">
+              <div class="donut-wrap" style="width:80px;height:80px">
+                <svg width="80" height="80" viewBox="0 0 80 80">
+                  <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="8"/>
+                  <circle id="cpu-donut" cx="40" cy="40" r="32" fill="none" stroke="#a9dfd8" stroke-width="8"
+                    stroke-linecap="round"
+                    style="stroke-dasharray:201.1;stroke-dashoffset:201.1;transform:rotate(-90deg);transform-origin:40px 40px;transition:stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)"/>
+                </svg>
+                <div class="donut-center"><span class="donut-pct" id="cpu-pct">--%</span><span class="donut-sub">CPU</span></div>
+              </div>
+              <div class="donut-info">
+                <div class="donut-title">System CPU Usage</div>
+                <div class="donut-detail" id="cpu-detail">System load: —</div>
+              </div>
+            </div>
+            <div class="donut-row">
+              <div class="donut-wrap" style="width:80px;height:80px">
+                <svg width="80" height="80" viewBox="0 0 80 80">
+                  <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="8"/>
+                  <circle id="ram-donut" cx="40" cy="40" r="32" fill="none" stroke="#fcb859" stroke-width="8"
+                    stroke-linecap="round"
+                    style="stroke-dasharray:201.1;stroke-dashoffset:201.1;transform:rotate(-90deg);transform-origin:40px 40px;transition:stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)"/>
+                </svg>
+                <div class="donut-center"><span class="donut-pct" id="ram-pct">--%</span><span class="donut-sub">RAM</span></div>
+              </div>
+              <div class="donut-info">
+                <div class="donut-title">Process Memory (RSS)</div>
+                <div class="donut-detail" id="ram-detail">Heap used: —</div>
+              </div>
+            </div>
+            <div id="perf-details"></div>
+          </div>
         </div>
-        <div id="perf-details"></div>
-      </div>
 
-    </div>
-    <div class="card">
-      <div class="card-hd">
-        <span class="card-title">&#x1F4E6; DISK &amp; STORAGE RESOURCE</span>
-        <span class="card-badge" id="storage-badge">v10.5 HYBRID</span>
-      </div>
-      <div class="card-body">
-        <div class="perf-row" style="margin-bottom:20px">
-            <div class="perf-lbl"><span>DISK USAGE (/)</span><span id="disk-val">...</span></div>
-            <div class="perf-bar-bg"><div id="disk-bar" class="perf-bar-fill" style="background:var(--purple);box-shadow:0 0 8px var(--purple)"></div></div>
+        <div id="storage" class="card">
+          <div class="card-hd">
+            <span class="card-title">Disk &amp; Storage</span>
+            <span class="card-badge">v10.5 HYBRID</span>
+          </div>
+          <div class="card-body">
+            <div class="bar-row" style="margin-bottom:20px">
+              <div class="bar-hd"><span class="bar-lbl">Disk Usage (/)</span><span id="disk-val">...</span></div>
+              <div class="bar-bg"><div id="disk-bar" class="bar-fill" style="background:#a855f7"></div></div>
+            </div>
+            <div id="storage-body"></div>
+          </div>
         </div>
-        <div id="storage-body"></div>
       </div>
-    </div>
 
-  </div>
+      <!-- OpenSky Accounts -->
+      <div id="opensky" class="card">
+        <div class="card-hd">
+          <span class="card-title">OpenSky Account Pool</span>
+          <span class="card-badge" id="acct-badge">— Accounts</span>
+        </div>
+        <div class="card-body">
+          <div class="acct-table">
+            <div class="acct-hd-row">
+              <span>Account</span><span>Status</span><span>Quota</span><span>Credits</span>
+            </div>
+            <div id="accounts-body"></div>
+          </div>
+        </div>
+      </div>
 
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-hd">
-      <span class="card-title">&#x1F511; OpenSky Account Rotation Pool</span>
-      <span class="card-badge" id="acct-badge">&#x2014;</span>
-    </div>
-    <div class="card-body">
-      <div id="accounts-body" class="accts-grid">
-        <div class="skel" style="height:190px;border-radius:10px"></div>
+      <!-- Sync + Sessions + API -->
+      <div class="grid-3">
+        <div id="sync" class="card">
+          <div class="card-hd">
+            <span class="card-title">Sync Engine</span>
+            <span class="card-badge" id="sync-badge">—</span>
+          </div>
+          <div class="card-body">
+            <div id="sources-bar" class="sources"></div>
+            <div id="sync-body"></div>
+          </div>
+        </div>
+        <div id="sessions" class="card">
+          <div class="card-hd">
+            <span class="card-title">Active Sessions</span>
+            <span class="card-badge" id="session-badge">—</span>
+          </div>
+          <div class="card-body" id="session-body"></div>
+        </div>
+        <div id="api" class="card">
+          <div class="card-hd">
+            <span class="card-title">API Analytics</span>
+            <span class="card-badge" id="api-badge">—</span>
+          </div>
+          <div class="card-body" id="api-body"></div>
+        </div>
       </div>
-    </div>
-  </div>
 
-  <div class="grid-3">
-    <div class="card">
-      <div class="card-hd">
-        <span class="card-title">&#x27F3; SYNC ENGINE</span>
-        <span class="card-badge" id="sync-badge">&#x2014;</span>
-      </div>
-      <div class="card-body">
-        <div id="sources-bar" class="sources"></div>
-        <div id="sync-body"></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-hd">
-        <span class="card-title">&#x25C9; ACTIVE SESSIONS</span>
-        <span class="card-badge" id="session-badge">&#x2014;</span>
-      </div>
-      <div class="card-body" id="session-body"></div>
-    </div>
-    <div class="card">
-      <div class="card-hd">
-        <span class="card-title">&#x1F4CA; API ANALYTICS</span>
-        <span class="card-badge" id="api-badge">&#x2014;</span>
-      </div>
-      <div class="card-body" id="api-body"></div>
-    </div>
-  </div>
+    </div><!-- /scroll -->
 
-  <footer>AEROSTRAT Hybrid Dynamics &nbsp;&middot;&nbsp; 2026-04-03 &nbsp;&middot;&nbsp; <a href="?token=dev">REFRESH</a></footer>
-</div>
+    <div class="page-footer">
+      <span>AEROSTRAT Hybrid Dynamics &nbsp;·&nbsp; 2026</span>
+      <a href="?token=dev">Refresh</a>
+    </div>
+  </div><!-- /main -->
+
+</div><!-- /layout -->
 
 <script>
-let lastBatches = 0;
+const DONUT_CIRC = 201.1; // 2 * π * 32
+
+function setDonut(id, pct) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.strokeDashoffset = DONUT_CIRC * (1 - Math.min(100, pct) / 100);
+}
+
+function setActive(el) {
+  document.querySelectorAll('.sb-nav-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+}
+
 function row(lbl, val, cls) {
   return '<div class="row"><span class="lbl">' + lbl + '</span><span class="val ' + (cls||'') + '">' + val + '</span></div>';
 }
 function statCard(val, lbl, cls, trend) {
-  return '<div class="stat-card ' + cls + '"><div class="stat-val">' + val + '</div><div class="stat-lbl">' + lbl + '</div>' + (trend ? '<div class="stat-trend">' + trend + '</div>' : '') + '</div>';
+  return '<div class="kpi-card ' + cls + '"><div class="kpi-lbl">' + lbl + '</div><div class="kpi-val">' + val + '</div><div class="kpi-trend">' + (trend||'') + '</div></div>';
 }
 function srcPill(name, status) {
   return '<div class="src-pill ' + status + '"><span class="src-dot"></span>' + name + '</div>';
 }
 function formatBytes(b) {
+  if (!b) return '0 B';
   if (b < 1024) return b + ' B';
-  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
-  if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
-  return (b / 1073741824).toFixed(1) + ' GB';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
+  return (b/1073741824).toFixed(2) + ' GB';
 }
 
 async function refresh() {
@@ -980,121 +1160,146 @@ async function refresh() {
       fetch('/api/health').then(r => r.json()),
       fetch('/api/stats').then(r => r.json()),
     ]);
-    
-    document.getElementById('sync-dot').style.background = '#10b981';
-    document.getElementById('sync-label').textContent = 'REAL-TIME CONNECTED';
-    document.getElementById('last-updated').textContent = 'LAST UPDATED: ' + new Date().toLocaleTimeString();
 
-    const ing = health.ingestion || {};
+    const dot = document.getElementById('sync-dot');
+    dot.className = 'sync-dot ok';
+    document.getElementById('sync-label').textContent = 'Real-time connected';
+    document.getElementById('last-updated').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+
+    const ing  = health.ingestion  || {};
     const perf = health.performance || {};
-    const stor = health.storage || {};
-    
-    // Uptime conversion
+    const stor = health.storage     || {};
+    const sys  = perf.system        || {};
+
+    // ── KPI Cards ──
     const upSec = health.uptime || 0;
-    const upStr = upSec >= 3600 ? Math.floor(upSec/3600) + 'h ' + Math.floor((upSec%3600)/60) + 'm' : Math.floor(upSec/60) + ' min';
+    const upStr = upSec >= 3600
+      ? Math.floor(upSec/3600) + 'h ' + Math.floor((upSec%3600)/60) + 'm'
+      : Math.floor(upSec/60) + ' min';
 
-    // Top Stats Bar
     document.getElementById('stat-bar').innerHTML =
-      statCard((health.cacheSize||0).toLocaleString(), 'AIRCRAFT', 'cyan', 'IN-MEMORY CACHE') +
-      statCard('#' + (ing.totalBatches||0), 'SYNC CYCLES', 'green', (ing.lastBatchMs||0) + 'ms LATENCY') +
-      statCard((ing.totalPoints||0).toLocaleString(), 'TRACK DOTS', 'amber', '24H PERSISTENCE') +
-      statCard(upStr, 'UPTIME', 'purple', 'SYSTEM AGE') +
-      statCard(formatBytes(stor.dbSize||0), 'DB SIZE', 'red', 'SQLITE STORAGE');
+      statCard((health.cacheSize||0).toLocaleString(), 'AIRCRAFT', 'c-teal', 'In-memory cache') +
+      statCard('#' + (ing.totalBatches||0), 'SYNC CYCLES', 'c-green', (ing.lastBatchMs||0) + 'ms last latency') +
+      statCard((ing.totalPoints||0).toLocaleString(), 'TRACK DOTS', 'c-amber', '24h persistence') +
+      statCard(upStr, 'UPTIME', 'c-purple', 'System age') +
+      statCard(formatBytes(stor.dbSize||0), 'DB SIZE', 'c-red', 'SQLite storage');
 
-    // Hardware Resources Card
-    const sys = perf.system || {};
-    const loadAvg = sys.load?.[0] || 0;
-    const cpuPct = Math.min(100, Math.round(loadAvg * 20)); // Normalized to 5.0 load scale
-    document.getElementById('load-val').textContent = loadAvg.toFixed(2);
-    document.getElementById('load-bar').style.width = cpuPct + '%';
-    
-    // Real-time CPU Usage
-    const sysCpu = sys.cpuUsage || 0;
-    document.getElementById('cpu-usage-val').textContent = sysCpu.toFixed(1) + '%';
-    document.getElementById('cpu-usage-bar').style.width = sysCpu + '%';
+    // ── Hardware ──
+    const cpuPct = Math.min(100, Math.round(sys.cpuUsage || 0));
+    const rss    = perf.process?.memory?.rss || 0;
+    const ramPct = Math.min(100, Math.round((rss / (sys.totalMem || 8589934592)) * 100));
 
-    const rss = perf.process?.memory?.rss || 0;
-    const ramPct = Math.min(100, Math.round((rss / 1073741824) * 100)); // Normalized to 1GB limit
-    document.getElementById('ram-val').textContent = formatBytes(rss);
-    document.getElementById('ram-bar').style.width = ramPct + '%';
-    
-    document.getElementById('perf-hardware-info').innerHTML = 
-        '<div style="font-weight:700;margin-bottom:4px;color:var(--cyan)">' + (sys.cpuModel || 'Generic CPU') + '</div>' +
-        '<div style="color:var(--td);font-size:11px">' + (sys.cpuCores || 0) + ' Logical Cores &middot; ' + (sys.arch || 'unknown') + ' &middot; ' + (sys.platform || 'linux') + '</div>';
+    setDonut('cpu-donut', cpuPct);
+    setDonut('ram-donut', ramPct);
+    document.getElementById('cpu-pct').textContent = cpuPct + '%';
+    document.getElementById('ram-pct').textContent = ramPct + '%';
+    document.getElementById('cpu-detail').textContent = 'System load (1m): ' + (sys.load?.[0] || 0).toFixed(2);
+    document.getElementById('ram-detail').textContent = 'Heap used: ' + formatBytes(perf.process?.memory?.heapUsed || 0);
 
-    document.getElementById('perf-details').innerHTML = 
-        row('Heap Used', formatBytes(perf.process?.memory?.heapUsed || 0), '') +
-        row('System Free RAM', formatBytes(sys.freeMem || 0), 'dim') +
-        row('System Total RAM', formatBytes(sys.totalMem || 0), 'dim');
+    document.getElementById('hw-strip').innerHTML =
+      '<div class="hw-model">' + (sys.cpuModel || 'Generic CPU') + '</div>' +
+      '<div class="hw-detail">' + (sys.cpuCores||0) + ' cores &nbsp;·&nbsp; ' + (sys.arch||'') + ' &nbsp;·&nbsp; ' + (sys.platform||'linux') + '</div>';
 
-    // Storage Status Card
-    const disk = sys.disk || {};
-    const diskPct = Math.round((disk.used / (disk.total || 1)) * 100);
+    document.getElementById('perf-details').innerHTML =
+      row('Free RAM', formatBytes(sys.freeMem||0), 'ok') +
+      row('Total RAM', formatBytes(sys.totalMem||0), 'dim') +
+      row('RSS Memory', formatBytes(rss), '');
+
+    // ── Disk ──
+    const disk   = sys.disk || {};
+    const diskPct = Math.round(((disk.used||0) / (disk.total||1)) * 100);
     document.getElementById('disk-val').textContent = formatBytes(disk.used) + ' / ' + formatBytes(disk.total);
     document.getElementById('disk-bar').style.width = diskPct + '%';
+    document.getElementById('storage-body').innerHTML =
+      row('Database', stor.dbPath || 'N/A', 'dim') +
+      row('Mode', 'SQLite WAL', 'ok') +
+      row('Sessions created', (ing.sessionsCreated||0).toLocaleString(), '') +
+      row('Disk free', formatBytes(disk.free||0), 'ok');
 
-    document.getElementById('storage-body').innerHTML = 
-        row('Database Path', stor.dbPath || 'N/A', 'dim') +
-        row('Persistence Mode', 'SQLite (WAL)', 'ok') +
-        row('Total FlightSessions', (ing.sessionsCreated||0).toLocaleString(), '') +
-        row('Disk Free Space', formatBytes(disk.free || 0), 'ok');
-
-
-    // Sync Engine Card
-    document.getElementById('sources-bar').innerHTML =
-      srcPill('adsb.lol', 'up') + srcPill('OpenSky', stats.activeAccount?'up':'cb') + srcPill('adsb.fi', 'up');
-    document.getElementById('sync-body').innerHTML = 
-        row('Last Batch Size', (ing.lastBatchSize || 0) + ' planes', 'ok') +
-        row('Sync Latency', (ing.lastBatchMs || 0) + ' ms', (ing.lastBatchMs < 3000 ? 'ok' : 'warn'));
-
-    // Session Card
-    document.getElementById('session-body').innerHTML = 
-        row('Active Sessions', (health.activeSessions||0).toLocaleString(), 'ok') +
-        row('Sessions Created', (ing.sessionsCreated||0).toLocaleString(), '') +
-        row('Sessions Closed', (ing.sessionsClosed||0).toLocaleString(), 'dim');
-        
-    // API Analytics
-    document.getElementById('api-badge').textContent = (stats.totalCalls||0).toLocaleString() + ' CALLS';
-    document.getElementById('api-body').innerHTML = 
-        row('Total API Hits', (stats.totalCalls || 0).toLocaleString(), '') +
-        row('Cache Hit Rate', Math.round((stats.cacheHits/(stats.totalCalls||1))*100) + '%', 'ok') +
-        row('Error Count', (stats.errors || 0), (stats.errors > 0 ? 'err' : ''));
-
-    // Accounts Pool (Simplified for brevity)
+    // ── OpenSky accounts ──
     const accts = stats.accounts || [];
-    document.getElementById('acct-badge').textContent = accts.length + ' ACCOUNTS';
-    document.getElementById('accounts-body').innerHTML = accts.map(a => 
-        '<div class="acct-card' + (a.user === health.activeAccount ? ' is-active' : '') + '">' +
-        '<div class="acct-name">' + a.user + '</div>' +
-        '<div class="lbl">REMAINING QUOTA</div>' +
-        '<div class="stat-val" style="font-size:20px">' + (a.remainingCredits || 0).toLocaleString() + '</div>' +
-        '</div>'
-    ).join('');
+    document.getElementById('acct-badge').textContent = accts.length + ' Accounts';
+    document.getElementById('accounts-body').innerHTML = accts.map(a => {
+      const pct   = Math.max(0, Math.min(100, Math.round((a.remainingCredits||0) / 4000 * 100)));
+      const locked = a.unlockTime && new Date(a.unlockTime) > new Date();
+      const isActive = a.user === health.activeAccount;
+      const barColor = locked ? '#ef4444' : pct > 50 ? '#a9dfd8' : pct > 20 ? '#fcb859' : '#ef4444';
+      const dotColor = locked ? '#ef4444' : '#34d399';
+      const statusTxt = locked ? 'Locked' : isActive ? 'Active' : 'Standby';
+      const shortName = (a.user||'').replace(/-api-client$/,'');
+      return '<div class="acct-row' + (isActive?' is-active':'') + '">' +
+        '<span class="acct-name">' + shortName + '</span>' +
+        '<span class="acct-status"><span class="acct-dot" style="background:' + dotColor + '"></span><span style="color:' + dotColor + '">' + statusTxt + '</span></span>' +
+        '<div class="acct-bar-wrap"><div class="acct-bar-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>' +
+        '<span class="acct-credits" style="color:' + barColor + '">' + (locked ? 'LOCKED' : (a.remainingCredits||0).toLocaleString()) + '</span>' +
+        '</div>';
+    }).join('');
+
+    // ── Sync ──
+    document.getElementById('sources-bar').innerHTML =
+      srcPill('adsb.lol', 'up') +
+      srcPill('OpenSky', stats.activeAccount ? 'up' : 'cb') +
+      srcPill('adsb.fi', 'up');
+    document.getElementById('sync-badge').textContent = 'Cycle #' + (ing.totalBatches||0);
+    document.getElementById('sync-body').innerHTML =
+      row('Last batch', (ing.lastBatchSize||0) + ' planes', 'ok') +
+      row('Latency', (ing.lastBatchMs||0) + ' ms', (ing.lastBatchMs||0) < 3000 ? 'ok' : 'warn') +
+      row('Active account', stats.activeAccount || '—', '');
+
+    // ── Sessions ──
+    document.getElementById('session-badge').textContent = (health.activeSessions||0) + ' active';
+    document.getElementById('session-body').innerHTML =
+      row('Active', (health.activeSessions||0).toLocaleString(), 'ok') +
+      row('Created', (ing.sessionsCreated||0).toLocaleString(), '') +
+      row('Closed', (ing.sessionsClosed||0).toLocaleString(), 'dim');
+
+    // ── API ──
+    document.getElementById('api-badge').textContent = (stats.totalCalls||0).toLocaleString() + ' calls';
+    document.getElementById('api-body').innerHTML =
+      row('Total calls', (stats.totalCalls||0).toLocaleString(), '') +
+      row('Cache hit rate', Math.round(((stats.cacheHits||0) / (stats.totalCalls||1)) * 100) + '%', 'ok') +
+      row('Errors', (stats.errors||0), stats.errors > 0 ? 'err' : 'ok') +
+      row('Uptime', Math.round((Date.now() - (stats.startTime||Date.now())) / 60000) + ' min', 'dim');
 
   } catch(e) {
-    document.getElementById('sync-dot').style.background = '#ef4444';
-    document.getElementById('sync-label').textContent = 'CONNECTION LOST';
+    const dot = document.getElementById('sync-dot');
+    dot.className = 'sync-dot err';
+    document.getElementById('sync-label').textContent = 'Connection lost';
     console.error(e);
   }
 }
 
-  function goBackToRadar() {
-    // Current monitor is on 3001, we want back to 3005
-    const radarUrl = window.location.protocol + '//' + window.location.hostname + ':3005';
-    if (window.opener && !window.opener.closed) {
-      try {
-        window.opener.focus();
-        window.close();
-      } catch(e) {
-        window.location.href = radarUrl;
-      }
-    } else {
-      window.location.href = radarUrl;
-    }
+function goBackToRadar() {
+  const radarUrl = window.location.protocol + '//' + window.location.hostname + ':3005';
+  if (window.opener && !window.opener.closed) {
+    try { window.opener.focus(); window.close(); }
+    catch(e) { window.location.href = radarUrl; }
+  } else {
+    window.location.href = radarUrl;
   }
+}
 
-  refresh();
+// Sidebar scroll-spy
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      const id = e.target.id;
+      document.querySelectorAll('.sb-nav-item').forEach(item => {
+        const href = item.getAttribute('href');
+        item.classList.toggle('active', href === '#' + id);
+      });
+    }
+  });
+}, { root: document.querySelector('.scroll'), threshold: 0.4 });
 
+document.addEventListener('DOMContentLoaded', () => {
+  ['kpi','hardware','storage','opensky','sync','sessions','api'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) observer.observe(el);
+  });
+});
+
+refresh();
 setInterval(refresh, 5000);
 </script>
 </body>
