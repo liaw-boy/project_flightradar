@@ -812,7 +812,7 @@ a:hover{opacity:.75}
 /* ── Sidebar ── */
 .sidebar{width:220px;min-width:220px;background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:0;overflow-y:auto;flex-shrink:0}
 .sb-brand{padding:24px 20px 20px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)}
-.sb-brand-icon{font-size:18px}
+.sb-brand-icon{width:18px;height:18px;flex-shrink:0}
 .sb-brand-text{font-size:13px;font-weight:700;letter-spacing:.08em;color:var(--t)}
 .sb-brand-ver{font-size:10px;color:var(--td);margin-top:2px}
 .sb-nav{padding:16px 12px;flex:1;display:flex;flex-direction:column;gap:2px}
@@ -820,7 +820,8 @@ a:hover{opacity:.75}
 .sb-nav-item:hover{color:var(--t);background:rgba(255,255,255,0.05)}
 .sb-nav-item.active{background:var(--teal);color:#171821;font-weight:600}
 .sb-nav-item.active .sb-nav-icon{color:#171821}
-.sb-nav-icon{width:14px;height:14px;flex-shrink:0;font-size:13px;display:flex;align-items:center;justify-content:center}
+.sb-nav-icon{width:14px;height:14px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.sb-nav-icon svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .sb-divider{height:1px;background:var(--border);margin:8px 12px}
 .sb-section-lbl{padding:8px 12px 4px;font-size:10px;font-weight:600;color:var(--td);letter-spacing:.1em;text-transform:uppercase}
 .sb-footer{padding:16px 20px;border-top:1px solid var(--border);font-size:11px;color:var(--td)}
@@ -940,7 +941,7 @@ a:hover{opacity:.75}
   <!-- ── Sidebar ── -->
   <aside class="sidebar">
     <div class="sb-brand">
-      <span class="sb-brand-icon">✈</span>
+      <svg class="sb-brand-icon" viewBox="0 0 24 24" fill="none" stroke="#a9dfd8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>
       <div>
         <div class="sb-brand-text">AEROSTRAT</div>
         <div class="sb-brand-ver">${AEROSTRAT_VERSION}</div>
@@ -949,29 +950,29 @@ a:hover{opacity:.75}
     <nav class="sb-nav">
       <div class="sb-section-lbl">Overview</div>
       <a class="sb-nav-item active" href="#kpi" onclick="setActive(this)">
-        <span class="sb-nav-icon">▣</span> Dashboard
+        <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span> Dashboard
       </a>
       <div class="sb-divider"></div>
       <div class="sb-section-lbl">System</div>
       <a class="sb-nav-item" href="#hardware" onclick="setActive(this)">
-        <span class="sb-nav-icon">⚡</span> Hardware
+        <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg></span> Hardware
       </a>
       <a class="sb-nav-item" href="#storage" onclick="setActive(this)">
-        <span class="sb-nav-icon">◫</span> Storage
+        <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg></span> Storage
       </a>
       <div class="sb-divider"></div>
       <div class="sb-section-lbl">Operations</div>
       <a class="sb-nav-item" href="#opensky" onclick="setActive(this)">
-        <span class="sb-nav-icon">🔑</span> OpenSky Pool
+        <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6"/><path d="M15.5 7.5l3 3L21 8l-3-3"/></svg></span> OpenSky Pool
       </a>
       <a class="sb-nav-item" href="#sync" onclick="setActive(this)">
-        <span class="sb-nav-icon">⟳</span> Sync Engine
+        <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg></span> Sync Engine
       </a>
       <a class="sb-nav-item" href="#sessions" onclick="setActive(this)">
-        <span class="sb-nav-icon">◉</span> Sessions
+        <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg></span> Sessions
       </a>
       <a class="sb-nav-item" href="#api" onclick="setActive(this)">
-        <span class="sb-nav-icon">◈</span> API Analytics
+        <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span> API Analytics
       </a>
     </nav>
     <div class="sb-footer">AEROSTRAT Hybrid Dynamics</div>

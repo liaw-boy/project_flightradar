@@ -490,7 +490,7 @@ export const ICON_SCALE_VERSION = 4;
  *   A225       (2.58) → 1.28×  e.g. zoom9 → 56px  (+27%)
  */
 const _SCALE_REF = 1.45; // B738 / A320 catalog scale — rendered as 1× base
-export function getDrawSize(_plane, zoom, typeScale = 1.0) {
+export function getDrawSize(_plane, zoom, _typeScale = 1.0) {
     let base;
     if      (zoom <= 4)  base = 5;
     else if (zoom <= 5)  base = 9;
@@ -504,10 +504,8 @@ export function getDrawSize(_plane, zoom, typeScale = 1.0) {
     else if (zoom <= 13) base = 46;
     else                 base = Math.min(58, 46 + (zoom - 13) * 4);
 
-    // Compress typeScale range: power=0.45 gives gentle proportional scaling
-    // that mimics adsb.fi where silhouette shape — not pixel size — conveys aircraft class.
-    const compressed = Math.pow(typeScale / _SCALE_REF, 0.45);
-    return Math.round(base * _SCALE_REF * compressed);
+    // Uniform size: all aircraft render at the same pixel size per zoom level.
+    return Math.round(base * _SCALE_REF);
 }
 
 
