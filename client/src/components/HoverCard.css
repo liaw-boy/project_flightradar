@@ -1,3 +1,10 @@
+/* 觸控裝置完全隱藏 HoverCard */
+@media (hover: none) and (pointer: coarse) {
+    .hover-card {
+        display: none !important;
+    }
+}
+
 .hover-card {
     position: absolute;
     width: min(240px, calc(100vw - 24px));

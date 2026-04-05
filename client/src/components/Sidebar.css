@@ -963,6 +963,212 @@
     box-shadow: 0 5px 20px rgba(34, 211, 238, 0.4);
 }
 
+/* ══════════════════════════════════════
+   Boarding Pass Route Card
+   ══════════════════════════════════════ */
+.sb-boarding-pass {
+    margin: 16px 16px 16px;
+    background: linear-gradient(135deg, rgba(15,23,42,0.8) 0%, rgba(30,41,59,0.6) 100%);
+    border: 1px solid rgba(148,163,184,0.15);
+    border-radius: 16px;
+    overflow: hidden;
+    position: relative;
+}
+
+.sb-boarding-pass::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #22d3ee 40%, #3b82f6 60%, transparent);
+    opacity: 0.6;
+}
+
+.bp-row {
+    display: flex;
+    align-items: flex-start;
+    padding: 18px 16px 14px;
+    gap: 8px;
+}
+
+.bp-endpoint {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.bp-origin { align-items: flex-start; }
+.bp-dest   { align-items: flex-end; }
+
+.bp-flag {
+    font-size: 20px;
+    line-height: 1;
+    margin-bottom: 2px;
+}
+
+.bp-iata {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    color: #f8fafc;
+    line-height: 1;
+    font-family: var(--font-main);
+}
+
+.bp-city {
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.bp-sched {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin-top: 6px;
+}
+
+.bp-sched-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--color-text-dim);
+    letter-spacing: 0.8px;
+}
+
+.bp-gate {
+    font-size: 10px;
+    font-weight: 700;
+    color: #22d3ee;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+    opacity: 0.85;
+}
+
+.bp-sched-time {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    font-family: var(--font-mono);
+}
+
+.bp-sched-arr {
+    color: #4ade80;
+}
+
+/* Arc + Plane Center */
+.bp-arc-wrap {
+    flex-shrink: 0;
+    width: 72px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding-top: 8px;
+    position: relative;
+}
+
+.bp-arc-svg {
+    width: 100%;
+    height: 36px;
+}
+
+.bp-arc-plane {
+    color: #22d3ee;
+    filter: drop-shadow(0 0 4px rgba(34,211,238,0.6));
+    margin-top: -8px;
+}
+
+.bp-status-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    color: #22d3ee;
+    background: rgba(34,211,238,0.1);
+    border: 1px solid rgba(34,211,238,0.25);
+    border-radius: 6px;
+    padding: 2px 7px;
+    white-space: nowrap;
+    margin-top: 2px;
+}
+
+/* ══════════════════════════════════════
+   2×2 Stats Grid
+   ══════════════════════════════════════ */
+.sb-stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding: 4px 14px 14px;
+}
+
+.stat-card {
+    background: rgba(15,23,42,0.6);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 12px 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+    overflow: hidden;
+}
+
+.stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, rgba(34,211,238,0.4), rgba(59,130,246,0.2));
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.stat-card:hover {
+    border-color: rgba(34,211,238,0.25);
+    background: rgba(15,23,42,0.8);
+}
+
+.stat-card:hover::before {
+    opacity: 1;
+}
+
+.stat-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--color-text-dim);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+}
+
+.stat-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: #f1f5f9;
+    line-height: 1;
+    font-family: var(--font-main);
+    letter-spacing: -0.5px;
+}
+
+.stat-unit {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    margin-top: 3px;
+    letter-spacing: 0.3px;
+}
+
+.stat-heading { color: #e2e8f0; }
+.stat-climb { color: #4ade80; }
+.stat-desc  { color: #f87171; }
+
 /* 平板直式（769-960px）：sidebar 已由 --sidebar-w clamp 自動縮小，不需要覆寫 */
 
 /* Mobile backdrop overlay — hidden on desktop */
@@ -970,8 +1176,8 @@
     display: none;
 }
 
-/* 手機底部抽屜 */
-@media (max-width: 768px) {
+/* 手機 / 平板底部抽屜（對齊 HUD 消失點 960px） */
+@media (max-width: 960px) {
     /* Backdrop: semi-transparent overlay so tapping outside closes the drawer */
     .sidebar-backdrop {
         display: block;
@@ -1031,8 +1237,8 @@
     }
 }
 
-/* 橫向手機：底部抽屜高度縮小避免擋住地圖 */
-@media (max-width: 768px) and (orientation: landscape) {
+/* 橫向手機/平板：底部抽屜高度縮小避免擋住地圖 */
+@media (max-width: 960px) and (orientation: landscape) {
     .sidebar {
         height: 80vh;
         max-height: calc(100dvh - var(--topbar-h));

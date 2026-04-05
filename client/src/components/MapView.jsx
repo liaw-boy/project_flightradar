@@ -203,6 +203,8 @@ export default function MapView({
 }) {
     const [hoveredPlane, setHoveredPlane] = useState(null);
     const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
+    // Detect touch device once — skip HoverCard on mobile/tablet
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
     useEffect(() => {
         // [v14.1] Data arrival sentinel for debugging - can be removed after verified
@@ -500,8 +502,9 @@ export default function MapView({
             }, 1000);
         });
 
-        // [AERO-SYNC] 動態懸停游標 (Dynamic Hover Pointer)
+        // [AERO-SYNC] 動態懸停游標 (Dynamic Hover Pointer) — 觸控裝置跳過
         map.on('mousemove', (e) => {
+            if (isTouchDevice) return;
             const currentPlanes = planesDictRef.current || {};
             const mousePt = e.containerPoint;
             let found = false;
@@ -837,14 +840,26 @@ export default function MapView({
         const lng = plane.renderLng || plane.lng;
 
         const targetLatLng = L.latLng(lat, lng);
-        const targetZoom = Math.max(map.getZoom(), 10);
+        const isMobile = window.innerWidth <= 768;
 
-        // Prevent setting state and getting stuck if the map is already there
+        // 手機：不強制改 zoom，只 pan；桌面：zoom 至少 10
+        const targetZoom = isMobile ? map.getZoom() : Math.max(map.getZoom(), 10);
+
+        // 飛機已在視野中心附近 → 跳過，避免無意義跳動
         if (map.getCenter().distanceTo(targetLatLng) < 5 && map.getZoom() === targetZoom) {
             return;
         }
 
-        map.setView(targetLatLng, targetZoom, { animate: true });
+        if (isMobile) {
+            // 手機底部 compact card 約 100px，只需輕微向上偏移讓飛機不被卡片遮住
+            const cardH = 110;
+            const offsetPx = cardH / 2;
+            const pt = map.project(targetLatLng, targetZoom);
+            const adjustedLatLng = map.unproject(L.point(pt.x, pt.y + offsetPx), targetZoom);
+            map.panTo(adjustedLatLng, { animate: true, duration: 0.4, easeLinearity: 0.5 });
+        } else {
+            map.setView(targetLatLng, targetZoom, { animate: true });
+        }
     }, [selectedIcao24, planesDict]);
 
     // ===== 動畫引擎與 Canvas 渲染 (Project AERO-SYNC) =====
@@ -913,14 +928,27 @@ export default function MapView({
                     }
                 } else if (plane.targetLat && plane.targetLng) {
                     // [Fix] Use wall-clock elapsed time instead of accumulated simTime.
-                    // The old simTime += dt approach never reset (dt === 0.1 was always false
-                    // at 60fps), causing up to 120s of position prediction error = visible jitter.
                     const anchorMs = plane.targetUpdatedAt || ((plane.lastContact || 0) * 1000) || Date.now();
                     const elapsedSec = Math.min(Math.max(0, (Date.now() - anchorMs) / 1000), 30);
                     const predictedPos = predictPosition(plane.targetLat, plane.targetLng, plane.velocity, plane.heading, elapsedSec);
 
-                    plane.renderLat = currentLat + (predictedPos.lat - currentLat) * lerpFactor;
-                    plane.renderLng = currentLng + (predictedPos.lng - currentLng) * lerpFactor;
+                    const rawLat = currentLat + (predictedPos.lat - currentLat) * lerpFactor;
+                    const rawLng = currentLng + (predictedPos.lng - currentLng) * lerpFactor;
+
+                    // [Phase 3] Clamp max per-frame movement to prevent icon teleporting on sharp turns.
+                    // Cap at 2 poll-cycles worth of flight distance (2 × 25s × speed).
+                    const maxDeg = ((plane.velocity || 0) * 50) / 111_000;
+                    const dLat = rawLat - currentLat;
+                    const dLng = rawLng - currentLng;
+                    const distDeg = Math.sqrt(dLat * dLat + dLng * dLng);
+                    if (maxDeg > 0 && distDeg > maxDeg) {
+                        const scale = maxDeg / distDeg;
+                        plane.renderLat = currentLat + dLat * scale;
+                        plane.renderLng = currentLng + dLng * scale;
+                    } else {
+                        plane.renderLat = rawLat;
+                        plane.renderLng = rawLng;
+                    }
                 } else {
                     plane.renderLat = plane.lat;
                     plane.renderLng = plane.lng;
@@ -1015,15 +1043,16 @@ export default function MapView({
                         : flightPath;
                     const basePath = trimmedPath.length > 1 ? trimmedPath : flightPath;
 
-                    // Append live position to path. Use the actual ADS-B lat/lng (not
-                    // the smoothed renderLat/renderLng) so the path endpoint always
-                    // aligns with the heading direction reported by the transponder.
-                    // The icon itself is drawn at renderLat/renderLng for smooth animation.
-                    const livePathLat = livePlane?.lat ?? livePlane?.renderLat;
-                    const livePathLng = livePlane?.lng ?? livePlane?.renderLng;
+                    // [Phase 2] Dead-reckoning track extension:
+                    // Use renderLat/renderLng (current predicted position = where icon is drawn)
+                    // as the live stitch point, with wall-clock "now" as the timestamp.
+                    // This keeps the track endpoint pixel-perfect aligned with the icon at all
+                    // times — no gap, no backward snap when new ADS-B data arrives.
+                    const livePathLat = livePlane?.renderLat ?? livePlane?.lat;
+                    const livePathLng = livePlane?.renderLng ?? livePlane?.lng;
                     activeSelectedPath = (livePathLat && livePathLng)
                         ? [...basePath, [
-                            livePlane.lastContact || Date.now() / 1000,
+                            Date.now() / 1000,
                             livePathLat,
                             livePathLng,
                             livePlane.altitude,
@@ -1090,9 +1119,10 @@ export default function MapView({
                         if (pts.length < 2) return;
                         ctx.beginPath();
                         if (isLiveSeg) {
-                            // Elastic band: thinner, lighter, short dash — shows estimated tail
-                            ctx.setLineDash([6, 8]);
-                            ctx.globalAlpha = isOutline ? 0.35 : 0.55;
+                            // Live-stitch segment: now safe to draw because livePathLat/Lng = renderLat/Lng
+                            // (the icon position). No more backward snap. Draw as thin solid line.
+                            ctx.setLineDash([]);
+                            ctx.globalAlpha = isOutline ? 0.4 : 0.65;
                             if (!isOutline) ctx.strokeStyle = altColor;
                         } else if (isDashed) {
                             ctx.setLineDash([8, 12]);
@@ -1266,9 +1296,55 @@ export default function MapView({
                         opacity = 0.3;
                     }
 
-                    // [Phase 17] Legacy local _trail drawing loop removed.
-                    // The robust historical 'trackPoints' now handles all trace rendering, 
-                    // eliminating the "dual overlapping traces" and pan/zoom jitter bug.
+                    // [v12.9] Short altitude-colored trail for non-selected aircraft
+                    // Selected aircraft gets full historical track above; non-selected get
+                    // a short fading tail from the ring buffer to show recent movement.
+                    if (!isSelected && plane._trail && plane._trailCount >= 2 && zoom >= 5) {
+                        const count = plane._trailCount;
+                        const head  = plane._trailHead;
+                        const trailAltColor = getAltitudeColor(plane.altitude, plane.onGround, false, 'ALTITUDE');
+                        ctx.save();
+                        ctx.lineCap = 'round';
+                        ctx.lineJoin = 'round';
+                        ctx.lineWidth = 1.5;
+
+                        for (let j = 1; j < count; j++) {
+                            const idxA = ((head - count + j - 1 + TRAIL_LEN) % TRAIL_LEN) * TRAIL_FPP;
+                            const idxB = ((head - count + j     + TRAIL_LEN) % TRAIL_LEN) * TRAIL_FPP;
+                            const pA = map.latLngToContainerPoint([plane._trail[idxA], normalizeLongitude(plane._trail[idxA + 1])]);
+                            const pB = map.latLngToContainerPoint([plane._trail[idxB], normalizeLongitude(plane._trail[idxB + 1])]);
+                            const segAlpha = (j / count) * (currentSelected ? 0.15 : 0.45);
+                            ctx.globalAlpha = segAlpha;
+                            ctx.strokeStyle = trailAltColor;
+                            ctx.beginPath();
+                            ctx.moveTo(pA.x, pA.y);
+                            ctx.lineTo(pB.x, pB.y);
+                            ctx.stroke();
+                        }
+                        ctx.restore();
+                    }
+
+                    // [v12.9] Pulsing glow ring for selected aircraft
+                    if (isSelected) {
+                        const pulse = (nowMs % 2000) / 2000;
+                        const ringR = 14 + pulse * 22;
+                        const ringAlpha = (1 - pulse) * 0.55;
+                        ctx.save();
+                        ctx.globalAlpha = ringAlpha;
+                        ctx.strokeStyle = '#22d3ee';
+                        ctx.lineWidth = 1.5;
+                        ctx.beginPath();
+                        ctx.arc(ptX, ptY, ringR, 0, Math.PI * 2);
+                        ctx.stroke();
+                        // Inner static glow
+                        ctx.globalAlpha = 0.25;
+                        ctx.strokeStyle = '#22d3ee';
+                        ctx.lineWidth = 3;
+                        ctx.beginPath();
+                        ctx.arc(ptX, ptY, 10, 0, Math.PI * 2);
+                        ctx.stroke();
+                        ctx.restore();
+                    }
 
                     // [v14.0] High-Performance Canvas Vector Rendering (tar1090 style)
                     // Eliminates external image loading latency and improves visual density.

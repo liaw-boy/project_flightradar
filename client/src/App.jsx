@@ -3,6 +3,7 @@ import LoadingScreen from './components/LoadingScreen';
 import Dashboard from './components/Dashboard';
 import DevPanel from './components/DevPanel';
 import Sidebar from './components/Sidebar';
+import MobileSheet from './components/MobileSheet';
 import SearchBar from './components/SearchBar';
 import TopBar from './components/TopBar';
 import MapView from './components/MapView';
@@ -32,6 +33,14 @@ export default function App() {
     const { t, translateMetar } = useI18n();
     const [loading, setLoading] = useState(true);
     const [selectedIcao24, setSelectedIcao24] = useState(null);
+    const [showFullSidebar, setShowFullSidebar] = useState(false);
+    const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 960);
+    useEffect(() => {
+        const mq = window.matchMedia('(max-width: 960px)');
+        const handler = (e) => setIsMobile(e.matches);
+        mq.addEventListener('change', handler);
+        return () => mq.removeEventListener('change', handler);
+    }, []);
     const [trackPoints, setTrackPoints] = useState([]);
     const [selectedMetadata, setSelectedMetadata] = useState(null);
     const [selectedRoute, setSelectedRoute] = useState(null);
@@ -201,6 +210,7 @@ export default function App() {
                 setPlaybackTime(null);
             }
             setSelectedIcao24(icao24);
+            setShowFullSidebar(false); // 手機先顯示 compact card
             setTrackMode(true);
             
             // [v11.0] Activate High-Res Zero-Truncation Buffer
@@ -410,10 +420,22 @@ export default function App() {
                 </div>
             )}
 
-            {selectedPlane && (
+            {selectedPlane && isMobile && !showFullSidebar && (
+                <MobileSheet
+                    key={selectedIcao24}
+                    plane={selectedPlane}
+                    icao24={selectedIcao24}
+                    metadata={selectedMetadata}
+                    route={selectedRoute}
+                    onClose={handleDeselectPlane}
+                    onExpand={() => setShowFullSidebar(true)}
+                />
+            )}
+
+            {selectedPlane && (!isMobile || showFullSidebar) && (
                 <>
                     {/* Mobile backdrop — tap outside to close bottom drawer */}
-                    <div className="sidebar-backdrop" onClick={handleDeselectPlane} />
+                    {isMobile && <div className="sidebar-backdrop" onClick={() => setShowFullSidebar(false)} />}
                     <Sidebar
                         plane={selectedPlane}
                         icao24={selectedIcao24}
@@ -423,7 +445,7 @@ export default function App() {
                         playbackTime={playbackTime}
                         onPlaybackChange={handlePlaybackChange}
                         flightHistoryRef={flightHistoryRef}
-                        onClose={handleDeselectPlane}
+                        onClose={isMobile ? () => setShowFullSidebar(false) : handleDeselectPlane}
                         trackMode={trackMode}
                         onToggleTrack={handleToggleTrackMode}
                     />

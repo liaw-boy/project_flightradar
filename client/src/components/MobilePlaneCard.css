@@ -1,0 +1,152 @@
+@media (min-width: 769px) {
+    .mpc-card { display: none; }
+}
+
+.mpc-card {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: rgba(8, 12, 24, 0.97);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.6);
+    z-index: 2000;
+    animation: mpcSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    color: #fff;
+    font-family: 'Inter', -apple-system, sans-serif;
+    overflow: hidden;
+    touch-action: pan-y;
+}
+
+@keyframes mpcSlideUp {
+    from { transform: translateY(100%); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* Drag handle */
+.mpc-handle-bar {
+    display: flex;
+    justify-content: center;
+    padding: 10px 0 6px;
+}
+
+.mpc-handle-bar::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Full-width photo — letterboxed */
+.mpc-photo {
+    width: 100%;
+    height: 180px;
+    background: #0b111f;
+    overflow: hidden;
+    position: relative;
+}
+
+.mpc-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #0b111f;
+    display: block;
+}
+
+.mpc-photo-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 52px;
+    opacity: 0.12;
+}
+
+/* Bottom fade on photo */
+.mpc-photo::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 32px;
+    background: linear-gradient(to bottom, transparent, rgba(8, 12, 24, 0.97));
+    pointer-events: none;
+}
+
+/* Info row */
+.mpc-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px 16px;
+}
+
+.mpc-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.mpc-callsign {
+    font-size: 20px;
+    font-weight: 800;
+    color: #22d3ee;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mpc-type {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mpc-route {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.75);
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: 2px;
+}
+
+.mpc-route-arrow {
+    color: rgba(255, 255, 255, 0.25);
+    font-size: 11px;
+}
+
+/* Close button */
+.mpc-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.45);
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s;
+}
+
+.mpc-close:active {
+    background: rgba(255, 255, 255, 0.15);
+}

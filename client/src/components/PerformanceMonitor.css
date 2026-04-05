@@ -117,20 +117,6 @@
 /* ===== Responsive Design: Performance Monitor ===== */
 @media (max-width: 768px) {
     .perf-monitor-container {
-        /* Move it higher up on mobile so the 60vh Sidebar doesn't cover it completely */
-        bottom: calc(60vh + 24px);
-        left: 12px;
-        min-width: 160px;
-        padding: 8px 10px;
-        transition: bottom 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-
-    .perf-label {
         display: none;
-        /* Hide text, just show numbers */
-    }
-
-    .perf-divider {
-        margin: 0 4px;
     }
 }

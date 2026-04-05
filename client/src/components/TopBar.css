@@ -218,10 +218,45 @@
 }
 
 /* ===== Responsive Design: Mobile & Tablet ===== */
-/* 平板（850px）：隱藏搜尋欄（可透過 Settings 存取） */
+
+/* 搜尋圖示：>850px 隱藏（搜尋欄直接顯示），≤850px 顯示 */
+.tb-search-icon {
+    display: none;
+}
+
+/* 平板（850px）：隱藏搜尋欄，改用圖示按鈕 */
 @media (max-width: 850px) {
     .top-bar-center {
         display: none;
+    }
+    .tb-search-icon {
+        display: flex;
+    }
+}
+
+/* Mobile Search Overlay — 展開時覆蓋 TopBar */
+.mobile-search-overlay {
+    display: none;
+}
+
+@media (max-width: 850px) {
+    .top-bar.mobile-search-open .top-bar-left,
+    .top-bar.mobile-search-open .top-bar-right {
+        display: none;
+    }
+    .mobile-search-overlay {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        width: 100%;
+    }
+    .mobile-search-overlay .search-container {
+        flex: 1;
+    }
+    .mobile-search-close {
+        flex-shrink: 0;
+        padding: 8px;
     }
 }
 
@@ -239,6 +274,14 @@
     }
 }
 
+/* 飛機計數副標（air/gnd） */
+.ts-sub {
+    font-size: 11px;
+    opacity: 0.6;
+    font-weight: 500;
+    margin-left: 4px;
+}
+
 @media (max-width: 600px) {
     .top-bar {
         padding: 0 12px;
@@ -246,35 +289,44 @@
 
     .brand-logo h2 {
         font-size: 15px;
+        letter-spacing: 0.5px;
     }
 
-    .brand-highlight {
-        display: none;
-        /* Hide 'RADAR' text */
+    /* 手機隱藏 RADAR 文字，只留 AEROSTRAT */
+    .brand-logo h2::after {
+        content: '';
     }
 
     .brand-version {
-        font-size: 10px;
-        padding: 1px 4px;
-        margin-left: 4px;
+        display: none;
     }
 
     .ts-label {
         display: none;
-        /* Hide STATS labels, just show icons/numbers */
+    }
+
+    /* 手機上 air/gnd 副標也隱藏，只顯示總數 */
+    .ts-sub {
+        display: none;
     }
 
     .tb-btn span {
         display: none;
-        /* Hide button text, only keep icons */
     }
 
     .tb-btn {
         padding: 8px;
+        min-width: 36px;
     }
 
     .top-stat-pill {
         padding: 4px 8px;
         gap: 4px;
+    }
+
+    /* 語言按鈕縮短 */
+    .tb-btn:first-of-type {
+        font-size: 11px;
+        padding: 6px 8px;
     }
 }

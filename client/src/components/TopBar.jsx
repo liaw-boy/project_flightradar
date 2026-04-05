@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Plane, Activity, Settings, Globe } from 'lucide-react';
+import { Clock, Plane, Activity, Settings, Globe, Search, X } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import SearchBar from './SearchBar';
 import FilterPanel from './FilterPanel';
@@ -21,6 +21,7 @@ export default function TopBar({
     const { t, lang, toggleLang } = useI18n();
     const [time, setTime] = useState('--:--:--');
     const [showSettings, setShowSettings] = useState(false);
+    const [showMobileSearch, setShowMobileSearch] = useState(false);
 
     useEffect(() => {
         const interval = setInterval(() => {
@@ -30,7 +31,7 @@ export default function TopBar({
     }, []);
 
     return (
-        <div className="top-bar">
+        <div className={`top-bar${showMobileSearch ? ' mobile-search-open' : ''}`}>
             {/* Left: Branding & Core Stats */}
             <div className="top-bar-left">
                 <div className="brand-logo">
@@ -43,7 +44,10 @@ export default function TopBar({
                 <div className="top-stat-pill">
                     <Plane size={14} style={{ color: 'var(--color-text-dim)' }} />
                     <span className="ts-label">{t('aircraft')}</span>
-                    <span className="ts-value">{planeCount > 0 ? planeCount : t('scanning')} {planeCount > 0 && <span style={{ fontSize: '11px', opacity: 0.7 }}>({airCount} {t('air')} / {groundCount} {t('gnd')})</span>}</span>
+                    <span className="ts-value">
+                        {planeCount > 0 ? planeCount : t('scanning')}
+                        {planeCount > 0 && <span className="ts-sub"> {airCount}/{groundCount}</span>}
+                    </span>
 
 
                 </div>
@@ -59,8 +63,28 @@ export default function TopBar({
                 />
             </div>
 
+            {/* Mobile Search Overlay（≤850px 展開時覆蓋整個 TopBar） */}
+            {showMobileSearch && (
+                <div className="mobile-search-overlay">
+                    <SearchBar
+                        planesDict={planesDict}
+                        onSelectPlane={(p) => { onSearchSelect(p); setShowMobileSearch(false); }}
+                        compact={true}
+                        autoFocus={true}
+                    />
+                    <button className="tb-btn mobile-search-close" onClick={() => setShowMobileSearch(false)}>
+                        <X size={16} />
+                    </button>
+                </div>
+            )}
+
             {/* Right: Settings & Localization */}
             <div className="top-bar-right">
+                {/* 搜尋圖示（只在 ≤850px 且搜尋欄隱藏時顯示） */}
+                <button className="tb-btn tb-search-icon" onClick={() => setShowMobileSearch(true)} aria-label="Search">
+                    <Search size={16} />
+                </button>
+
                 <button className="tb-btn" onClick={toggleLang}>
                     {lang === 'en' ? 'EN' : '中'}
                 </button>
@@ -71,7 +95,7 @@ export default function TopBar({
                         onClick={() => setShowSettings(!showSettings)}
                     >
                         <Settings size={16} />
-                        Settings
+                        <span>{t('filters')}</span>
                     </button>
 
                     {showSettings && (

@@ -1,29 +1,33 @@
 // @ts-check
+/**
+ * Playwright config for production smoke tests against https://flyradar.spkuan.cc
+ * Runs headless; does NOT use localhost baseURL.
+ */
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
     testDir: './tests/e2e',
+    testMatch: '**/prod_smoke.spec.js',
     timeout: 60000,
     expect: {
-        timeout: 15000,
+        timeout: 20000,
     },
     fullyParallel: false,
     retries: 1,
     workers: 1,
     reporter: [
-        ['html', { outputFolder: '../pw-report', open: 'never' }],
-        ['junit', { outputFile: '../pw-report/results.xml' }],
         ['list'],
+        ['html', { outputFolder: '/home/lbw/project_aerostrat/client/pw-screenshots/prod-run/report', open: 'never' }],
     ],
     use: {
-        baseURL: 'http://localhost:3000',
+        baseURL: 'https://flyradar.spkuan.cc',
         screenshot: 'on',
-        video: 'on-first-retry',
+        video: 'off',
         trace: 'on-first-retry',
         headless: true,
         viewport: { width: 1400, height: 900 },
     },
-    outputDir: '../pw-screenshots/artifacts',
+    outputDir: '/home/lbw/project_aerostrat/client/pw-screenshots/prod-run/artifacts',
     projects: [
         {
             name: 'chromium',

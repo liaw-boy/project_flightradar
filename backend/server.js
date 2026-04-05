@@ -199,7 +199,7 @@ if (fs.existsSync(publicReactPath)) {
     app.use(express.static(publicReactPath, { maxAge: '1h' }));
     // Express 5 wildcard syntax: serve index.html for all non-API routes (SPA fallback)
     app.get('/{*path}', (req, res, next) => {
-        if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path === '/monitor') return next();
+        if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/monitor')) return next();
         res.sendFile(path.join(publicReactPath, 'index.html'));
     });
     logger.info('SERVER', `Serving built frontend from ${publicReactPath}`);
@@ -256,6 +256,7 @@ app.use(express.json());
 // [v9.7] Strategic API Heartbeats
 app.post('/api/viewport', (req, res) => res.json({ status: 'ok', received: true }));
 app.get('/api/planes/bbox-ping', (req, res) => res.json({ status: 'active' }));
+
 
 // ==========================================
 // [v8.0] High-Availability Live Data Endpoint
@@ -627,11 +628,39 @@ async function fetchRouteData(callsign) {
             const data = await res.json();
             if (Array.isArray(data) && data.length > 0) {
                 const f = data[0];
+                // Extract rich schedule & gate info
+                const depSched   = f.departure?.scheduledTimeLocal || f.departure?.scheduledTimeUtc || null;
+                const depRevised = f.departure?.revisedTimeLocal   || f.departure?.revisedTimeUtc   || null;
+                const arrSched   = f.arrival?.scheduledTimeLocal   || f.arrival?.scheduledTimeUtc   || null;
+                const arrRevised = f.arrival?.revisedTimeLocal     || f.arrival?.revisedTimeUtc     || null;
+                const fmtTime = (s) => {
+                    if (!s) return null;
+                    const d = new Date(s);
+                    if (isNaN(d)) return s;
+                    return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+                };
                 return {
-                    origin_iata: f.departure?.airport?.iata || 'N/A',
-                    destination_iata: f.arrival?.airport?.iata || '---',
-                    destination_icao: f.arrival?.airport?.icao || null,
-                    estimated_arrival_time: f.arrival?.scheduledTimeLocal || f.arrival?.scheduledTimeUtc || null,
+                    origin_iata:        f.departure?.airport?.iata || 'N/A',
+                    origin_name:        f.departure?.airport?.name || null,
+                    origin_city:        f.departure?.airport?.municipalityName || null,
+                    destination_iata:   f.arrival?.airport?.iata || '---',
+                    destination_icao:   f.arrival?.airport?.icao || null,
+                    destination_name:   f.arrival?.airport?.name || null,
+                    destination_city:   f.arrival?.airport?.municipalityName || null,
+                    departure_time:     fmtTime(depRevised || depSched),
+                    departure_scheduled:fmtTime(depSched),
+                    departure_revised:  fmtTime(depRevised),
+                    departure_terminal: f.departure?.terminal || null,
+                    departure_gate:     f.departure?.gate || null,
+                    arrival_time:       fmtTime(arrRevised || arrSched),
+                    arrival_scheduled:  fmtTime(arrSched),
+                    arrival_revised:    fmtTime(arrRevised),
+                    arrival_terminal:   f.arrival?.terminal || null,
+                    arrival_gate:       f.arrival?.gate || null,
+                    flightNumber:       f.number || null,
+                    flightStatus:       f.status || null,
+                    airline_name:       f.airline?.name || null,
+                    estimated_arrival_time: arrRevised || arrSched || null,
                     source: 'aerodatabox'
                 };
             }
@@ -932,7 +961,26 @@ a:hover{opacity:.75}
 
 /* ── Responsive ── */
 @media(max-width:1100px){.kpi-grid{grid-template-columns:repeat(3,1fr)}.sidebar{width:180px;min-width:180px}}
-@media(max-width:800px){.sidebar{display:none}.grid-2,.grid-3{grid-template-columns:1fr}.kpi-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:800px){
+  .sidebar{display:none}
+  .grid-2,.grid-3{grid-template-columns:1fr}
+  .kpi-grid{grid-template-columns:repeat(2,1fr)}
+  .topbar{padding:0 16px}
+  .topbar-title{font-size:13px}
+  .topbar-sub{display:none}
+  .btn-back{font-size:11px;padding:5px 10px}
+  .sync-badge{font-size:11px}
+  .mob-nav{display:flex}
+}
+@media(max-width:480px){
+  .kpi-grid{grid-template-columns:1fr 1fr}
+  .topbar-right{gap:6px}
+  .btn-back span{display:none}
+}
+.mob-nav{display:none;overflow-x:auto;gap:8px;padding:10px 16px;background:var(--s);border-bottom:1px solid var(--border);scrollbar-width:none}
+.mob-nav::-webkit-scrollbar{display:none}
+.mob-nav a{flex-shrink:0;font-size:11px;font-weight:600;color:var(--td);text-decoration:none;padding:5px 12px;border-radius:20px;border:1px solid var(--border);white-space:nowrap;transition:all .2s}
+.mob-nav a:hover,.mob-nav a.active{background:var(--teal);color:#171821;border-color:var(--teal)}
 </style>
 </head>
 <body>
@@ -992,8 +1040,20 @@ a:hover{opacity:.75}
           <span id="sync-label">Connecting...</span>
         </div>
         <a class="btn-back" href="javascript:void(0)" onclick="goBackToRadar()">← Back to Radar</a>
+        <a class="btn-back" href="/monitor/logout" style="margin-left:8px;color:#f87171;border-color:rgba(239,68,68,0.3)">Logout</a>
       </div>
     </div>
+
+    <!-- 手機版橫向導覽（≤800px sidebar 隱藏時顯示） -->
+    <nav class="mob-nav">
+      <a href="#kpi" class="active">Overview</a>
+      <a href="#hw">Hardware</a>
+      <a href="#storage">Storage</a>
+      <a href="#opensky">OpenSky</a>
+      <a href="#sync">Sync</a>
+      <a href="#sessions">Sessions</a>
+      <a href="#api">API</a>
+    </nav>
 
     <!-- Scroll area -->
     <div class="scroll">
@@ -1311,12 +1371,93 @@ setInterval(refresh, 5000);
 </body>
 </html>`;
 }
+// ── Monitor Auth (session-based, no extra deps) ────────────────
+const crypto = require('crypto');
+const monitorSessions = new Map(); // token → expiry timestamp
+const MONITOR_SESSION_TTL = 8 * 60 * 60 * 1000; // 8 hours
+
+function getMonitorToken(req) {
+    const cookie = req.headers.cookie || '';
+    const match = cookie.match(/(?:^|;\s*)monitor_session=([^;]+)/);
+    return match ? match[1] : null;
+}
+
+function isMonitorAuthed(req) {
+    const token = getMonitorToken(req);
+    if (!token) return false;
+    const expiry = monitorSessions.get(token);
+    if (!expiry || Date.now() > expiry) {
+        monitorSessions.delete(token);
+        return false;
+    }
+    return true;
+}
+
+function getLoginHtml(error) {
+    return `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>AEROSTRAT MONITOR — Login</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#171821;color:#fff;font-family:Inter,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .card{background:#21222d;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,0.5)}
+  .logo{text-align:center;margin-bottom:32px}
+  .logo h1{font-size:20px;font-weight:700;letter-spacing:2px;color:#a9dfd8}
+  .logo p{font-size:12px;color:#87888c;margin-top:4px;letter-spacing:1px}
+  label{display:block;font-size:12px;font-weight:600;color:#87888c;letter-spacing:1px;margin-bottom:8px}
+  input[type=password]{width:100%;background:#171821;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:14px;padding:12px 16px;outline:none;transition:border-color .2s}
+  input[type=password]:focus{border-color:#a9dfd8}
+  button{width:100%;margin-top:20px;background:#a9dfd8;border:none;border-radius:8px;color:#171821;font-size:14px;font-weight:700;padding:13px;cursor:pointer;transition:opacity .2s;letter-spacing:1px}
+  button:hover{opacity:.85}
+  .error{margin-top:16px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:10px 14px;font-size:13px;color:#f87171;text-align:center}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <h1>AEROSTRAT</h1>
+    <p>SYSTEM MONITOR</p>
+  </div>
+  <form method="POST" action="/monitor/login">
+    <label for="pw">ADMIN PASSWORD</label>
+    <input type="password" id="pw" name="password" autofocus autocomplete="current-password" placeholder="••••••••">
+    <button type="submit">LOGIN</button>
+    ${error ? `<div class="error">${error}</div>` : ''}
+  </form>
+</div>
+</body>
+</html>`;
+}
+
 app.get('/monitor', (req, res) => {
-    const token = req.query.token;
-    if (token !== 'dev') {
-        return res.status(403).send('Forbidden: Token invalid');
+    if (!isMonitorAuthed(req)) {
+        return res.status(401).send(getLoginHtml());
     }
     res.send(getMonitorHtml());
+});
+
+app.use('/monitor', express.urlencoded({ extended: false }));
+
+app.post('/monitor/login', (req, res) => {
+    const { password } = req.body;
+    const expected = process.env.MONITOR_PASSWORD || 'admin123';
+    if (password !== expected) {
+        return res.status(401).send(getLoginHtml('密碼錯誤，請再試一次'));
+    }
+    const token = crypto.randomBytes(32).toString('hex');
+    monitorSessions.set(token, Date.now() + MONITOR_SESSION_TTL);
+    res.setHeader('Set-Cookie', `monitor_session=${token}; HttpOnly; SameSite=Strict; Path=/monitor; Max-Age=${MONITOR_SESSION_TTL / 1000}`);
+    res.redirect('/monitor');
+});
+
+app.get('/monitor/logout', (req, res) => {
+    const token = getMonitorToken(req);
+    if (token) monitorSessions.delete(token);
+    res.setHeader('Set-Cookie', 'monitor_session=; HttpOnly; SameSite=Strict; Path=/monitor; Max-Age=0');
+    res.redirect('/monitor');
 });
 
 app.get('/api/health', (req, res) => {
@@ -2463,8 +2604,8 @@ async function fetchGlobalPlanes() {
 }
 
 // ── [v11.0] Three-Tier Engine Startup ─────────────────────────────────────
-setInterval(fetchGlobalBaseline,    25_000);   // full global refresh (was 15s, reduced to save CPU)
-setInterval(fetchViewportOverlay,   12_000);   // viewport high-frequency (was 8s)
+setInterval(fetchGlobalBaseline,    25_000);   // full global refresh
+setInterval(fetchViewportOverlay,    6_000);   // viewport high-frequency (halved for smoother tracking)
 setInterval(fetchSpecialCategories, 60_000);   // military + LADD (slow)
 
 // [v7.0] Session timeout reaper — in-memory cleanup every 5 minutes
@@ -3129,6 +3270,31 @@ app.get('/api/photos/:icao24', async (req, res) => {
                 const data = await regRes.json();
                 if (data.photos?.length) freshPhotos = [...freshPhotos, ...(data.photos || [])];
             }
+        }
+
+        // [C] airport-data.com fallback — free, no key required
+        if (freshPhotos.length < 3 && reg && reg !== 'N/A') {
+            try {
+                const adRes = await fetch(
+                    `https://www.airport-data.com/api/ac_thumb.json?r=${encodeURIComponent(reg)}&n=3`,
+                    { headers: { 'User-Agent': 'AEROSTRAT/5.0' }, signal: AbortSignal.timeout(4000) }
+                );
+                if (adRes.ok) {
+                    const adData = await adRes.json();
+                    if (adData.status === 200 && Array.isArray(adData.data)) {
+                        for (const p of adData.data) {
+                            if (!p.image) continue;
+                            freshPhotos.push({
+                                thumbnail:       { src: p.image },
+                                thumbnail_large: { src: p.image.replace('/thumbnails/', '/large/') },
+                                photographer: p.photographer || 'airport-data.com',
+                                link: p.link || p.image,
+                                source: 'airport-data'
+                            });
+                        }
+                    }
+                }
+            } catch (_) {}
         }
 
         // 4. 合併與去重 (限量 3 張，優先使用高品質的 Fresh Data)
@@ -4025,11 +4191,25 @@ app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
         // Flight Route Info
         const routeUpdate = {
             callsign,
-            origin_iata: routeRes?.origin_iata || dbRoute?.origin_iata || 'N/A',
-            destination_iata: routeRes?.destination_iata || dbRoute?.destination_iata || '---',
+            origin_iata:         routeRes?.origin_iata         || dbRoute?.origin_iata         || 'N/A',
+            origin_name:         routeRes?.origin_name         || dbRoute?.origin_name         || null,
+            origin_city:         routeRes?.origin_city         || dbRoute?.origin_city         || null,
+            destination_iata:    routeRes?.destination_iata    || dbRoute?.destination_iata    || '---',
+            destination_icao:    routeRes?.destination_icao    || dbRoute?.destination_icao    || null,
+            destination_name:    routeRes?.destination_name    || dbRoute?.destination_name    || null,
+            destination_city:    routeRes?.destination_city    || dbRoute?.destination_city    || null,
+            departure_time:      routeRes?.departure_time      || dbRoute?.departure_time      || null,
+            departure_terminal:  routeRes?.departure_terminal  || dbRoute?.departure_terminal  || null,
+            departure_gate:      routeRes?.departure_gate      || dbRoute?.departure_gate      || null,
+            arrival_time:        routeRes?.arrival_time        || dbRoute?.arrival_time        || null,
+            arrival_terminal:    routeRes?.arrival_terminal    || dbRoute?.arrival_terminal    || null,
+            arrival_gate:        routeRes?.arrival_gate        || dbRoute?.arrival_gate        || null,
+            flightNumber:        routeRes?.flightNumber        || dbRoute?.flightNumber        || null,
+            flightStatus:        routeRes?.flightStatus        || dbRoute?.flightStatus        || null,
+            airline_name:        routeRes?.airline_name        || dbRoute?.airline_name        || null,
             estimated_arrival_time: routeRes?.estimated_arrival_time || dbRoute?.estimated_arrival_time || null,
-            departureAirport: routeRes?.origin_iata || dbRoute?.departureAirport,
-            arrivalAirport: routeRes?.destination_iata || dbRoute?.arrivalAirport,
+            departureAirport:    routeRes?.origin_iata         || dbRoute?.departureAirport,
+            arrivalAirport:      routeRes?.destination_iata    || dbRoute?.arrivalAirport,
             lastUpdated: new Date()
         };
         const updatedRoute = await Route.findOneAndUpdate({ callsign }, { $set: routeUpdate }, { upsert: true, returnDocument: 'after' });

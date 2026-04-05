@@ -36,7 +36,7 @@ export default function FilterPanel({ filters, onFilterChange, mapLayer, onMapLa
     const [isLayersExpanded, setIsLayersExpanded] = useState(false);
     const openMonitor = () => {
         // Points to our backend at port 3001
-        const monitorUrl = `${window.location.protocol}//${window.location.hostname}:3001/monitor?token=dev`;
+        const monitorUrl = `${window.location.origin}/monitor?token=dev`;
         // Open in a new tab next to the current one
         window.open(monitorUrl, '_blank');
     };

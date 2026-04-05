@@ -69,6 +69,13 @@ function AltitudeChart({ history, icao24 }) {
     );
 }
 
+// ─── Heading direction helper ─────────────────────────────────────────────────
+function headingDir(h) {
+    if (h == null) return '';
+    const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+    return dirs[Math.round(h / 45) % 8];
+}
+
 // ─── Flight Progress Bar ───────────────────────────────────────────────────────
 function FlightProgress({ plane, depInfo, arrInfo }) {
     const progress = useMemo(() => {
@@ -371,51 +378,59 @@ export default function Sidebar({
                     })()}
                 </div>
 
-                {/* [Phase 16] Restored High-Fidelity Flight Progress View */}
-                <div className="sb-route-card">
-                    {/* [v7.0] High-Fidelity Terminal Node Layout */}
-                    <div className="sb-route-layout-v3">
-                        {/* Origin Column */}
-                        <div className="route-column origin">
-                            <div className="column-header">
-                                <span className="column-dot"></span>
-                                <span className="column-label">FROM</span>
+                {/* ── Boarding Pass Route Card ── */}
+                <div className="sb-boarding-pass">
+                    <div className="bp-row">
+                        {/* Origin */}
+                        <div className="bp-endpoint bp-origin">
+                            {depInfo?.country && (
+                                <span className="bp-flag">{getCountryFlag(depInfo.country)}</span>
+                            )}
+                            <div className="bp-iata">{displayDepCode}</div>
+                            <div className="bp-city">{depCity || depName || '---'}</div>
+                            <div className="bp-sched">
+                                <span className="bp-sched-label">SCHED OUT</span>
+                                <span className="bp-sched-time">{routeInfo.departure_time || '--:--'}</span>
                             </div>
-                            <div className="column-iata">{displayDepCode}</div>
-                            <div className="column-city">{depCity || depName || 'Origin'}</div>
-                            <div className="column-footer">
-                                <span className="footer-label">SCHED OUT</span>
-                                <span className="footer-time">{routeInfo.departure_time || '--:--'}</span>
-                            </div>
-                        </div>
-
-                        {/* Central Connector Overlay */}
-                        <div className="route-connector-v3">
-                            <div className="connector-line-v3">
-                                <div className="connector-pulse"></div>
-                                <div className="connector-plane-icon">
-                                    <PlaneIcon size={14} style={{ transform: 'rotate(90deg)', color: 'var(--color-accent-cyan)' }} />
+                            {(routeInfo.departure_terminal || routeInfo.departure_gate) && (
+                                <div className="bp-gate">
+                                    {routeInfo.departure_terminal && <span>T{routeInfo.departure_terminal}</span>}
+                                    {routeInfo.departure_gate && <span> · {routeInfo.departure_gate}</span>}
                                 </div>
-                            </div>
-                            <div className="connector-status">IN FLIGHT</div>
+                            )}
                         </div>
 
-                        {/* Destination Column */}
-                        <div className="route-column destination">
-                            <div className="column-header">
-                                <span className="column-label">TO</span>
-                                <span className="column-dot"></span>
+                        {/* Arc + Plane */}
+                        <div className="bp-arc-wrap">
+                            <svg className="bp-arc-svg" viewBox="0 0 100 36" preserveAspectRatio="none">
+                                <path d="M4,32 Q50,4 96,32" fill="none" stroke="rgba(34,211,238,0.25)" strokeWidth="1.5" strokeDasharray="4 3"/>
+                            </svg>
+                            <PlaneIcon size={15} className="bp-arc-plane" style={{ transform: 'rotate(90deg)' }} />
+                            <div className="bp-status-badge">
+                                {routeInfo.flightStatus || (plane.onGround ? 'ON GROUND' : 'IN FLIGHT')}
                             </div>
-                            <div className="column-iata">{displayArrCode}</div>
-                            <div className="column-city">{arrCity || arrName || 'Destination'}</div>
-                            <div className="column-footer">
-                                <span className="footer-label">SCHED IN</span>
-                                <span className="footer-time" style={{ color: '#4ade80' }}>{routeInfo.arrival_time || '--:--'}</span>
+                        </div>
+
+                        {/* Destination */}
+                        <div className="bp-endpoint bp-dest">
+                            {arrInfo?.country && (
+                                <span className="bp-flag">{getCountryFlag(arrInfo.country)}</span>
+                            )}
+                            <div className="bp-iata">{displayArrCode}</div>
+                            <div className="bp-city">{arrCity || arrName || '---'}</div>
+                            <div className="bp-sched">
+                                <span className="bp-sched-label">SCHED IN</span>
+                                <span className="bp-sched-time bp-sched-arr">{routeInfo.arrival_time || '--:--'}</span>
                             </div>
+                            {(routeInfo.arrival_terminal || routeInfo.arrival_gate) && (
+                                <div className="bp-gate" style={{ textAlign: 'right' }}>
+                                    {routeInfo.arrival_terminal && <span>T{routeInfo.arrival_terminal}</span>}
+                                    {routeInfo.arrival_gate && <span> · {routeInfo.arrival_gate}</span>}
+                                </div>
+                            )}
                         </div>
                     </div>
 
-                    {/* Flight Progress Bar only when both depInfo and arrInfo exist */}
                     {depInfo && arrInfo && !isLoadingDetails && (
                         <FlightProgress plane={plane} depInfo={depInfo} arrInfo={arrInfo} />
                     )}
@@ -473,14 +488,43 @@ export default function Sidebar({
                 </div>
                 {openSections.spatial && (
                     <div className="sb-section-content">
-                        <DataRow label={t('altitude')} value={plane.onGround ? 'GROUND' : (plane.altitude != null ? `${Math.round(plane.altitude).toLocaleString()} ft` : 'N/A')} />
-                        <DataRow label={t('speed')} value={plane.velocity != null ? `${Math.round(plane.velocity * 3.6)} km/h` : 'N/A'} />
-                        <DataRow label={t('heading')} value={plane.heading != null ? `${Math.round(plane.heading)}°` : 'N/A'} />
-                        <DataRow label={t('vertRate')} value={plane.vRate != null ? formatVerticalRate(plane.vRate) : 'N/A'} />
+                        {/* 2×2 Stats Grid */}
+                        <div className="sb-stats-grid">
+                            <div className="stat-card">
+                                <div className="stat-label">ALTITUDE</div>
+                                <div className="stat-value">
+                                    {plane.onGround ? 'GND' : (plane.altitude != null ? `${Math.round(plane.altitude).toLocaleString()}` : '---')}
+                                </div>
+                                {!plane.onGround && plane.altitude != null && <div className="stat-unit">ft</div>}
+                            </div>
+                            <div className="stat-card">
+                                <div className="stat-label">SPEED</div>
+                                <div className="stat-value">
+                                    {plane.velocity != null ? Math.round(plane.velocity * 3.6) : '---'}
+                                </div>
+                                {plane.velocity != null && <div className="stat-unit">km/h</div>}
+                            </div>
+                            <div className="stat-card">
+                                <div className="stat-label">HEADING</div>
+                                <div className="stat-value stat-heading">
+                                    {plane.heading != null ? `${Math.round(plane.heading)}°` : '---'}
+                                </div>
+                                {plane.heading != null && <div className="stat-unit">{headingDir(plane.heading)}</div>}
+                            </div>
+                            <div className="stat-card">
+                                <div className="stat-label">VERT RATE</div>
+                                <div className={`stat-value ${plane.vRate > 50 ? 'stat-climb' : plane.vRate < -50 ? 'stat-desc' : ''}`}>
+                                    {plane.vRate != null ? `${plane.vRate > 50 ? '▲' : plane.vRate < -50 ? '▼' : '―'} ${Math.abs(Math.round(plane.vRate))}` : '---'}
+                                </div>
+                                {plane.vRate != null && <div className="stat-unit">ft/min</div>}
+                            </div>
+                        </div>
+
+                        {/* Secondary info rows */}
                         <DataRow label={t('position')} value={plane.lat != null && plane.lng != null ? `${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}` : 'N/A'} />
                         <DataRow label="Flight No." value={fusionData?.route?.flightNumber || plane.callsign || '---'} />
                         <DataRow label={t('source')} value={posSourceMap[plane.positionSource] || 'ADS-B'} />
-                        
+
                         {flightHistoryRef?.current && (
                             <AltitudeChart history={flightHistoryRef.current} icao24={icao24} />
                         )}
