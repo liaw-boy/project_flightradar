@@ -1059,7 +1059,13 @@ export default function MapView({
                             const prevSeg = activeSelectedPath[pi - 1];
                             const timeDeltaSec = seg[0] && prevSeg[0] ? seg[0] - prevSeg[0] : 0;
                             const dist = haversineKm(prevSeg[1], prevSeg[2], seg[1], seg[2]);
-                            const isAntimeridian = Math.abs(pt.x - (segments[segments.length - 1]?.pt.x ?? pt.x)) > canvasCssW / 2;
+                            // Use geographic longitude diff to detect antimeridian crossing.
+                            // Pixel-distance check breaks at high zoom levels where even short
+                            // track segments span more than half the canvas width.
+                            const lngA = normalizeLongitude(prevSeg[2]);
+                            const lngB = normalizeLongitude(seg[2]);
+                            const lngDiff = Math.abs(lngB - lngA);
+                            const isAntimeridian = lngDiff > 180;
 
                             if (isAntimeridian || (dist > 50 && !isLive) || timeDeltaSec > 1800) {
                                 gap = true;
@@ -1091,18 +1097,16 @@ export default function MapView({
                         ctx.globalAlpha = 1.0; // reset before each segment to avoid stale alpha bleed
                         ctx.beginPath();
                         if (isLiveSeg) {
-                            // Live-stitch segment: now safe to draw because livePathLat/Lng = renderLat/Lng
-                            // (the icon position). No more backward snap. Draw as thin solid line.
                             ctx.setLineDash([]);
-                            ctx.globalAlpha = isOutline ? 0.4 : 0.65;
+                            ctx.globalAlpha = isOutline ? 0.25 : 0.65;
                             if (!isOutline) ctx.strokeStyle = altColor;
                         } else if (isDashed) {
                             ctx.setLineDash([8, 12]);
-                            ctx.globalAlpha = isOutline ? 0.5 : 0.7;
+                            ctx.globalAlpha = isOutline ? 0.3 : 0.7;
                             if (!isOutline) ctx.strokeStyle = altColor;
                         } else {
                             ctx.setLineDash([]);
-                            ctx.globalAlpha = isOutline ? 0.8 : 1.0;
+                            ctx.globalAlpha = isOutline ? 0.5 : 1.0;
                             if (!isOutline) ctx.strokeStyle = altColor;
                         }
                         ctx.moveTo(pts[0].x, pts[0].y);
@@ -1122,8 +1126,10 @@ export default function MapView({
 
                     const drawTrack = (isOutline) => {
                         const baseWidth = zoom >= 12 ? 2.5 : 2;
-                        ctx.lineWidth = isOutline ? baseWidth * 2 : baseWidth;
-                        ctx.strokeStyle = isOutline ? 'rgba(0,0,0,0.8)' : '#ffffff';
+                        // Outline is only 1.5× wide (was 2×) — keeps it a subtle border,
+                        // not a visually separate second line.
+                        ctx.lineWidth = isOutline ? baseWidth * 1.5 : baseWidth;
+                        ctx.strokeStyle = isOutline ? 'rgba(0,0,0,0.55)' : '#ffffff';
 
                         let batch = [];
                         let batchColor = null;
