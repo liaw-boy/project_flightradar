@@ -387,10 +387,16 @@ export default function Sidebar({
                                 <span className="bp-flag">{getCountryFlag(depInfo.country)}</span>
                             )}
                             <div className="bp-iata">{displayDepCode}</div>
-                            <div className="bp-city">{depCity || depName || '---'}</div>
                             <div className="bp-sched">
                                 <span className="bp-sched-label">SCHED OUT</span>
-                                <span className="bp-sched-time">{routeInfo.departure_time || '--:--'}</span>
+                                {routeInfo.departure_time
+                                    ? <span className="bp-sched-time">{routeInfo.departure_time}</span>
+                                    : <span className="bp-sched-time bp-sched-na">
+                                        {routeInfo.flightStatus
+                                            ? routeInfo.flightStatus.toUpperCase()
+                                            : (plane.onGround ? 'ON GROUND' : 'AIRBORNE')}
+                                      </span>
+                                }
                             </div>
                             {(routeInfo.departure_terminal || routeInfo.departure_gate) && (
                                 <div className="bp-gate">
@@ -406,9 +412,6 @@ export default function Sidebar({
                                 <path d="M4,32 Q50,4 96,32" fill="none" stroke="rgba(34,211,238,0.25)" strokeWidth="1.5" strokeDasharray="4 3"/>
                             </svg>
                             <PlaneIcon size={15} className="bp-arc-plane" style={{ transform: 'rotate(90deg)' }} />
-                            <div className="bp-status-badge">
-                                {routeInfo.flightStatus || (plane.onGround ? 'ON GROUND' : 'IN FLIGHT')}
-                            </div>
                         </div>
 
                         {/* Destination */}
@@ -417,10 +420,12 @@ export default function Sidebar({
                                 <span className="bp-flag">{getCountryFlag(arrInfo.country)}</span>
                             )}
                             <div className="bp-iata">{displayArrCode}</div>
-                            <div className="bp-city">{arrCity || arrName || '---'}</div>
                             <div className="bp-sched">
                                 <span className="bp-sched-label">SCHED IN</span>
-                                <span className="bp-sched-time bp-sched-arr">{routeInfo.arrival_time || '--:--'}</span>
+                                {routeInfo.arrival_time
+                                    ? <span className="bp-sched-time bp-sched-arr">{routeInfo.arrival_time}</span>
+                                    : <span className="bp-sched-time bp-sched-na">N/A</span>
+                                }
                             </div>
                             {(routeInfo.arrival_terminal || routeInfo.arrival_gate) && (
                                 <div className="bp-gate" style={{ textAlign: 'right' }}>
