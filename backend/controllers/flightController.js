@@ -304,24 +304,132 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
 
         const metadataPromise = metadataWaterfall();
         const resolveRouteWaterfall = async () => {
-            // Priority 1: Dynamic Community API (ADSB.fi) — Most up-to-date
-            let liveRoute = await fetchRouteInfo(callsign);
-            if (liveRoute) return liveRoute;
+            // DB cache fast-path: if we have times and it's fresh (< 4h), return early
+            const ROUTE_TTL_MS = 4 * 60 * 60 * 1000;
+            if (dbRoute && dbRoute.departure_time && dbRoute.updatedAt &&
+                (Date.now() - new Date(dbRoute.updatedAt).getTime() < ROUTE_TTL_MS)) {
+                return {
+                    origin_iata:        dbRoute.origin_iata        || 'N/A',
+                    origin_name:        dbRoute.origin_name        || null,
+                    origin_city:        dbRoute.origin_city        || null,
+                    destination_iata:   dbRoute.destination_iata   || 'N/A',
+                    destination_name:   dbRoute.destination_name   || null,
+                    destination_city:   dbRoute.destination_city   || null,
+                    departure_time:     dbRoute.departure_time     || null,
+                    departure_terminal: dbRoute.departure_terminal || null,
+                    departure_gate:     dbRoute.departure_gate     || null,
+                    arrival_time:       dbRoute.arrival_time       || null,
+                    arrival_terminal:   dbRoute.arrival_terminal   || null,
+                    arrival_gate:       dbRoute.arrival_gate       || null,
+                    flightNumber:       dbRoute.flightNumber       || callsign,
+                    flightStatus:       dbRoute.flightStatus       || null,
+                    airline_name:       dbRoute.airline_name       || null,
+                    destination_weather: dbRoute.destination_weather || null,
+                    source: 'db_cache'
+                };
+            }
 
-            // Priority 2: Local Map (Airport/Route Dictionary)
+            // Fetch ADSB.fi (free, real-time ICAO routing) and AeroDataBox (paid, schedule/gate)
+            // in parallel to minimise latency
+            const adbKey = process.env.AERODATABOX_API_KEY;
+            const fetchAeroDataBox = async () => {
+                if (!adbKey || adbKey === 'your_key_here') return null;
+                try {
+                    const res = await fetch(
+                        `https://aerodatabox.p.rapidapi.com/flights/callsign/${callsign.trim().toUpperCase()}`,
+                        {
+                            headers: { 'X-RapidAPI-Key': adbKey, 'X-RapidAPI-Host': 'aerodatabox.p.rapidapi.com' },
+                            signal: AbortSignal.timeout(4000)
+                        }
+                    );
+                    if (!res.ok) return null;
+                    const data = await res.json();
+                    if (!Array.isArray(data) || data.length === 0) return null;
+                    const f = data[0];
+                    const fmtTime = (s) => {
+                        if (!s) return null;
+                        const d = new Date(s);
+                        return isNaN(d) ? s : d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    };
+                    const depRevised = f.departure?.revisedTimeLocal || f.departure?.revisedTimeUtc;
+                    const depSched   = f.departure?.scheduledTimeLocal || f.departure?.scheduledTimeUtc;
+                    const arrRevised = f.arrival?.revisedTimeLocal   || f.arrival?.revisedTimeUtc;
+                    const arrSched   = f.arrival?.scheduledTimeLocal  || f.arrival?.scheduledTimeUtc;
+                    return {
+                        origin_iata:        f.departure?.airport?.iata || null,
+                        origin_icao:        f.departure?.airport?.icao || null,
+                        origin_name:        f.departure?.airport?.name || null,
+                        origin_city:        f.departure?.airport?.municipalityName || null,
+                        destination_iata:   f.arrival?.airport?.iata || null,
+                        destination_icao:   f.arrival?.airport?.icao || null,
+                        destination_name:   f.arrival?.airport?.name || null,
+                        destination_city:   f.arrival?.airport?.municipalityName || null,
+                        departure_time:     fmtTime(depRevised || depSched),
+                        departure_terminal: f.departure?.terminal || null,
+                        departure_gate:     f.departure?.gate || null,
+                        arrival_time:       fmtTime(arrRevised || arrSched),
+                        arrival_terminal:   f.arrival?.terminal || null,
+                        arrival_gate:       f.arrival?.gate || null,
+                        flightNumber:       f.number || null,
+                        flightStatus:       f.status || null,
+                        airline_name:       f.airline?.name || null,
+                        source: 'aerodatabox'
+                    };
+                } catch (e) {
+                    logger.debug('FUSION', `AeroDataBox failed for ${callsign}: ${e.message}`);
+                    return null;
+                }
+            };
+
+            const [adsbFiRoute, adbRoute] = await Promise.all([
+                fetchRouteInfo(callsign),
+                fetchAeroDataBox()
+            ]);
+
+            // Merge: AeroDataBox has schedule/gate; ADSB.fi has real-time routing
+            if (adsbFiRoute || adbRoute) {
+                return {
+                    // Base from AeroDataBox (full schedule)
+                    ...(adbRoute  || {}),
+                    // ADSB.fi overrides airport codes (more real-time)
+                    ...(adsbFiRoute ? {
+                        origin_iata:      adsbFiRoute.origin_iata      || (adbRoute?.origin_iata),
+                        origin_icao:      adsbFiRoute.origin_icao      || (adbRoute?.origin_icao),
+                        origin_name:      adsbFiRoute.origin_name      || (adbRoute?.origin_name),
+                        origin_city:      adsbFiRoute.origin_city      || (adbRoute?.origin_city),
+                        destination_iata: adsbFiRoute.destination_iata || (adbRoute?.destination_iata),
+                        destination_icao: adsbFiRoute.destination_icao || (adbRoute?.destination_icao),
+                        destination_name: adsbFiRoute.destination_name || (adbRoute?.destination_name),
+                        destination_city: adsbFiRoute.destination_city || (adbRoute?.destination_city),
+                    } : {}),
+                    // Schedule data always from AeroDataBox (ADSB.fi doesn't have times)
+                    departure_time:     adbRoute?.departure_time     || null,
+                    departure_terminal: adbRoute?.departure_terminal || null,
+                    departure_gate:     adbRoute?.departure_gate     || null,
+                    arrival_time:       adbRoute?.arrival_time       || null,
+                    arrival_terminal:   adbRoute?.arrival_terminal   || null,
+                    arrival_gate:       adbRoute?.arrival_gate       || null,
+                    flightNumber:       adbRoute?.flightNumber || adsbFiRoute?.flightNumber || callsign,
+                    flightStatus:       adbRoute?.flightStatus       || null,
+                    airline_name:       adbRoute?.airline_name       || null,
+                };
+            }
+
+            // Priority 3: Local Map (Airport/Route Dictionary)
             let localRoute = await fetchLocalOSINTRoute(callsign);
             if (localRoute) return localRoute;
 
+            // Priority 4: DB stale cache (no times, but at least has codes)
             if (dbRoute) {
                 return {
-                    origin_iata: dbRoute.origin_iata || dbRoute.departureAirport || 'N/A',
-                    origin_name: dbRoute.origin_name || null,
-                    origin_city: dbRoute.origin_city || null,
-                    destination_iata: dbRoute.destination_iata || dbRoute.arrivalAirport || 'N/A',
-                    destination_name: dbRoute.destination_name || null,
-                    destination_city: dbRoute.destination_city || null,
+                    origin_iata:        dbRoute.origin_iata        || dbRoute.departureAirport || 'N/A',
+                    origin_name:        dbRoute.origin_name        || null,
+                    origin_city:        dbRoute.origin_city        || null,
+                    destination_iata:   dbRoute.destination_iata   || dbRoute.arrivalAirport   || 'N/A',
+                    destination_name:   dbRoute.destination_name   || null,
+                    destination_city:   dbRoute.destination_city   || null,
                     destination_weather: dbRoute.destination_weather || null,
-                    flightNumber: dbRoute.flightNumber || callsign
+                    flightNumber:       dbRoute.flightNumber       || callsign
                 };
             }
             return { origin_iata: 'N/A', destination_iata: 'N/A', destination_weather: null };
@@ -414,14 +522,24 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
 
         const mergedRoute = {
             callsign,
-            flightNumber: routeInfo.flightNumber || callsign,
-            origin_iata: routeInfo.origin_iata,
-            origin_name: routeInfo.origin_name,
-            origin_city: routeInfo.origin_city,
-            destination_iata: routeInfo.destination_iata,
-            destination_name: routeInfo.destination_name,
-            destination_city: routeInfo.destination_city,
-            destination_weather: routeInfo.destination_weather,
+            flightNumber:       routeInfo.flightNumber       || callsign,
+            origin_iata:        routeInfo.origin_iata        || null,
+            origin_icao:        routeInfo.origin_icao        || null,
+            origin_name:        routeInfo.origin_name        || null,
+            origin_city:        routeInfo.origin_city        || null,
+            destination_iata:   routeInfo.destination_iata   || null,
+            destination_icao:   routeInfo.destination_icao   || null,
+            destination_name:   routeInfo.destination_name   || null,
+            destination_city:   routeInfo.destination_city   || null,
+            departure_time:     routeInfo.departure_time     || null,
+            departure_terminal: routeInfo.departure_terminal || null,
+            departure_gate:     routeInfo.departure_gate     || null,
+            arrival_time:       routeInfo.arrival_time       || null,
+            arrival_terminal:   routeInfo.arrival_terminal   || null,
+            arrival_gate:       routeInfo.arrival_gate       || null,
+            flightStatus:       routeInfo.flightStatus       || null,
+            airline_name:       routeInfo.airline_name       || null,
+            destination_weather: routeInfo.destination_weather || null,
             updatedAt: new Date()
         };
 
