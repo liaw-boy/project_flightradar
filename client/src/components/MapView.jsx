@@ -829,35 +829,27 @@ export default function MapView({
         const map = mapRef.current;
         if (!map || !selectedIcao24 || !planesDict[selectedIcao24]) return;
 
-        // [v3.4 Fix] Respect user panning. DO NOT force camera if user is currently interacting.
-        if (userInteractingRef.current) return;
-
         const plane = planesDict[selectedIcao24];
         const lat = plane.renderLat || plane.lat;
         const lng = plane.renderLng || plane.lng;
-
         const targetLatLng = L.latLng(lat, lng);
+
+        // Only pan on selection if the plane is NOT currently visible in the viewport.
+        // If it's already on screen, keep the user's current view and zoom level.
+        if (map.getBounds().contains(targetLatLng)) return;
+
+        // Plane is off-screen — bring it into view without changing zoom level.
         const isMobile = window.innerWidth <= 768;
-
-        // 手機：不強制改 zoom，只 pan；桌面：zoom 至少 10
-        const targetZoom = isMobile ? map.getZoom() : Math.max(map.getZoom(), 10);
-
-        // 飛機已在視野中心附近 → 跳過，避免無意義跳動
-        if (map.getCenter().distanceTo(targetLatLng) < 5 && map.getZoom() === targetZoom) {
-            return;
-        }
-
         if (isMobile) {
-            // 手機底部 compact card 約 100px，只需輕微向上偏移讓飛機不被卡片遮住
             const cardH = 110;
-            const offsetPx = cardH / 2;
-            const pt = map.project(targetLatLng, targetZoom);
-            const adjustedLatLng = map.unproject(L.point(pt.x, pt.y + offsetPx), targetZoom);
+            const zoom = map.getZoom();
+            const pt = map.project(targetLatLng, zoom);
+            const adjustedLatLng = map.unproject(L.point(pt.x, pt.y + cardH / 2), zoom);
             map.panTo(adjustedLatLng, { animate: true, duration: 0.4, easeLinearity: 0.5 });
         } else {
-            map.setView(targetLatLng, targetZoom, { animate: true });
+            map.panTo(targetLatLng, { animate: true, duration: 0.5 });
         }
-    }, [selectedIcao24, planesDict]);
+    }, [selectedIcao24]); // Only fire on selection change, not on every plane update
 
     // ===== 動畫引擎與 Canvas 渲染 (Project AERO-SYNC) =====
     useEffect(() => {
@@ -978,10 +970,22 @@ export default function MapView({
                 }
             }
 
-            // Smart Camera Pan
-            if (currentSelected && currentPlanes[currentSelected] && trackModeRef.current && !userInteractingRef.current) {
+            // Smart Camera Pan — only follow when plane drifts near viewport edge.
+            // "Near edge" = plane is within 15% of viewport width/height from the border.
+            if (currentSelected && currentPlanes[currentSelected] && !userInteractingRef.current) {
                 const sp = currentPlanes[currentSelected];
-                map.panTo([sp.renderLat, sp.renderLng], { animate: true, duration: isPlaybackActive ? 0.1 : 0.3, easeLinearity: 0.5 });
+                const planePx = map.latLngToContainerPoint([sp.renderLat ?? sp.lat, sp.renderLng ?? sp.lng]);
+                const mapSz = map.getSize();
+                const edgeMarginX = mapSz.x * 0.15;
+                const edgeMarginY = mapSz.y * 0.15;
+                const nearEdge =
+                    planePx.x < edgeMarginX || planePx.x > mapSz.x - edgeMarginX ||
+                    planePx.y < edgeMarginY || planePx.y > mapSz.y - edgeMarginY;
+
+                if (nearEdge || isPlaybackActive) {
+                    map.panTo([sp.renderLat ?? sp.lat, sp.renderLng ?? sp.lng],
+                        { animate: true, duration: isPlaybackActive ? 0.1 : 0.6, easeLinearity: 0.5 });
+                }
             }
 
             // === Canvas Drawing Phase ===

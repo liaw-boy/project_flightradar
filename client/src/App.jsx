@@ -211,7 +211,8 @@ export default function App() {
             }
             setSelectedIcao24(icao24);
             setShowFullSidebar(false); // 手機先顯示 compact card
-            setTrackMode(true);
+            // Don't auto-enable tracking on click — tracking activates automatically
+            // only when the plane drifts near the viewport edge (handled in MapView).
             
             // [v11.0] Activate High-Res Zero-Truncation Buffer
             trackStore.setSelected(icao24);
