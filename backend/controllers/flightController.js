@@ -304,9 +304,15 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
 
         const metadataPromise = metadataWaterfall();
         const resolveRouteWaterfall = async () => {
-            // DB cache fast-path: if we have times and it's fresh (< 4h), return early
+            // DB cache fast-path: serve cached route if it has times, is fresh (< 4h),
+            // AND is not a stale "Arrived" route for an aircraft that is currently airborne.
+            // An "Arrived" route for an airborne aircraft means the callsign was reused for
+            // a new flight — the old route must not be served to avoid misleading the user.
             const ROUTE_TTL_MS = 4 * 60 * 60 * 1000;
-            if (dbRoute && dbRoute.departure_time && dbRoute.updatedAt &&
+            // Never serve cache for "Arrived" routes — the callsign may have been reused
+            // for a new flight. Force a live re-fetch so the correct route is shown.
+            const isArrivedInCache = dbRoute?.flightStatus === 'Arrived';
+            if (dbRoute && dbRoute.departure_time && dbRoute.updatedAt && !isArrivedInCache &&
                 (Date.now() - new Date(dbRoute.updatedAt).getTime() < ROUTE_TTL_MS)) {
                 return {
                     origin_iata:        dbRoute.origin_iata        || 'N/A',
@@ -420,7 +426,8 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
             if (localRoute) return localRoute;
 
             // Priority 4: DB stale cache (no times, but at least has codes)
-            if (dbRoute) {
+            // Skip if status is "Arrived" — callsign may be reused for a new flight.
+            if (dbRoute && dbRoute.flightStatus !== 'Arrived') {
                 return {
                     origin_iata:        dbRoute.origin_iata        || dbRoute.departureAirport || 'N/A',
                     origin_name:        dbRoute.origin_name        || null,

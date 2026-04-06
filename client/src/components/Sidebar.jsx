@@ -156,7 +156,13 @@ export default function Sidebar({
     }, [icao24, plane.callsign]);
 
     const aircraft = fusionData?.aircraft || {};
-    const routeInfo = fusionData?.route || {};
+    // Guard: if the API returned a route with status "Arrived" but the plane is currently
+    // airborne, the data belongs to the PREVIOUS flight (callsign was reused).
+    // Discard it and show no route info so we don't mislead the user.
+    const rawRoute = fusionData?.route || {};
+    const isStaleArrivedRoute =
+        rawRoute.flightStatus === 'Arrived' && !plane.onGround;
+    const routeInfo = isStaleArrivedRoute ? {} : rawRoute;
 
     const displayRegistration = aircraft.registration || metadata?.registration || plane.registration || '--';
     const typecode = aircraft.type || metadata?.typecode || plane.typecode || '--';

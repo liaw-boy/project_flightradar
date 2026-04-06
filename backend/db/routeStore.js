@@ -69,6 +69,11 @@ const RouteStore = {
     get(callsign) {
         return cache.get(normalizeKey(callsign)) || null;
     },
+
+    /** Remove a cached route entirely — used when a new flight session starts */
+    invalidate(callsign) {
+        cache.del(normalizeKey(callsign));
+    },
 };
 
 module.exports = RouteStore;

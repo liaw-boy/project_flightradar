@@ -1918,6 +1918,12 @@ async function ingestTrackPoints(states, timeUnix) {
             session = { sessionId: newSessionId, callsign, lastSeen: now, startTime: timeUnix, onGround, groundIdleSince: null, groundCounter: 0, airborneCounter: 0 };
             activeSessions.set(icao24, session);
 
+            // Invalidate stale route cache for this callsign so the next sidebar click
+            // fetches a fresh route (prevents showing the previous flight's Arrived route).
+            if (callsign && callsign !== 'N/A') {
+                Route.invalidate(callsign);
+            }
+
             sessionCreateDocs.push({
                 sessionId: newSessionId,
                 icao24,
