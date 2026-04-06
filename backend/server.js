@@ -3806,14 +3806,26 @@ async function fetchTracksInternal(icao24) {
         sessionId        = memSession.sessionId;
         sessionStartUnix = memSession.startTime; // Unix seconds, set at session creation
     } else {
-        // Aircraft not currently active — query DB for its latest session
-        // (handles recently-landed aircraft whose session was just COMPLETED)
+        // Aircraft not currently active — query DB for its latest session.
+        // Guard: only accept ACTIVE sessions, or COMPLETED sessions updated
+        // within the last 2 hours.  Sessions older than that belong to a
+        // previous flight and must NOT contaminate the current view.
         const dbSession = await FlightSession.findLatestActiveByIcao24(icao);
         if (dbSession) {
-            sessionId        = dbSession.sessionId;
-            sessionStartUnix = dbSession.startTime
-                ? Math.floor(new Date(dbSession.startTime).getTime() / 1000)
-                : null;
+            const sessionAgeMs = dbSession.updatedAt
+                ? Date.now() - dbSession.updatedAt.getTime()
+                : Infinity;
+            const MAX_COMPLETED_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+            if (dbSession.status === 'ACTIVE' || sessionAgeMs < MAX_COMPLETED_AGE_MS) {
+                sessionId        = dbSession.sessionId;
+                sessionStartUnix = dbSession.startTime
+                    ? Math.floor(dbSession.startTime.getTime() / 1000)
+                    : null;
+            } else {
+                // Stale COMPLETED session — belongs to a previous flight, skip it
+                logger.debug('TRACK', `${icao24}: skipping stale ${dbSession.status} session (${Math.round(sessionAgeMs / 3600000)}h old), returning empty path`);
+            }
         }
     }
 
