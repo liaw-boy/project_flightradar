@@ -95,7 +95,7 @@ export default function TopBar({
                         onClick={() => setShowSettings(!showSettings)}
                     >
                         <Settings size={16} />
-                        <span>{t('filters')}</span>
+                        <span>{t('settings')}</span>
                     </button>
 
                     {showSettings && (

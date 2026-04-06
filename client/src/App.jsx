@@ -374,18 +374,9 @@ export default function App() {
             {/* Right Status Column */}
             <div className="right-hud">
                 <Dashboard
-                    planeCount={planeCount}
-                    airCount={airCount}
-                    groundCount={groundCount}
                     apiStatus={apiStatus}
                     apiStatusClass={apiStatusClass}
                     apiErrorDetail={apiErrorDetail}
-                    latency={latency}
-                    lastUpdateTime={lastUpdateTime}
-                    nextRefresh={throttleSeconds}
-                    apiStats={apiStats}
-                    zoom={zoom}
-                    usageStats={usageStats}
                 />
                 <PlaneList
                     planesDict={planesDict}

@@ -76,8 +76,9 @@ const translations = {
         inferred: 'INFERRED',
         spiActive: '⚠️ ACTIVE',
         spiNormal: 'Normal',
-        // Filters
-        filters: 'FILTERS',
+        // Settings / Filters
+        filters: 'SETTINGS',
+        settings: 'SETTINGS',
         showGround: 'Show Ground',
         showEmergency: 'Show Emergency',
         showLow: 'Show Low Alt (<1500m)',
@@ -164,8 +165,9 @@ const translations = {
         inferred: '推測結果',
         spiActive: '⚠️ 發送中 (SPI)',
         spiNormal: '正常',
-        // Filters
-        filters: '篩選器',
+        // Settings / Filters
+        filters: '設定',
+        settings: '設定',
         showGround: '顯示地面',
         showEmergency: '顯示緊急',
         showLow: '顯示低空 (<1500m)',
