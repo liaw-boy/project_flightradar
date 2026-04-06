@@ -60,9 +60,9 @@ CREATE INDEX IF NOT EXISTS idx_tp_icao24  ON track_points(icao24);
 CREATE INDEX IF NOT EXISTS idx_tp_ts      ON track_points(ts);
 `);
 
-// ── TTL cleanup (24 h) — run on startup and every hour ───────────────────
+// ── TTL cleanup (72 h) — run on startup and every hour ───────────────────
 function pruneOldTrackPoints() {
-    const cutoff = Math.floor(Date.now() / 1000) - 24 * 3600;
+    const cutoff = Math.floor(Date.now() / 1000) - 72 * 3600;
     const info = db.prepare('DELETE FROM track_points WHERE ts < ?').run(cutoff);
     if (info.changes > 0) {
         console.log(`[SQLite] Pruned ${info.changes} track points older than 24h`);

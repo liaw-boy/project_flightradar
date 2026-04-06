@@ -1247,7 +1247,7 @@ async function refresh() {
       statCard((health.cacheSize||0).toLocaleString(), 'AIRCRAFT', 'c-teal', 'In-memory cache') +
       statCard('#' + (ing.totalBatches||0), 'SYNC CYCLES', 'c-green', (ing.lastBatchMs||0) + 'ms last latency') +
       statCard((ing.totalPoints||0).toLocaleString(), 'TRACK DOTS', 'c-amber', '24h persistence') +
-      statCard(upStr, 'UPTIME', 'c-purple', 'Started ' + startedStr) +
+      statCard(upStr, 'UPTIME', 'c-purple', 'Started ' + startedAt.toLocaleString('zh-TW', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false })) +
       statCard(formatBytes(stor.dbSize||0), 'DB SIZE', 'c-red', 'SQLite storage');
 
     // ── Hardware ──
@@ -2207,6 +2207,8 @@ async function fetchViewportOverlay() {
         if (vpStates.length > 0) {
             mergeStates(vpStates, 'merge');  // merge: preserve existing desc/year/typecode
             pruneAndBroadcast();
+            // Also ingest track points for viewport aircraft (6s resolution vs 25s global)
+            ingestTrackPoints(vpStates, Math.floor(Date.now() / 1000)).catch(() => {});
             logger.debug('SYNC', `Viewport overlay: ${vpStates.length} planes | sources: ${vpSources.join('+')} | ${Math.round(performance.now()-t0)}ms`);
         }
     } catch (e) {
