@@ -166,14 +166,20 @@ export default function Sidebar({
 
     const displayRegistration = aircraft.registration || metadata?.registration || plane.registration || '--';
     const typecode = aircraft.type || metadata?.typecode || plane.typecode || '--';
-    
+
     // [v12.5] P0 Fix: Information Anemia - Priority resolve names
     const _isKnown = v => v && v !== 'Unknown' && v !== 'unknown' && v !== '--';
-    const aircraftModel = (_isKnown(aircraft.description) && aircraft.description) ||
+    // model: prefer Mictronics full model name (e.g. "Boeing 777-35E(ER)") over type code
+    const aircraftModel = (_isKnown(aircraft.model) && aircraft.model) ||
+                          (_isKnown(aircraft.description) && aircraft.description) ||
                           (_isKnown(plane.description) && plane.description) ||
                           [aircraft.manufacturer, aircraft.type].filter(_isKnown).join(' ') ||
                           (metadata ? [metadata.manufacturerName, metadata.model].filter(_isKnown).join(' ') : '') ||
                           '';
+    // operator: prefer Mictronics operator (actual owner) over callsign-derived airline
+    const operatorName = (_isKnown(aircraft.operator) && aircraft.operator) ||
+                         (aircraft.airline && _isKnown(aircraft.airline) ? aircraft.airline : null) ||
+                         null;
 
     // ── Image Resolution: Planespotters (multiple) ──────
     const [photos, setPhotos] = useState([]);
@@ -554,7 +560,8 @@ export default function Sidebar({
                         <DataRow label={t('icao24')} value={icao24.toUpperCase()} />
                         <DataRow label={t('registration')} value={displayRegistration} />
                         <DataRow label={t('type')} value={typecode} />
-                        {aircraftModel && <DataRow label="Aircraft" value={aircraftModel} />}
+                        {aircraftModel && <DataRow label="Model" value={aircraftModel} />}
+                        {operatorName && <DataRow label="Operator" value={operatorName} />}
                         <DataRow label={t('airline')} value={
                             (aircraft.airline && aircraft.airline !== 'Unknown') ? aircraft.airline : (airlineName || '--')
                         } />

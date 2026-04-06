@@ -1,5 +1,6 @@
 const Aircraft = require('../db/aircraftStore');
 const Route = require('../db/routeStore');
+const MictronicsDb = require('../db/mictronicsDb');
 const { AirportDictionary, RouteDictionary } = require('../db/staticMaps');
 const logger = require('../logger');
 
@@ -222,19 +223,35 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
 
     try {
         // [v12.0] High-Performance Layer 0: Local Master Database (Mictronics + legacy)
+        // Also enrich with Mictronics SQLite registry for model name and operator.
+        const micData = MictronicsDb.lookup(hex);
         let resolvedMetadata = null;
         if (dbAircraft && dbAircraft.type_code) {
             logger.debug('FUSION', `L0 DB match: ${hex} → ${dbAircraft.type_code} (src:${dbAircraft.source || 'legacy'})`);
-            const rawAirline = dbAircraft.operator || dbAircraft.airline || '';
+            const rawAirline = dbAircraft.operator || dbAircraft.airline || micData?.operator || '';
             const knownAirline = rawAirline && rawAirline !== 'Unknown' ? rawAirline : null;
             resolvedMetadata = {
-                type: dbAircraft.type_code,
-                registration: dbAircraft.registration || 'Unknown',
-                // model: "Boeing 737-800" from Mictronics aircraft_types enrichment
-                description: dbAircraft.model || dbAircraft.manufacturerName || 'Unknown',
+                type:         dbAircraft.type_code || micData?.typecode || null,
+                registration: dbAircraft.registration || micData?.registration || 'Unknown',
+                model:        micData?.model || dbAircraft.model || null,
+                description:  micData?.model || dbAircraft.model || dbAircraft.manufacturerName || 'Unknown',
                 manufacturer: dbAircraft.manufacturerName || dbAircraft.manufacturer || 'Unknown',
-                airline: knownAirline || 'Unknown',
-                icon_type: dbAircraft.icon_type || 'STANDARD_JET'
+                airline:      knownAirline || 'Unknown',
+                operator:     micData?.operator || dbAircraft.operator || null,
+                icon_type:    dbAircraft.icon_type || 'STANDARD_JET'
+            };
+        } else if (micData && (micData.typecode || micData.registration)) {
+            // Mictronics has data but live cache doesn't — use Mictronics directly
+            logger.debug('FUSION', `L0 Mictronics-only match: ${hex} → ${micData.typecode}`);
+            resolvedMetadata = {
+                type:         micData.typecode || 'Unknown',
+                registration: micData.registration || 'Unknown',
+                model:        micData.model || null,
+                description:  micData.model || 'Unknown',
+                manufacturer: 'Unknown',
+                airline:      micData.operator || 'Unknown',
+                operator:     micData.operator || null,
+                icon_type:    'STANDARD_JET'
             };
         }
 
@@ -520,7 +537,9 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
             operator: aircraftInfo.airline,
             airline: aircraftInfo.airline,
             icon_type: aircraftInfo.icon_type,
-            description: aircraftInfo.description || (dbAircraft ? (dbAircraft.model || dbAircraft.description) : null),
+            description:  aircraftInfo.description || micData?.model || (dbAircraft ? (dbAircraft.model || dbAircraft.description) : null),
+            model:        aircraftInfo.model        || micData?.model || (dbAircraft ? dbAircraft.model : null),
+            operator:     aircraftInfo.operator     || micData?.operator || aircraftInfo.airline || null,
             photo_url: photoUrl || (dbAircraft ? dbAircraft.photo_url : null),
             photographer: photographer || (dbAircraft ? dbAircraft.photographer : null),
             is_military_or_private: aircraftInfo.is_military_or_private,

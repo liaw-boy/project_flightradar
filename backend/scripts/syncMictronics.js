@@ -1,62 +1,40 @@
+'use strict';
 /**
- * syncMictronics.js — Mictronics Aircraft Database Sync
+ * syncMictronics.js — Mictronics Aircraft Database Weekly Sync
  *
  * Downloads two datasets from mictronics.de (weekly updated, ODbL license):
- *   1. aircraft_db   → ICAO24 hex → { registration, typecode, operator }  (~400k records)
- *   2. aircraft_types → ICAO typecode → { description, wtc }              (~1k records)
+ *   1. aircraft_db   → ICAO24 hex → { r: registration, t: typecode, d: operator, desc: model }
+ *   2. aircraft_types → ICAO typecode → { wtc }  (wake-turbulence class)
  *
- * Both are ZIP archives. aircraft_db contains one JSON file per 2-char hex prefix.
+ * Data is stored in the SQLite mictronics_aircraft table via mictronicsDb.bulkUpsert().
  *
  * Run modes:
- *   node scripts/syncMictronics.js           — skip if data already exists
+ *   node scripts/syncMictronics.js              — skip if table already has data
  *   FORCE_RESYNC=true node scripts/syncMictronics.js — always re-download
  */
 
-'use strict';
+const https  = require('https');
+const http   = require('http');
+const fs     = require('fs');
+const path   = require('path');
+const AdmZip = require('adm-zip');
 
-const https    = require('https');
-const http     = require('http');
-const fs       = require('fs');
-const path     = require('path');
-const AdmZip   = require('adm-zip');
-const Aircraft = require('../db/aircraftStore');
-
-const DB_URL  = 'https://www.mictronics.de/aircraft-database/aircraft_db.php';
+const DB_URL   = 'https://www.mictronics.de/aircraft-database/aircraft_db.php';
 const TYPE_URL = 'https://www.mictronics.de/aircraft-database/aircraft_types.php';
 
-const TEMP_DB_ZIP   = path.join(__dirname, '../data/mictronics_db.zip');
-const TEMP_TYPE_ZIP = path.join(__dirname, '../data/mictronics_types.zip');
-const TYPE_CACHE    = path.join(__dirname, '../data/aircraft_types.json');
+const TEMP_DIR      = path.join(__dirname, '..', 'data');
+const TEMP_DB_ZIP   = path.join(TEMP_DIR, 'mictronics_db.zip');
+const TEMP_TYPE_ZIP = path.join(TEMP_DIR, 'mictronics_types.zip');
+const TYPE_CACHE    = path.join(TEMP_DIR, 'aircraft_types.json');
 
-const BATCH_SIZE = 500;                    // smaller batches → lower per-write CPU spike
-const BATCH_DELAY_MS = 150;               // pause between batches — keeps MongoDB CPU < ~40%
-const MICTRONICS_SOURCE_TAG = 'mictronics'; // stored in Aircraft.source to track provenance
+const BATCH_SIZE = 2000;  // rows per SQLite transaction
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-// ── Wake-turbulence class → icon_type ────────────────────────────────────────
-// wtc: J=Super-Heavy(A380), H=Heavy(Wide), M=Medium(Narrow), L=Light
-function wtcToIconType(wtc, typecode) {
-    const tc = (typecode || '').toUpperCase();
-    // Military override from typecode patterns
-    const MILITARY_PREFIXES = ['F1','F2','F3','F4','F5','F6','F7','F8','F9','A10','B52','B1B','B2','C17','C130','KC1','KC3','KC4','KC7','U2'];
-    if (MILITARY_PREFIXES.some(p => tc.startsWith(p))) return 'MILITARY';
-
-    switch ((wtc || '').toUpperCase()) {
-        case 'J': return 'HEAVY_JET';    // Super (A380, AN-225)
-        case 'H': return 'HEAVY_JET';    // Heavy  (B777, B744, A333…)
-        case 'M': return 'STANDARD_JET'; // Medium (B738, A320…)
-        case 'L': return 'LIGHT_PROP';   // Light  (C172, SR22…)
-        default:  return 'STANDARD_JET';
-    }
-}
-
-// ── Download helper (follows redirects) ──────────────────────────────────────
+// ── Download helper (follows redirects, 60s timeout) ─────────────────────────
 function downloadFile(url, dest) {
     return new Promise((resolve, reject) => {
         const proto = url.startsWith('https') ? https : http;
-        const file = fs.createWriteStream(dest);
-        const req = proto.get(url, { timeout: 30000 }, res => {
+        const file  = fs.createWriteStream(dest);
+        const req   = proto.get(url, { timeout: 60000 }, res => {
             if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
                 file.close();
                 return downloadFile(res.headers.location, dest).then(resolve).catch(reject);
@@ -73,42 +51,38 @@ function downloadFile(url, dest) {
     });
 }
 
-// ── Parse a single aircraft_db JSON entry ────────────────────────────────────
-// Mictronics aircraft_db value format:
-//   { "r": "N1234", "t": "B738", "f": "A0", "d": "United Airlines", "desc": "Boeing 737-800" }
-//   `d`    = airline / operator name
-//   `desc` = human-readable aircraft model name (e.g. "Eurocopter EC145 C-2") — may be absent
-//
-// Mictronics aircraft_types format: { "B738": { "desc": "L2J", "wtc": "M" } }
-//   aircraft_types `desc` = ICAO type classification code ("L2J" = Land,2engines,Jet) — NOT a model name
-//   Only `wtc` is used from aircraft_types.
-function parseDbEntry(hex, entry, typesMap) {
-    const typecode = (entry.t || '').trim().toUpperCase() || null;
-    const typeInfo = typecode && typesMap[typecode] ? typesMap[typecode] : null;
-    const wtc      = typeInfo ? typeInfo.wtc : null;
-    const iconType = wtcToIconType(wtc, typecode);
-    const operator = (entry.d || '').trim() || null;
-    // `desc` in the aircraft_db entry is the human-readable model name
-    const modelDesc = (entry.desc || '').trim() || null;
+// ── Load aircraft_types from ZIP or cached JSON ───────────────────────────────
+function loadAircraftTypes(zipPath, logger) {
+    if (fs.existsSync(TYPE_CACHE)) {
+        try {
+            const cached = JSON.parse(fs.readFileSync(TYPE_CACHE, 'utf8'));
+            if (Object.keys(cached).length > 0) {
+                logger(`[Mictronics] Using cached aircraft_types.json (${Object.keys(cached).length} types)`);
+                return cached;
+            }
+        } catch (_) {}
+    }
 
-    return {
-        hex:          hex.toLowerCase(),
-        icao24:       hex.toLowerCase(),
-        registration: (entry.r || '').trim() || null,
-        type_code:    typecode,
-        typecode:     typecode,
-        operator:     operator,
-        airline:      operator,
-        model:        modelDesc,
-        icon_type:    iconType,
-        source:       MICTRONICS_SOURCE_TAG,
-        lastUpdated:  new Date()
-    };
+    try {
+        const zip      = new AdmZip(zipPath);
+        const jsonEntry = zip.getEntries().find(e => !e.isDirectory && e.name.endsWith('.json'));
+        if (jsonEntry) {
+            const types = JSON.parse(jsonEntry.getData().toString('utf8'));
+            fs.writeFileSync(TYPE_CACHE, JSON.stringify(types), 'utf8');
+            logger(`[Mictronics] aircraft_types loaded: ${Object.keys(types).length} entries`);
+            return types;
+        }
+    } catch (e) {
+        logger(`[Mictronics] WARN: could not load aircraft_types: ${e.message}`);
+    }
+    return {};
 }
 
-// ── Import aircraft_db ZIP into MongoDB ───────────────────────────────────────
-async function importAircraftDb(zipPath, typesMap, logger) {
-    logger(`[Mictronics] Extracting aircraft_db ZIP (${(fs.statSync(zipPath).size / 1024 / 1024).toFixed(1)} MB)...`);
+// ── Import ZIP into SQLite via mictronicsDb ───────────────────────────────────
+function importAircraftDb(zipPath, typesMap, logger) {
+    const MictronicsDb = require('../db/mictronicsDb');
+
+    logger(`[Mictronics] Extracting ZIP (${(fs.statSync(zipPath).size / 1024 / 1024).toFixed(1)} MB)...`);
 
     let zip;
     try {
@@ -117,192 +91,120 @@ async function importAircraftDb(zipPath, typesMap, logger) {
         throw new Error(`Failed to open ZIP: ${err.message}`);
     }
 
-    const entries = zip.getEntries().filter(e => !e.isDirectory && e.name.endsWith('.json'));
-    logger(`[Mictronics] Found ${entries.length} JSON shards in ZIP`);
+    const shards = zip.getEntries().filter(e => !e.isDirectory && e.name.endsWith('.json'));
+    logger(`[Mictronics] ${shards.length} JSON shards found`);
 
-    let totalProcessed = 0;
-    let totalUpdated   = 0;
+    let totalRows = 0;
+    let batch     = [];
 
-    for (const entry of entries) {
+    const flush = () => {
+        if (batch.length === 0) return;
+        MictronicsDb.bulkUpsert(batch);
+        totalRows += batch.length;
+        batch = [];
+    };
+
+    for (const entry of shards) {
         let shard;
         try {
             shard = JSON.parse(entry.getData().toString('utf8'));
         } catch (e) {
-            logger(`[Mictronics] Skipping malformed shard ${entry.name}: ${e.message}`);
+            logger(`[Mictronics] Skipping malformed shard ${entry.name}`);
             continue;
         }
 
-        // Mictronics dump1090-fa format: shard file "a0.json" contains keys that are
-        // the last 4 hex chars. Prepend the 2-char filename prefix to build full ICAO24.
-        // Some shards may use full 6-char keys directly — handle both.
-        const shardPrefix = entry.name.replace(/\.json$/i, '').toLowerCase(); // e.g. "a0"
+        // Shard filename prefix: "a0.json" → prefix "a0"
+        const shardPrefix  = entry.name.replace(/\.json$/i, '').toLowerCase();
+        const expectedSufLen = 6 - shardPrefix.length;
 
-        const hexKeys = Object.keys(shard);
-        let bulkOps = [];
-
-        for (const rawKey of hexKeys) {
+        for (const [rawKey, val] of Object.entries(shard)) {
             const key = rawKey.toLowerCase();
-            // Build full 6-char ICAO24 hex.
-            // Rule: shardPrefix + key must equal exactly 6 valid hex chars.
-            // Prefix length varies: 1-char ("a"), 2-char ("a0"), or 3-char ("406").
-            let hex;
-            const expectedKeyLen = 6 - shardPrefix.length;
-            if (key.length === expectedKeyLen && /^[0-9a-f]+$/.test(key)) {
-                hex = shardPrefix + key;      // normal case: concatenate prefix + suffix
+            let icao24;
+
+            if (key.length === expectedSufLen && /^[0-9a-f]+$/.test(key)) {
+                icao24 = shardPrefix + key;
             } else if (key.length === 6 && /^[0-9a-f]{6}$/.test(key)) {
-                hex = key;                    // shard already stores full 6-char hex
+                icao24 = key;
             } else {
-                continue;                     // skip malformed entries
+                continue;
             }
 
-            const parsed = parseDbEntry(hex, shard[rawKey], typesMap);
+            const typecode   = (val.t || '').trim().toUpperCase() || null;
+            const registration = (val.r || '').trim() || null;
+            const operator   = (val.d || '').trim() || null;
+            const model      = (val.desc || '').trim() || null;
 
-            // Only set fields that are non-null to avoid overwriting richer data
-            const setFields = {
-                // icao24 must be in $set (not just $setOnInsert) so the required constraint
-                // is satisfied on new inserts without triggering duplicate-key on updates.
-                // Both hex and icao24 hold the same lowercase ICAO24 value.
-                icao24: parsed.hex,
-                hex:    parsed.hex,
-                icon_type:   parsed.icon_type,
-                source:      MICTRONICS_SOURCE_TAG,
-                lastUpdated: parsed.lastUpdated,
-            };
-            if (parsed.registration) setFields.registration = parsed.registration;
-            if (parsed.type_code)    setFields.type_code    = parsed.type_code;
-            if (parsed.type_code)    setFields.typecode     = parsed.type_code;
-            if (parsed.operator)     setFields.operator     = parsed.operator;
-            if (parsed.operator)     setFields.airline      = parsed.operator;
-            if (parsed.model)        setFields.model        = parsed.model;
+            // Skip completely empty records
+            if (!registration && !typecode && !operator && !model) continue;
 
-            bulkOps.push({
-                updateOne: {
-                    filter: { icao24: parsed.hex },
-                    update: { $set: setFields },
-                    upsert: true
+            batch.push({ icao24, registration, typecode, operator, model });
+
+            if (batch.length >= BATCH_SIZE) {
+                flush();
+                if (totalRows % 50000 === 0) {
+                    logger(`[Mictronics] Progress: ${totalRows.toLocaleString()} rows written`);
                 }
-            });
-
-            if (bulkOps.length >= BATCH_SIZE) {
-                const result = await Aircraft.bulkWrite(bulkOps, { ordered: false });
-                totalUpdated   += (result.upsertedCount || 0) + (result.modifiedCount || 0);
-                totalProcessed += bulkOps.length;
-                logger(`[Mictronics] Progress: ${totalProcessed.toLocaleString()} queued | ${totalUpdated.toLocaleString()} written`);
-                bulkOps = [];
-                await sleep(BATCH_DELAY_MS); // throttle: give MongoDB CPU breathing room
             }
         }
-
-        if (bulkOps.length > 0) {
-            const result = await Aircraft.bulkWrite(bulkOps, { ordered: false });
-            totalUpdated   += (result.upsertedCount || 0) + (result.modifiedCount || 0);
-            totalProcessed += bulkOps.length;
-            await sleep(BATCH_DELAY_MS);
-        }
     }
 
-    logger(`[Mictronics] Aircraft DB import complete: ${totalProcessed.toLocaleString()} queued, ${totalUpdated.toLocaleString()} written to DB`);
-    return totalProcessed;
+    flush();
+    logger(`[Mictronics] Import complete: ${totalRows.toLocaleString()} rows written to SQLite`);
+    return totalRows;
 }
 
-// ── Load aircraft_types (ZIP or plain JSON) ───────────────────────────────────
-async function loadAircraftTypes(zipPath, logger) {
-    // If cached JSON already exists, use it
-    if (fs.existsSync(TYPE_CACHE)) {
-        try {
-            const cached = JSON.parse(fs.readFileSync(TYPE_CACHE, 'utf8'));
-            if (Object.keys(cached).length > 0) {
-                logger(`[Mictronics] Using cached aircraft_types.json (${Object.keys(cached).length} types)`);
-                return cached;
-            }
-        } catch (_) { /* fall through */ }
-    }
-
-    logger(`[Mictronics] Extracting aircraft_types ZIP...`);
-    let rawJson = null;
-
-    try {
-        const zip = new AdmZip(zipPath);
-        const jsonEntry = zip.getEntries().find(e => !e.isDirectory && e.name.endsWith('.json'));
-        if (jsonEntry) {
-            rawJson = jsonEntry.getData().toString('utf8');
-        }
-    } catch (_) {
-        // Not a ZIP — try reading directly as JSON
-        try {
-            rawJson = fs.readFileSync(zipPath, 'utf8');
-        } catch (e) {
-            logger(`[Mictronics] Could not read aircraft_types: ${e.message}`);
-            return {};
-        }
-    }
-
-    if (!rawJson) return {};
-
-    try {
-        const types = JSON.parse(rawJson);
-        fs.writeFileSync(TYPE_CACHE, JSON.stringify(types), 'utf8');
-        logger(`[Mictronics] aircraft_types loaded: ${Object.keys(types).length} entries, cached to disk`);
-        return types;
-    } catch (e) {
-        logger(`[Mictronics] Failed to parse aircraft_types JSON: ${e.message}`);
-        return {};
-    }
-}
-
-// ── Check if Mictronics data already exists in store ─────────────────────────
-async function hasMictronicsData() {
-    const count = await Aircraft.estimatedDocumentCount();
-    return count > 10000; // at least 10k records means data was imported
-}
-
-// ── Main sync function (called from server.js) ────────────────────────────────
+// ── Main sync function ────────────────────────────────────────────────────────
 async function syncMictronics(logFn) {
     const logger = logFn || (msg => console.log(msg));
 
     const forceResync = process.env.FORCE_RESYNC === 'true';
 
-    if (!forceResync && await hasMictronicsData()) {
-        const count = await Aircraft.estimatedDocumentCount();
-        logger(`[Mictronics] Already have ${count.toLocaleString()} records. Skipping sync. (Set FORCE_RESYNC=true to override)`);
-        return { skipped: true, count };
+    if (!forceResync) {
+        const MictronicsDb = require('../db/mictronicsDb');
+        const existing = MictronicsDb.count();
+        if (existing > 10000) {
+            const lastSync = MictronicsDb.lastSyncTime();
+            const ageHours = lastSync ? ((Date.now() / 1000 - lastSync) / 3600).toFixed(0) : 'unknown';
+            logger(`[Mictronics] Already have ${existing.toLocaleString()} records (synced ${ageHours}h ago). Skipping. (FORCE_RESYNC=true to override)`);
+            return { skipped: true, count: existing };
+        }
     }
 
     logger('[Mictronics] Starting sync from mictronics.de...');
     const startTime = Date.now();
 
-    // Step 1: Download aircraft_types first (small, needed to enrich aircraft_db)
-    logger(`[Mictronics] Downloading aircraft_types (${TYPE_URL})...`);
+    // Step 1: Download aircraft_types (small, ~17KB)
+    logger(`[Mictronics] Downloading aircraft_types...`);
     try {
         await downloadFile(TYPE_URL, TEMP_TYPE_ZIP);
-        logger('[Mictronics] aircraft_types download complete');
     } catch (err) {
-        logger(`[Mictronics] WARN: Failed to download aircraft_types: ${err.message}. Continuing without type enrichment.`);
+        logger(`[Mictronics] WARN: Failed to download aircraft_types: ${err.message}`);
+    }
+    const typesMap = loadAircraftTypes(TEMP_TYPE_ZIP, logger);
+
+    // Step 2: Download aircraft_db (~4.6 MB ZIP)
+    logger(`[Mictronics] Downloading aircraft_db (~4.6 MB)...`);
+    await downloadFile(DB_URL, TEMP_DB_ZIP);
+    logger('[Mictronics] Download complete');
+
+    // Step 3: Import into SQLite
+    const total = importAircraftDb(TEMP_DB_ZIP, typesMap, logger);
+
+    // Step 4: Cleanup temp ZIPs
+    for (const f of [TEMP_DB_ZIP, TEMP_TYPE_ZIP]) {
+        try { fs.unlinkSync(f); } catch (_) {}
     }
 
-    const typesMap = await loadAircraftTypes(TEMP_TYPE_ZIP, logger);
-
-    // Step 2: Download aircraft_db (large ~4.6MB ZIP)
-    logger(`[Mictronics] Downloading aircraft_db (~4.6 MB) from ${DB_URL}...`);
-    await downloadFile(DB_URL, TEMP_DB_ZIP);
-    logger('[Mictronics] aircraft_db download complete');
-
-    // Step 3: Import into MongoDB
-    const total = await importAircraftDb(TEMP_DB_ZIP, typesMap, logger);
-
-    // Step 4: Cleanup temp ZIPs (keep type cache)
-    [TEMP_DB_ZIP, TEMP_TYPE_ZIP].forEach(f => { try { fs.unlinkSync(f); } catch (_) {} });
-
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    logger(`[Mictronics] Sync complete in ${elapsed}s — ${total.toLocaleString()} aircraft indexed`);
+    logger(`[Mictronics] ✅ Sync complete in ${elapsed}s — ${total.toLocaleString()} aircraft in DB`);
     return { total, elapsed };
 }
 
 // ── Standalone execution ──────────────────────────────────────────────────────
 if (require.main === module) {
     syncMictronics(console.log)
-        .then(result => { console.log('[Mictronics] Done:', result); process.exit(0); })
-        .catch(err => { console.error('[Mictronics] Fatal:', err); process.exit(1); });
+        .then(r => { console.log('[Mictronics] Done:', r); process.exit(0); })
+        .catch(e => { console.error('[Mictronics] Fatal:', e); process.exit(1); });
 }
 
 module.exports = { syncMictronics };

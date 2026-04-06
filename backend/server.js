@@ -18,6 +18,8 @@ const { initWebSocketServer, broadcastPlanes, broadcastTelemetry, getActiveViewp
 const Aircraft      = require('./db/aircraftStore');
 const Route         = require('./db/routeStore');
 const Metar         = require('./db/metarStore');
+const MictronicsDb  = require('./db/mictronicsDb');
+const { syncMictronics } = require('./scripts/syncMictronics');
 const FlightSession = require('./db/sessionStore');
 const TrackPoint    = require('./db/trackStore');
 const staticMaps    = require('./db/staticMaps');
@@ -3260,31 +3262,41 @@ app.get('/api/photos/:icao24', async (req, res) => {
             };
         }
 
-        // 3. 抓取外部 API (Planespotters)
+        // 3. 抓取外部 API — 優先用 reg（hex 永遠回空）
         let freshPhotos = [];
-        const hexRes = await fetch(`https://api.planespotters.net/pub/photos/hex/${icao24}`, {
-            headers: { 'User-Agent': 'AEROSTRAT/5.0 (flight-tracking)' }
-        });
-        if (hexRes.ok) {
-            const data = await hexRes.json();
-            if (data.photos?.length) freshPhotos = data.photos;
+
+        // [A] Planespotters — reg 優先，有 reg 直接用；否則才試 hex
+        const psHeaders = { 'User-Agent': 'AEROSTRAT/5.0 (flight-tracking)' };
+        if (reg && reg !== 'N/A') {
+            try {
+                const regRes = await fetch(
+                    `https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg)}`,
+                    { headers: psHeaders, signal: AbortSignal.timeout(5000) }
+                );
+                if (regRes.ok) {
+                    const data = await regRes.json();
+                    if (data.photos?.length) freshPhotos = data.photos;
+                }
+            } catch (_) {}
+        }
+        if (freshPhotos.length === 0) {
+            try {
+                const hexRes = await fetch(
+                    `https://api.planespotters.net/pub/photos/hex/${icao24}`,
+                    { headers: psHeaders, signal: AbortSignal.timeout(5000) }
+                );
+                if (hexRes.ok) {
+                    const data = await hexRes.json();
+                    if (data.photos?.length) freshPhotos = data.photos;
+                }
+            } catch (_) {}
         }
 
-        if (freshPhotos.length < 3 && reg && reg !== 'N/A') {
-            const regRes = await fetch(`https://api.planespotters.net/pub/photos/reg/${reg}`, {
-                headers: { 'User-Agent': 'AEROSTRAT/5.0 (flight-tracking)' }
-            });
-            if (regRes.ok) {
-                const data = await regRes.json();
-                if (data.photos?.length) freshPhotos = [...freshPhotos, ...(data.photos || [])];
-            }
-        }
-
-        // [C] airport-data.com fallback — free, no key required
-        if (freshPhotos.length < 3 && reg && reg !== 'N/A') {
+        // [B] airport-data.com fallback — 無 www（SSL 憑證只綁 apex domain）
+        if (freshPhotos.length < 2 && reg && reg !== 'N/A') {
             try {
                 const adRes = await fetch(
-                    `https://www.airport-data.com/api/ac_thumb.json?r=${encodeURIComponent(reg)}&n=3`,
+                    `https://airport-data.com/api/ac_thumb.json?r=${encodeURIComponent(reg)}&n=3`,
                     { headers: { 'User-Agent': 'AEROSTRAT/5.0' }, signal: AbortSignal.timeout(4000) }
                 );
                 if (adRes.ok) {
@@ -3294,7 +3306,7 @@ app.get('/api/photos/:icao24', async (req, res) => {
                             if (!p.image) continue;
                             freshPhotos.push({
                                 thumbnail:       { src: p.image },
-                                thumbnail_large: { src: p.image.replace('/thumbnails/', '/large/') },
+                                thumbnail_large: { src: p.image },
                                 photographer: p.photographer || 'airport-data.com',
                                 link: p.link || p.image,
                                 source: 'airport-data'
@@ -4372,6 +4384,31 @@ cron.schedule('*/15 * * * *', () => {
 }, {
     timezone: "Asia/Taipei"
 });
+
+// ── Mictronics Aircraft Registry (weekly sync, every Sunday 03:17 Taiwan time) ──
+cron.schedule('17 3 * * 0', () => {
+    console.log('🛫 [Mictronics] Weekly sync starting...');
+    syncMictronics(msg => console.log(msg))
+        .then(r => console.log(`✅ [Mictronics] Weekly sync done:`, r))
+        .catch(e => console.error(`❌ [Mictronics] Weekly sync failed:`, e.message));
+}, { timezone: 'Asia/Taipei' });
+
+// On startup: sync Mictronics if table is empty
+(async () => {
+    try {
+        const existing = MictronicsDb.count();
+        if (existing < 10000) {
+            console.log(`🛫 [Mictronics] Table empty (${existing} rows) — running initial sync...`);
+            await syncMictronics(msg => console.log(msg));
+        } else {
+            const lastSync = MictronicsDb.lastSyncTime();
+            const ageDays  = lastSync ? ((Date.now() / 1000 - lastSync) / 86400).toFixed(1) : '?';
+            console.log(`✅ [Mictronics] ${existing.toLocaleString()} aircraft in DB (last sync: ${ageDays}d ago)`);
+        }
+    } catch (e) {
+        console.error(`❌ [Mictronics] Startup check failed: ${e.message}`);
+    }
+})();
 
 // ==========================================
 // [v11.0] Tactical Background Resolution

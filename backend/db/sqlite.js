@@ -60,6 +60,19 @@ CREATE INDEX IF NOT EXISTS idx_tp_icao24  ON track_points(icao24);
 CREATE INDEX IF NOT EXISTS idx_tp_ts      ON track_points(ts);
 `);
 
+// ── Mictronics Aircraft Registry (static, weekly sync) ───────────────────
+db.exec(`
+CREATE TABLE IF NOT EXISTS mictronics_aircraft (
+    icao24       TEXT PRIMARY KEY,
+    registration TEXT,
+    typecode     TEXT,
+    operator     TEXT,
+    model        TEXT,
+    synced_at    INTEGER DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_mic_typecode ON mictronics_aircraft(typecode);
+`);
+
 // ── TTL cleanup (72 h) — run on startup and every hour ───────────────────
 function pruneOldTrackPoints() {
     const cutoff = Math.floor(Date.now() / 1000) - 72 * 3600;
