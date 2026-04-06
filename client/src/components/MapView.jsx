@@ -80,9 +80,6 @@ const PlaneCanvasLayer = L.Layer.extend({
 // Larger aircraft (B744, A380) render physically bigger at all zoom levels.
 
 const FR24_BASE_PX = 36; // Base icon size — PlaneFinder reference
-const TRAIL_LEN = 12;    // Ring buffer depth for gradient trail (非選中飛機短尾)
-const TRAIL_FPP = 2;     // Floats per trail point: [lat, lng]
-const TRAIL_MIN_DIST_SQ = 0.000004; // ~2m² — skip duplicate trail points
 
 // [v14.0] High-Performance Rendering Logic
 
@@ -938,13 +935,13 @@ export default function MapView({
                     // [Phase 3] Clamp max per-frame movement to prevent icon teleporting on sharp turns.
                     // Cap at 2 poll-cycles worth of flight distance (2 × 25s × speed).
                     const maxDeg = ((plane.velocity || 0) * 50) / 111_000;
-                    const dLat = rawLat - currentLat;
-                    const dLng = rawLng - currentLng;
-                    const distDeg = Math.sqrt(dLat * dLat + dLng * dLng);
+                    const clampDLat = rawLat - currentLat;
+                    const clampDLng = rawLng - currentLng;
+                    const distDeg = Math.sqrt(clampDLat * clampDLat + clampDLng * clampDLng);
                     if (maxDeg > 0 && distDeg > maxDeg) {
                         const scale = maxDeg / distDeg;
-                        plane.renderLat = currentLat + dLat * scale;
-                        plane.renderLng = currentLng + dLng * scale;
+                        plane.renderLat = currentLat + clampDLat * scale;
+                        plane.renderLng = currentLng + clampDLng * scale;
                     } else {
                         plane.renderLat = rawLat;
                         plane.renderLng = rawLng;
@@ -953,32 +950,6 @@ export default function MapView({
                     plane.renderLat = plane.lat;
                     plane.renderLng = plane.lng;
                 }
-
-                // === Trail Ring Buffer Recording ===
-                const lat = plane.renderLat;
-                const lng = plane.renderLng;
-                if (!lat || !lng) return;
-
-                if (!plane._trail) {
-                    plane._trail = new Float64Array(TRAIL_LEN * TRAIL_FPP);
-                    plane._trailHead = 0;
-                    plane._trailCount = 0;
-                    plane._trail[0] = lat;
-                    plane._trail[1] = lng;
-                    plane._trailCount = 1;
-                    return;
-                }
-
-                const prevIdx = ((plane._trailHead + TRAIL_LEN - 1) % TRAIL_LEN) * TRAIL_FPP;
-                const dLat = lat - plane._trail[prevIdx];
-                const dLng = lng - plane._trail[prevIdx + 1];
-                if (dLat * dLat + dLng * dLng < TRAIL_MIN_DIST_SQ) return;
-
-                const writeIdx = plane._trailHead * TRAIL_FPP;
-                plane._trail[writeIdx]     = lat;
-                plane._trail[writeIdx + 1] = lng;
-                plane._trailHead = (plane._trailHead + 1) % TRAIL_LEN;
-                if (plane._trailCount < TRAIL_LEN) plane._trailCount++;
             });
 
             // Playback override for selected plane
@@ -1117,6 +1088,7 @@ export default function MapView({
                     // ── Quadratic Bezier smooth path renderer ───────────────
                     const drawSmoothedPath = (pts, isOutline, altColor, isDashed, isLiveSeg) => {
                         if (pts.length < 2) return;
+                        ctx.globalAlpha = 1.0; // reset before each segment to avoid stale alpha bleed
                         ctx.beginPath();
                         if (isLiveSeg) {
                             // Live-stitch segment: now safe to draw because livePathLat/Lng = renderLat/Lng
@@ -1296,33 +1268,6 @@ export default function MapView({
                         opacity = 0.3;
                     }
 
-                    // [v12.9] Short altitude-colored trail for non-selected aircraft
-                    // Selected aircraft gets full historical track above; non-selected get
-                    // a short fading tail from the ring buffer to show recent movement.
-                    if (!isSelected && plane._trail && plane._trailCount >= 2 && zoom >= 5) {
-                        const count = plane._trailCount;
-                        const head  = plane._trailHead;
-                        const trailAltColor = getAltitudeColor(plane.altitude, plane.onGround, false, 'ALTITUDE');
-                        ctx.save();
-                        ctx.lineCap = 'round';
-                        ctx.lineJoin = 'round';
-                        ctx.lineWidth = 1.5;
-
-                        for (let j = 1; j < count; j++) {
-                            const idxA = ((head - count + j - 1 + TRAIL_LEN) % TRAIL_LEN) * TRAIL_FPP;
-                            const idxB = ((head - count + j     + TRAIL_LEN) % TRAIL_LEN) * TRAIL_FPP;
-                            const pA = map.latLngToContainerPoint([plane._trail[idxA], normalizeLongitude(plane._trail[idxA + 1])]);
-                            const pB = map.latLngToContainerPoint([plane._trail[idxB], normalizeLongitude(plane._trail[idxB + 1])]);
-                            const segAlpha = (j / count) * (currentSelected ? 0.15 : 0.45);
-                            ctx.globalAlpha = segAlpha;
-                            ctx.strokeStyle = trailAltColor;
-                            ctx.beginPath();
-                            ctx.moveTo(pA.x, pA.y);
-                            ctx.lineTo(pB.x, pB.y);
-                            ctx.stroke();
-                        }
-                        ctx.restore();
-                    }
 
                     // [v12.9] Pulsing glow ring for selected aircraft
                     if (isSelected) {

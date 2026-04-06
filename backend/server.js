@@ -4260,10 +4260,29 @@ async function finalizeProfile(aircraft, route, liveState = null) {
             timestamp: liveState?.lastContact || Math.floor(Date.now() / 1000)
         },
         route: {
+            // nested (legacy compat)
             origin: { iata: route.origin_iata || 'N/A' },
             destination: { iata: route.destination_iata || '---' },
             arrival: route.estimated_arrival_time,
-            weather: weather || route.destination_weather || null
+            weather: weather || route.destination_weather || null,
+            // flat fields expected by Sidebar
+            origin_iata:        route.origin_iata        || null,
+            origin_name:        route.origin_name        || null,
+            origin_city:        route.origin_city        || null,
+            destination_iata:   route.destination_iata   || null,
+            destination_icao:   route.destination_icao   || null,
+            destination_name:   route.destination_name   || null,
+            destination_city:   route.destination_city   || null,
+            departure_time:     route.departure_time     || null,
+            departure_terminal: route.departure_terminal || null,
+            departure_gate:     route.departure_gate     || null,
+            arrival_time:       route.arrival_time       || null,
+            arrival_terminal:   route.arrival_terminal   || null,
+            arrival_gate:       route.arrival_gate       || null,
+            flightNumber:       route.flightNumber       || null,
+            flightStatus:       route.flightStatus       || null,
+            airline_name:       route.airline_name       || null,
+            destination_weather: weather || route.destination_weather || null,
         },
         aircraft: {
             type: aircraft.type || aircraft.model,
