@@ -905,42 +905,39 @@ export default function MapView({
                     prewarmExactSvg(activeTypecode);
                 }
 
-                // === Interpolation (Phase 8) ===
-                const currentLat = plane.renderLat || plane.lat;
-                const currentLng = plane.renderLng || plane.lng;
-                const lerpFactor = 0.15;
+                // === Dead Reckoning Interpolation ===
+                // Plane continuously moves forward based on last known position + velocity + heading.
+                // When new ADS-B data arrives, blend smoothly from old render position to new DR track.
+                // This eliminates backward jumps (we never move backwards) and forward jumps (smooth blend).
+                const BLEND_MS = 600; // transition window after new data arrival
 
-                if (plane.onGround || plane.velocity <= 0 || plane.altitude === 'GROUND') {
-                    if (plane.targetLat && plane.targetLng) {
-                        plane.renderLat = currentLat + (plane.targetLat - currentLat) * lerpFactor;
-                        plane.renderLng = currentLng + (plane.targetLng - currentLng) * lerpFactor;
-                    }
-                } else if (plane.targetLat && plane.targetLng) {
-                    // [Fix] Use wall-clock elapsed time instead of accumulated simTime.
-                    const anchorMs = plane.targetUpdatedAt || ((plane.lastContact || 0) * 1000) || Date.now();
-                    const elapsedSec = Math.min(Math.max(0, (Date.now() - anchorMs) / 1000), 30);
-                    const predictedPos = predictPosition(plane.targetLat, plane.targetLng, plane.velocity, plane.heading, elapsedSec);
+                const drLat      = plane.drLat      ?? plane.lat;
+                const drLng      = plane.drLng      ?? plane.lng;
+                const drTs       = plane.drTs       ?? plane.targetUpdatedAt ?? Date.now();
+                const drVelocity = plane.drVelocity ?? plane.velocity ?? 0;
+                const drHeading  = plane.drHeading  ?? plane.heading  ?? 0;
 
-                    const rawLat = currentLat + (predictedPos.lat - currentLat) * lerpFactor;
-                    const rawLng = currentLng + (predictedPos.lng - currentLng) * lerpFactor;
-
-                    // [Phase 3] Clamp max per-frame movement to prevent icon teleporting on sharp turns.
-                    // Cap at 2 poll-cycles worth of flight distance (2 × 25s × speed).
-                    const maxDeg = ((plane.velocity || 0) * 50) / 111_000;
-                    const clampDLat = rawLat - currentLat;
-                    const clampDLng = rawLng - currentLng;
-                    const distDeg = Math.sqrt(clampDLat * clampDLat + clampDLng * clampDLng);
-                    if (maxDeg > 0 && distDeg > maxDeg) {
-                        const scale = maxDeg / distDeg;
-                        plane.renderLat = currentLat + clampDLat * scale;
-                        plane.renderLng = currentLng + clampDLng * scale;
-                    } else {
-                        plane.renderLat = rawLat;
-                        plane.renderLng = rawLng;
-                    }
+                if (plane.onGround || drVelocity <= 0) {
+                    // Stationary: snap to DR origin (no reckoning needed)
+                    plane.renderLat = drLat;
+                    plane.renderLng = drLng;
                 } else {
-                    plane.renderLat = plane.lat;
-                    plane.renderLng = plane.lng;
+                    // Dead reckoning: where should the plane be right now?
+                    const elapsedSec = Math.min((nowMs - drTs) / 1000, 60);
+                    const drPos = predictPosition(drLat, drLng, drVelocity, drHeading, elapsedSec);
+
+                    const timeSinceUpdate = nowMs - drTs;
+                    if (timeSinceUpdate < BLEND_MS && plane._blendFromLat != null) {
+                        // Within blend window: ease from previous render pos to DR track
+                        const t = timeSinceUpdate / BLEND_MS;
+                        const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // easeInOut
+                        plane.renderLat = plane._blendFromLat + (drPos.lat - plane._blendFromLat) * eased;
+                        plane.renderLng = plane._blendFromLng + (drPos.lng - plane._blendFromLng) * eased;
+                    } else {
+                        // After blend window: pure dead reckoning, smooth continuous motion
+                        plane.renderLat = drPos.lat;
+                        plane.renderLng = drPos.lng;
+                    }
                 }
             });
 

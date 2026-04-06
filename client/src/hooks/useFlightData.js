@@ -228,14 +228,33 @@ export function useFlightData(mapRef) {
                     const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
                     const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
 
+                    // [DR] Dead Reckoning: snapshot current render position as blend origin.
+                    // renderLat/Lng is preserved from existing so the render loop blends smoothly.
+                    const snapRenderLat = existing.renderLat ?? existing.lat;
+                    const snapRenderLng = existing.renderLng ?? existing.lng;
+                    const now = Date.now();
+
                     next[icao24] = {
                         ...existing,
                         ...pData,
                         isDirty,
+                        // Dead reckoning origin: where plane IS according to ADS-B
+                        drLat: pData.lat,
+                        drLng: pData.lng,
+                        drHeading: pData.heading,
+                        drVelocity: pData.velocity,
+                        drTs: now,
+                        // Blend start: where the icon WAS before this update
+                        _blendFromLat: snapRenderLat,
+                        _blendFromLng: snapRenderLng,
+                        // Keep render position frozen at blend start; loop will move it
+                        renderLat: snapRenderLat,
+                        renderLng: snapRenderLng,
+                        // Legacy compat
                         targetLat: pData.lat,
                         targetLng: pData.lng,
-                        targetUpdatedAt: Date.now(),
-                        globalX: globalPt.x, // [v3.0] Space Decoupling
+                        targetUpdatedAt: now,
+                        globalX: globalPt.x,
                         globalY: globalPt.y
                     };
                 }
