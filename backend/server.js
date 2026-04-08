@@ -3886,15 +3886,27 @@ async function fetchTracksInternal(icao24) {
         }
 
         // ── 5. OpenSky Historical Track Augmentation ────────────────────────
-        // Only for sparse local data. Hard-filtered to session start so
-        // previous flights of the same aircraft are never included.
+        // OpenSky time=0 returns only the current flight's track, so we can
+        // trust it without session-time filtering when it starts on the ground
+        // (i.e. full departure data is present). If the track starts mid-air,
+        // we still apply the session start filter to avoid mixing flights.
         if (localPoints.length < 20) {
             try {
                 const osTrack = await fetchOpenSkyHistoricalTrack(icao);
                 if (osTrack && Array.isArray(osTrack.path) && osTrack.path.length > 0) {
-                    const flightStartUnix = sessionStartUnix
-                        ? sessionStartUnix - 120
-                        : Math.floor((Date.now() - 30 * 60 * 1000) / 1000);
+
+                    // Check if OpenSky has the full flight from departure
+                    // (first point on ground = departure airport included)
+                    const firstPt = osTrack.path[0];
+                    const startsOnGround = firstPt && firstPt[5] === true;
+
+                    // Only filter by session start when OpenSky doesn't have
+                    // the full departure — prevents mixing old flights mid-air.
+                    const flightStartUnix = startsOnGround
+                        ? (osTrack.path[0][0] || 0)  // trust OpenSky's own start
+                        : sessionStartUnix
+                            ? sessionStartUnix - 120
+                            : Math.floor((Date.now() - 30 * 60 * 1000) / 1000);
 
                     const osFiltered = osTrack.path.filter(p =>
                         p[0] >= flightStartUnix &&
@@ -3918,7 +3930,7 @@ async function fetchTracksInternal(icao24) {
                         localPoints.forEach(p => mergedMap.set(Math.round(p.timestamp.getTime() / 1000), p));
                         localPoints = Array.from(mergedMap.values()).sort((a, b) => a.timestamp - b.timestamp);
 
-                        logger.info('TRACK', `Historical augment OK: ${icao24} — ${osFiltered.length} OpenSky pts merged → ${localPoints.length} total`);
+                        logger.info('TRACK', `Historical augment OK: ${icao24} — ${osFiltered.length} OpenSky pts merged → ${localPoints.length} total (startsOnGround=${startsOnGround})`);
                     }
                 }
             } catch (osErr) {
