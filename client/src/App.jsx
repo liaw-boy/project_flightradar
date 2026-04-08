@@ -378,10 +378,15 @@ export default function App() {
                 if (trailOwnerRef.current !== selectedIcao24) return;
                 setTrackPoints(prev => {
                     if (!prev || prev.length === 0) return newPoints;
-                    // Immutable merge: keep all existing points, append only truly new ones
-                    const latestTime = prev[prev.length - 1][0];
-                    const fresh = newPoints.filter(p => p[0] > latestTime);
-                    return fresh.length > 0 ? [...prev, ...fresh] : prev;
+                    // Merge all points, deduplicate by timestamp, sort ascending.
+                    // This prevents zigzag caused by duplicate or slightly out-of-order
+                    // points at the seam between old and new data fetches.
+                    const seen = new Set(prev.map(p => p[0]));
+                    const fresh = newPoints.filter(p => !seen.has(p[0]));
+                    if (fresh.length === 0) return prev;
+                    const merged = [...prev, ...fresh];
+                    merged.sort((a, b) => a[0] - b[0]);
+                    return merged;
                 });
             } catch (_) {}
         }, 30000); // every 30 s — matches backend TrackPoint ingest cycle
