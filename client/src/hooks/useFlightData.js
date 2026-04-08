@@ -233,6 +233,12 @@ export function useFlightData(mapRef) {
                     const snapRenderLat = existing.renderLat ?? existing.lat;
                     const snapRenderLng = existing.renderLng ?? existing.lng;
                     const now = Date.now();
+                    // Use actual ADS-B measurement time as DR origin so dead reckoning
+                    // accounts for the propagation delay (typically 5-10s). This prevents
+                    // the plane from jumping backward to the stale ADS-B position on each update.
+                    const adsbTs = pData.lastContact
+                        ? pData.lastContact * 1000
+                        : now;
 
                     next[icao24] = {
                         ...existing,
@@ -243,10 +249,11 @@ export function useFlightData(mapRef) {
                         drLng: pData.lng,
                         drHeading: pData.heading,
                         drVelocity: pData.velocity,
-                        drTs: now,
+                        drTs: adsbTs,  // measurement time, not receive time
                         // Blend start: where the icon WAS before this update
                         _blendFromLat: snapRenderLat,
                         _blendFromLng: snapRenderLng,
+                        _dataArrivedAt: now,
                         // Keep render position frozen at blend start; loop will move it
                         renderLat: snapRenderLat,
                         renderLng: snapRenderLng,

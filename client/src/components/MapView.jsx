@@ -936,9 +936,12 @@ export default function MapView({
                     const elapsedSec = Math.max(0, Math.min((nowDateMs - drTs) / 1000, 60));
                     const drPos = predictPosition(drLat, drLng, drVelocity, drHeading, elapsedSec);
 
-                    const timeSinceUpdate = nowDateMs - (plane._dataArrivedAt ?? drTs);
+                    const dataArrivedAt = plane._dataArrivedAt ?? nowDateMs;
+                    const timeSinceUpdate = nowDateMs - dataArrivedAt;
                     if (timeSinceUpdate >= 0 && timeSinceUpdate < BLEND_MS && plane._blendFromLat != null) {
-                        // Within blend window: ease from previous render pos to DR track
+                        // Within blend window: ease from previous render pos to DR track.
+                        // drPos is already time-corrected (accounts for ADS-B propagation delay),
+                        // so blending toward it is always forward motion.
                         const t = Math.max(0, Math.min(1, timeSinceUpdate / BLEND_MS));
                         const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // easeInOut
                         plane.renderLat = plane._blendFromLat + (drPos.lat - plane._blendFromLat) * eased;
