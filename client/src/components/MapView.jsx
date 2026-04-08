@@ -1024,27 +1024,32 @@ export default function MapView({
                 if (flightPath && flightPath.length > 1 && livePlane) {
                     const liveTime = livePlane?.lastContact || 0;
                     const trimmedPath = (liveTime > 0)
-                        ? flightPath.filter(pt => !pt[0] || pt[0] <= liveTime + 10) // 10s tolerance
+                        ? flightPath.filter(pt => !pt[0] || pt[0] <= liveTime + 10)
                         : flightPath;
                     const basePath = trimmedPath.length > 1 ? trimmedPath : flightPath;
 
-                    // [Phase 2] Dead-reckoning track extension:
-                    // Use renderLat/renderLng (current predicted position = where icon is drawn)
-                    // as the live stitch point, with wall-clock "now" as the timestamp.
-                    // This keeps the track endpoint pixel-perfect aligned with the icon at all
-                    // times — no gap, no backward snap when new ADS-B data arrives.
+                    // Only extend trail to live DR position if the last track point is
+                    // recent (< 90s gap). A larger gap means the straight-line extension
+                    // would be long and misleading — better to show nothing than a rubber band.
+                    const lastPtTime = basePath[basePath.length - 1]?.[0] ?? 0;
+                    const nowSec = Date.now() / 1000;
+                    const gapSec = nowSec - lastPtTime;
                     const livePathLat = livePlane?.renderLat ?? livePlane?.lat;
                     const livePathLng = livePlane?.renderLng ?? livePlane?.lng;
-                    activeSelectedPath = (livePathLat && livePathLng)
-                        ? [...basePath, [
-                            Date.now() / 1000,
+
+                    if (livePathLat && livePathLng && gapSec < 90) {
+                        activeSelectedPath = [...basePath, [
+                            nowSec,
                             livePathLat,
                             livePathLng,
                             livePlane.altitude,
                             livePlane.heading,
-                            livePlane.velocity
-                          ]]
-                        : basePath;
+                            livePlane.velocity,
+                            true, // _isLiveExtension flag
+                        ]];
+                    } else {
+                        activeSelectedPath = basePath;
+                    }
                 }
 
                 // ── [v8.0] Professional Altitude-Colored Track with Outline ──
@@ -1109,7 +1114,7 @@ export default function MapView({
                     for (let pi = 0; pi < trimmedPath.length; pi++) {
                         const seg = trimmedPath[pi];
                         const isLastPoint = pi === trimmedPath.length - 1;
-                        const isLive = isLastPoint && (livePlane?.lat || livePlane?.renderLat);
+                        const isLive = isLastPoint && !!seg[6]; // _isLiveExtension flag
                         const pt = map.latLngToContainerPoint([seg[1], normalizeLongitude(seg[2])]);
                         let stale = false;
                         let gap   = false;
@@ -1165,8 +1170,8 @@ export default function MapView({
                         ctx.globalAlpha = 1.0; // reset before each segment to avoid stale alpha bleed
                         ctx.beginPath();
                         if (isLiveSeg) {
-                            ctx.setLineDash([]);
-                            ctx.globalAlpha = isOutline ? 0.25 : 0.65;
+                            ctx.setLineDash([5, 7]);
+                            ctx.globalAlpha = isOutline ? 0.15 : 0.5;
                             if (!isOutline) ctx.strokeStyle = altColor;
                         } else if (isDashed) {
                             // At low zoom the dash gaps shrink to sub-pixel — invisible.
