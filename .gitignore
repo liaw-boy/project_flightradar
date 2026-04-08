@@ -82,4 +82,10 @@ readme (*).md
 !client/index.html
 
 assets.rar
-data/aerostrat.db*
+
+# Runtime database (never commit)
+backend/data/aerostrat.db
+backend/data/aerostrat.db-shm
+backend/data/aerostrat.db-wal
+backend/data/aircraft_cache.json
+backend/data/raw_jonty.json
