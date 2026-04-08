@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, AlertTriangle, Plane as PlaneIcon, Map, Fingerprint, Activity, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, AlertTriangle, Plane as PlaneIcon, Map, Fingerprint, Activity, MapPin, ChevronLeft, ChevronRight, Share2, Check } from 'lucide-react';
 import {
     getAirlineLogoUrl, getAirlineName, getCountryFlag, getCategoryName,
     getNearestAirport, formatVerticalRate, getAirportDisplayData,
@@ -108,6 +108,34 @@ function FlightProgress({ plane, depInfo, arrInfo }) {
     );
 }
 
+// ─── Share Button ─────────────────────────────────────────────────────────────
+function ShareButton({ icao24 }) {
+    const [copied, setCopied] = useState(false);
+    const handleShare = () => {
+        const url = `${window.location.origin}${window.location.pathname}?icao=${icao24}`;
+        navigator.clipboard.writeText(url).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        }).catch(() => {
+            prompt('複製此連結：', url);
+        });
+    };
+    return (
+        <button
+            onClick={handleShare}
+            title="分享追蹤連結"
+            style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: copied ? '#22d3ee' : 'var(--color-text-dim, #64748b)',
+                padding: '4px', display: 'flex', alignItems: 'center',
+                transition: 'color 0.2s', borderRadius: '6px',
+            }}
+        >
+            {copied ? <Check size={18} /> : <Share2 size={18} />}
+        </button>
+    );
+}
+
 // ─── Main Sidebar Component ────────────────────────────────────────────────────
 export default function Sidebar({
     plane, icao24, metadata, route, trackPoints, playbackTime, onPlaybackChange,
@@ -199,8 +227,8 @@ export default function Sidebar({
             .then(results => {
                 if (!active) return;
                 
-                // Format photos for carousel
-                const formatted = (results || []).map(p => ({
+                // Format photos — only keep the first (best quality) photo
+                const formatted = (results || []).slice(0, 1).map(p => ({
                     url: p.thumbnail_large?.src || p.thumbnail?.src || p.link || null,
                     photographer: p.photographer || 'Planespotters.net'
                 })).filter(h => h.url);
@@ -289,6 +317,7 @@ export default function Sidebar({
 
                 </div>
                 <div className="sb-header-actions">
+                    <ShareButton icao24={icao24} />
                     <div className="sb-close" onClick={onClose}><X size={24} /></div>
                 </div>
             </div>
@@ -530,8 +559,10 @@ export default function Sidebar({
                             </div>
                             <div className="stat-card">
                                 <div className="stat-label">VERT RATE</div>
-                                <div className={`stat-value ${plane.vRate > 50 ? 'stat-climb' : plane.vRate < -50 ? 'stat-desc' : ''}`}>
-                                    {plane.vRate != null ? `${plane.vRate > 50 ? '▲' : plane.vRate < -50 ? '▼' : '―'} ${Math.abs(Math.round(plane.vRate))}` : '---'}
+                                <div className={`stat-value ${plane.vRate > 1.5 ? 'stat-climb' : plane.vRate < -1.5 ? 'stat-desc' : ''}`}>
+                                    {plane.vRate != null
+                                        ? `${plane.vRate > 1.5 ? '+' : plane.vRate < -1.5 ? '\u2212' : ''}${Math.round(Math.abs(plane.vRate) * 196.85)}`
+                                        : '---'}
                                 </div>
                                 {plane.vRate != null && <div className="stat-unit">ft/min</div>}
                             </div>

@@ -9,7 +9,7 @@ import TopBar from './components/TopBar';
 import MapView from './components/MapView';
 import PlaneList from './components/PlaneList';
 import TimePlayer from './components/TimePlayer';
-import PerformanceMonitor from './components/PerformanceMonitor';
+import StatsPanel from './components/StatsPanel';
 import { useFlightData } from './hooks/useFlightData';
 import { useI18n } from './hooks/useI18n';
 import { logToServer, logger } from './utils/logger';
@@ -42,6 +42,7 @@ export default function App() {
         return () => mq.removeEventListener('change', handler);
     }, []);
     const [trackPoints, setTrackPoints] = useState([]);
+    const trailOwnerRef = useRef(null); // 防止舊 timer / 舊 fetch 污染新選取的軌跡
     const [selectedMetadata, setSelectedMetadata] = useState(null);
     const [selectedRoute, setSelectedRoute] = useState(null);
     const [filters, setFilters] = useState({
@@ -72,6 +73,27 @@ export default function App() {
 
     // [v4.2.0] Anomaly alerts from server SSE
     const [anomalyAlerts, setAnomalyAlerts] = useState([]);
+    const seenAlertKeys = useRef(new Set());
+    const [showStats, setShowStats] = useState(false);
+
+    const playSquawkAlert = useCallback((severity) => {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const tones = severity === 'critical' ? [880, 660, 880] : [520, 440];
+            let t = ctx.currentTime;
+            tones.forEach(freq => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.frequency.value = freq;
+                osc.type = 'sine';
+                gain.gain.setValueAtTime(0.3, t);
+                gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+                osc.start(t); osc.stop(t + 0.25);
+                t += 0.28;
+            });
+        } catch (_) { /* AudioContext blocked */ }
+    }, []);
 
     // [v4.2.0] Track mode — map auto-pans to follow selected plane
     const [trackMode, setTrackMode] = useState(false);
@@ -118,6 +140,17 @@ export default function App() {
                 if (data.type === 'planes-updated') {
                     fetchPlanesRef.current(); // Immediate fetch on new data
                 } else if (data.type === 'anomalies' && data.alerts?.length > 0) {
+                    // Play sound for NEW alerts only
+                    const newAlerts = data.alerts.filter(a => {
+                        const key = `${a.icao24}-${a.type}`;
+                        if (seenAlertKeys.current.has(key)) return false;
+                        seenAlertKeys.current.add(key);
+                        return true;
+                    });
+                    if (newAlerts.length > 0) {
+                        const severity = newAlerts.some(a => a.severity === 'critical') ? 'critical' : 'warning';
+                        playSquawkAlert(severity);
+                    }
                     setAnomalyAlerts(prev => {
                         // Merge, deduplicate by icao24+type, keep latest 10
                         const merged = [...data.alerts, ...prev.filter(a =>
@@ -203,8 +236,9 @@ export default function App() {
     const handleSelectPlane = useCallback(
         async (icao24, plane) => {
             logToServer(`Selected plane: ${plane.callsign || 'N/A'} (ICAO: ${icao24})`, 'info', { callsign: plane.callsign, icao24 });
+            trailOwnerRef.current = icao24; // 標記新目標，防止舊 fetch/timer 污染
             if (selectedIcao24 !== icao24) {
-                setTrackPoints([]); 
+                setTrackPoints([]);
                 setSelectedMetadata(null);
                 setSelectedRoute(null);
                 setPlaybackTime(null);
@@ -213,16 +247,19 @@ export default function App() {
             setShowFullSidebar(false); // 手機先顯示 compact card
             // Don't auto-enable tracking on click — tracking activates automatically
             // only when the plane drifts near the viewport edge (handled in MapView).
-            
+
             // [v11.0] Activate High-Res Zero-Truncation Buffer
             trackStore.setSelected(icao24);
 
             // Fetch track immediately (blocks slightly but necessary for visual sync)
             try {
                 const points = await fetchTrack(icao24, plane.lastContact);
-                setTrackPoints(points || []);
+                // 若 fetch 期間使用者已切換到其他飛機，丟棄結果
+                if (trailOwnerRef.current === icao24) {
+                    setTrackPoints(points || []);
+                }
             } catch (e) {
-                setTrackPoints([]);
+                if (trailOwnerRef.current === icao24) setTrackPoints([]);
             }
 
             // [AERO-SYNC] Helper for Fetch with Timeout
@@ -264,6 +301,7 @@ export default function App() {
 
     // 取消選擇
     const handleDeselectPlane = useCallback(() => {
+        trailOwnerRef.current = null;
         setSelectedIcao24(null);
         setTrackPoints([]);
         setSelectedMetadata(null);
@@ -279,6 +317,15 @@ export default function App() {
         url.searchParams.delete('icao');
         window.history.replaceState({}, '', url);
     }, []);
+
+    // Expose select/deselect for E2E tests (does not affect production behaviour)
+    useEffect(() => {
+        window._selectPlane = (icao24) => {
+            const plane = planesDictRef.current[icao24];
+            if (plane) handleSelectPlane(icao24, plane);
+        };
+        return () => { delete window._selectPlane; };
+    }, [handleSelectPlane]);
 
     // 過濾器變更
     const handleFilterChange = useCallback((key, value) => {
@@ -310,6 +357,8 @@ export default function App() {
             try {
                 const newPoints = await fetchTrack(selectedIcao24, plane.lastContact, true); // bypass LRU
                 if (!newPoints || newPoints.length === 0) return;
+                // 確認 fetch 期間沒有切換到其他飛機
+                if (trailOwnerRef.current !== selectedIcao24) return;
                 setTrackPoints(prev => {
                     if (!prev || prev.length === 0) return newPoints;
                     // Immutable merge: keep all existing points, append only truly new ones
@@ -332,6 +381,107 @@ export default function App() {
             handleDeselectPlane();
         }
     }, [planesDict, selectedIcao24, trackMode, handleDeselectPlane]);
+
+    // ── 飛行階段狀態機 ──────────────────────────────────────────────────────
+    // 規則一覽：
+    //
+    // 輸入欄位（ADS-B）
+    //   onGround : boolean
+    //   altitude : 公尺
+    //   velocity : m/s  → 換算 kts = velocity * 1.944
+    //   vRate    : ft/min（正 = 爬升，負 = 下降）
+    //
+    // 階段定義
+    //   PARKED          onGround=true  AND  速度 < 5 kts
+    //   TAXIING         onGround=true  AND  速度 5–80 kts
+    //   TAKEOFF_ROLL    onGround=true  AND  速度 > 80 kts
+    //   CLIMBING        onGround=false AND  vRate > +1.52 m/s  (≈ +300 ft/min)
+    //   CRUISE          onGround=false AND  |vRate| ≤ 1.52 m/s   AND  高度 > 1500m
+    //   DESCENDING      onGround=false AND  vRate < -1.52 m/s    AND  高度 > 1500m
+    //   APPROACH        onGround=false AND  vRate < -1.02 m/s    AND  高度 ≤ 1500m
+    //   LANDING_ROLL    onGround=true  AND  速度 > 5 kts（剛接地）
+    //
+    // 關鍵轉換
+    //   PARKED/TAXIING → TAKEOFF_ROLL → CLIMBING          = 起飛
+    //   DESCENDING/APPROACH → LANDING_ROLL → PARKED       = 降落
+    //
+    // 航班結束條件（清除軌跡）
+    //   曾經進入 CLIMBING 或以上階段（has_been_airborne = true）
+    //   AND 現在是 PARKED 狀態持續 ≥ 30 秒
+    //
+    // 防誤判
+    //   Touch-and-go：LANDING_ROLL 後若速度再次 > 80 kts，視為重新起飛，不清除
+    //   資料缺失：velocity / vRate 為 null 時，保守判斷（不觸發清除）
+    // ────────────────────────────────────────────────────────────────────────
+
+    const flightPhaseRef = useRef({
+        phase: 'UNKNOWN',       // 目前階段
+        hasBeenAirborne: false, // 本次選取後是否曾進入空中
+        parkedSince: null,      // 進入 PARKED 的時間戳
+    });
+
+    useEffect(() => {
+        // 選取新飛機時重置狀態機
+        flightPhaseRef.current = { phase: 'UNKNOWN', hasBeenAirborne: false, parkedSince: null };
+    }, [selectedIcao24]);
+
+    useEffect(() => {
+        if (!selectedIcao24 || trackPoints.length === 0) return;
+        const plane = planesDict[selectedIcao24];
+        if (!plane) return;
+
+        const kts      = (plane.velocity ?? 0) * 1.944;   // m/s → kts
+        const vRate    = plane.vRate   ?? 0;               // m/s
+        const alt      = plane.altitude ?? 0;              // 公尺
+        const onGround = !!plane.onGround;
+        const state    = flightPhaseRef.current;
+
+        // ── 計算當前階段 ──────────────────────────────────────
+        let phase;
+        if (onGround) {
+            if      (kts > 80)  phase = 'TAKEOFF_ROLL';
+            else if (kts > 5)   phase = 'LANDING_ROLL';  // 滑行 or 落地後減速
+            else                phase = 'PARKED';
+        } else {
+            if      (vRate > 1.52)                       phase = 'CLIMBING';
+            else if (vRate < -1.02 && alt <= 1500)       phase = 'APPROACH';
+            else if (vRate < -1.52 && alt >  1500)       phase = 'DESCENDING';
+            else                                         phase = 'CRUISE';
+        }
+
+        // ── 更新 hasBeenAirborne ──────────────────────────────
+        if (phase === 'CLIMBING' || phase === 'CRUISE' || phase === 'DESCENDING') {
+            state.hasBeenAirborne = true;
+        }
+
+        // ── 防 touch-and-go：TAKEOFF_ROLL 重置 PARKED 計時 ───
+        if (phase === 'TAKEOFF_ROLL') {
+            state.parkedSince = null;
+        }
+
+        // ── PARKED 計時 ───────────────────────────────────────
+        if (phase === 'PARKED') {
+            if (!state.parkedSince) state.parkedSince = Date.now();
+        } else {
+            state.parkedSince = null;
+        }
+
+        state.phase = phase;
+
+        // ── 航班結束判定：曾在空中 + 停機 ≥ 30 秒 ────────────
+        if (
+            state.hasBeenAirborne &&
+            phase === 'PARKED' &&
+            state.parkedSince &&
+            Date.now() - state.parkedSince >= 30000
+        ) {
+            logger.info('UI', `Flight completed (${phase}): ${plane.callsign || selectedIcao24} — clearing trail`);
+            setTrackPoints([]);
+            trailOwnerRef.current = null;
+            state.hasBeenAirborne = false;
+            state.parkedSince = null;
+        }
+    }, [planesDict, selectedIcao24, trackPoints.length]);
 
     return (
         <div className="app">
@@ -370,6 +520,8 @@ export default function App() {
                 onFilterChange={handleFilterChange}
                 mapLayer={mapLayer}
                 onMapLayerChange={handleMapLayerChange}
+                showStats={showStats}
+                onToggleStats={() => setShowStats(s => !s)}
             />
 
             {/* Right Status Column */}
@@ -444,7 +596,14 @@ export default function App() {
                 </>
             )}
 
-            <PerformanceMonitor usageStats={usageStats} />
+            {showStats && (
+                <StatsPanel
+                    planesDict={planesDict}
+                    anomalyCount={anomalyAlerts.length}
+                    usageStats={usageStats}
+                    onClose={() => setShowStats(false)}
+                />
+            )}
 
             {/* Dev Panel — Ctrl+D to toggle */}
             {showDevPanel && (

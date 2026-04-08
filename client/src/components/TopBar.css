@@ -124,6 +124,18 @@
     transition: all 0.2s;
 }
 
+.tb-lang-btn,
+.tb-icon-btn {
+    width: 44px;
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+}
+
+.tb-lang-btn {
+    width: 52px;
+}
+
 .tb-btn:hover,
 .tb-btn.active {
     background: rgba(34, 211, 238, 0.15);

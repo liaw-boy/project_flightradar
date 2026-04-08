@@ -1,0 +1,205 @@
+.stats-panel {
+    position: fixed;
+    top: calc(var(--topbar-h, 56px) + 8px);
+    left: 16px;
+    width: 260px;
+    background: rgba(15, 18, 30, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    backdrop-filter: blur(12px);
+    z-index: 900;
+    font-family: 'Inter', sans-serif;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+}
+
+.stats-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.stats-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: #a9dfd8;
+}
+
+.stats-close {
+    background: none;
+    border: none;
+    color: var(--color-text-dim, #64748b);
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+    transition: color 0.15s;
+}
+.stats-close:hover { color: #fff; }
+
+.stats-tabs {
+    display: flex;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.stats-tab {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--color-text-dim, #64748b);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    padding: 8px 4px;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+    text-transform: uppercase;
+}
+.stats-tab:hover { color: #e2e8f0; }
+.stats-tab.active {
+    color: #a9dfd8;
+    border-bottom: 2px solid #a9dfd8;
+}
+
+.stats-body {
+    padding: 12px 14px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.stat-box {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    padding: 8px 10px;
+    text-align: center;
+}
+.stat-box-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+.stat-box-label {
+    font-size: 10px;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: var(--color-text-dim, #64748b);
+    margin-top: 5px;
+}
+
+.stats-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.06);
+    margin: 10px 0;
+}
+
+.stats-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    font-size: 12px;
+}
+.stats-label { color: var(--color-text-dim, #64748b); }
+.stats-value { color: #e2e8f0; font-weight: 500; }
+.stats-value-mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+
+/* Bar rows for airlines/types */
+.bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+}
+.bar-label {
+    width: 44px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #cbd5e1;
+    font-family: 'JetBrains Mono', monospace;
+    flex-shrink: 0;
+}
+.bar-track {
+    flex: 1;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #a9dfd8, #22d3ee);
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+.bar-count {
+    width: 28px;
+    text-align: right;
+    font-size: 12px;
+    color: var(--color-text-dim, #64748b);
+    flex-shrink: 0;
+}
+
+.stats-empty {
+    font-size: 12px;
+    color: var(--color-text-dim, #64748b);
+    text-align: center;
+    padding: 16px 0;
+}
+
+/* Engine tab */
+.engine-fps-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0 10px;
+}
+.engine-fps-val {
+    display: flex;
+    align-items: center;
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1;
+}
+.engine-fps-unit {
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: 5px;
+    opacity: 0.7;
+    align-self: flex-end;
+    padding-bottom: 3px;
+}
+.engine-sparkline {
+    opacity: 0.8;
+}
+.engine-throttle-warn {
+    margin-top: 8px;
+    font-size: 10px;
+    color: #f59e0b;
+    text-align: center;
+    letter-spacing: 0.5px;
+}
+
+@media (max-width: 600px) {
+    .stats-panel {
+        left: 8px;
+        bottom: 90px;
+        width: calc(100vw - 16px);
+        max-width: 300px;
+    }
+}

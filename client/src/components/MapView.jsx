@@ -360,6 +360,9 @@ export default function MapView({
             easeLinearity: 0.1
         }).setView([25.17, 121.44], 10);
 
+        // Expose map instance for E2E tests
+        window._leafletMap = map;
+
         // [AERO-SYNC] 專業級游標：強制還原為 default，不使用 Leaflet 預設的 grab
         map.getContainer().style.cursor = 'default';
 
@@ -883,6 +886,11 @@ export default function MapView({
             const dt = Math.min(rawDt, 100) / 1000; // in seconds
             lastDrawTimeRef.current = nowMs;
 
+            // DR timing uses Date.now() (Unix ms) to match drTs which is set via Date.now().
+            // performance.now() and Date.now() have different epochs — mixing them causes
+            // catastrophic easing explosion (timeSinceUpdate ≈ -1.7 trillion ms).
+            const nowDateMs = Date.now();
+
             // [PERF-3 Fix] Single unified loop: Interpolation + Trail Recording + Enrichment
             // Merges two separate Object.keys() iterations into one pass per frame.
             Object.keys(currentPlanes).forEach(id => {
@@ -923,13 +931,14 @@ export default function MapView({
                     plane.renderLng = drLng;
                 } else {
                     // Dead reckoning: where should the plane be right now?
-                    const elapsedSec = Math.min((nowMs - drTs) / 1000, 60);
+                    // elapsedSec uses nowDateMs (Date.now) to match drTs epoch.
+                    const elapsedSec = Math.max(0, Math.min((nowDateMs - drTs) / 1000, 60));
                     const drPos = predictPosition(drLat, drLng, drVelocity, drHeading, elapsedSec);
 
-                    const timeSinceUpdate = nowMs - drTs;
-                    if (timeSinceUpdate < BLEND_MS && plane._blendFromLat != null) {
+                    const timeSinceUpdate = nowDateMs - (plane._dataArrivedAt ?? drTs);
+                    if (timeSinceUpdate >= 0 && timeSinceUpdate < BLEND_MS && plane._blendFromLat != null) {
                         // Within blend window: ease from previous render pos to DR track
-                        const t = timeSinceUpdate / BLEND_MS;
+                        const t = Math.max(0, Math.min(1, timeSinceUpdate / BLEND_MS));
                         const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // easeInOut
                         plane.renderLat = plane._blendFromLat + (drPos.lat - plane._blendFromLat) * eased;
                         plane.renderLng = plane._blendFromLng + (drPos.lng - plane._blendFromLng) * eased;
@@ -1047,17 +1056,36 @@ export default function MapView({
                     // isLive = the live-stitch segment (last point = current interpolated pos)
                     //          → drawn as elastic band (thinner, lighter)
                     // Long segments (>GC_THRESHOLD_KM) are expanded to great circle arcs.
+                    // Only draw the most recent continuous flight segment.
+                    // Find the last major gap (>2h or impossible jump) in raw points
+                    // and discard everything before it, preventing ghost trails from
+                    // previous flights of the same ICAO24 from appearing.
+                    let pathStartIdx = 0;
+                    for (let pi = 1; pi < activeSelectedPath.length; pi++) {
+                        const prev = activeSelectedPath[pi - 1];
+                        const cur  = activeSelectedPath[pi];
+                        const dt   = cur[0] && prev[0] ? cur[0] - prev[0] : 0;
+                        const dist = haversineKm(prev[1], prev[2], cur[1], cur[2]);
+                        const spd  = dt > 0 ? (dist / dt) * 3600 : 0;
+                        if (dt > 7200 || (dist > 50 && dt < 60 && spd > 2000)) {
+                            pathStartIdx = pi;
+                        }
+                    }
+                    const trimmedPath = pathStartIdx > 0
+                        ? activeSelectedPath.slice(pathStartIdx)
+                        : activeSelectedPath;
+
                     const segments = [];
-                    for (let pi = 0; pi < activeSelectedPath.length; pi++) {
-                        const seg = activeSelectedPath[pi];
-                        const isLastPoint = pi === activeSelectedPath.length - 1;
+                    for (let pi = 0; pi < trimmedPath.length; pi++) {
+                        const seg = trimmedPath[pi];
+                        const isLastPoint = pi === trimmedPath.length - 1;
                         const isLive = isLastPoint && (livePlane?.lat || livePlane?.renderLat);
                         const pt = map.latLngToContainerPoint([seg[1], normalizeLongitude(seg[2])]);
                         let stale = false;
                         let gap   = false;
 
                         if (pi > 0) {
-                            const prevSeg = activeSelectedPath[pi - 1];
+                            const prevSeg = trimmedPath[pi - 1];
                             const timeDeltaSec = seg[0] && prevSeg[0] ? seg[0] - prevSeg[0] : 0;
                             const dist = haversineKm(prevSeg[1], prevSeg[2], seg[1], seg[2]);
                             // Use geographic longitude diff to detect antimeridian crossing.
@@ -1068,9 +1096,18 @@ export default function MapView({
                             const lngDiff = Math.abs(lngB - lngA);
                             const isAntimeridian = lngDiff > 180;
 
-                            if (isAntimeridian || (dist > 50 && !isLive) || timeDeltaSec > 1800) {
+                            // Gap detection rules:
+                            // 1. Antimeridian crossing → always break
+                            // 2. Impossible teleport (>50km in <60s at >2000km/h) → break
+                            // 3. Time gap > 2 hours → break (different flight day / multi-leg)
+                            // 4. Time gap 5–120 min → stale (dashed, ADS-B coverage gap)
+                            // 5. < 5 min gap → solid (normal polling interval / rate limit)
+                            // NOTE: 30-min threshold was too short for oceanic ADS-B gaps.
+                            const impliedSpeedKph = timeDeltaSec > 0 ? (dist / timeDeltaSec) * 3600 : 0;
+                            const isImpossibleJump = dist > 50 && timeDeltaSec < 60 && impliedSpeedKph > 2000;
+                            if (isAntimeridian || (isImpossibleJump && !isLive) || timeDeltaSec > 7200) {
                                 gap = true;
-                            } else if (timeDeltaSec > 60 && !isLive) {
+                            } else if (timeDeltaSec > 300 && !isLive) {
                                 stale = true;
                             }
 
@@ -1102,8 +1139,12 @@ export default function MapView({
                             ctx.globalAlpha = isOutline ? 0.25 : 0.65;
                             if (!isOutline) ctx.strokeStyle = altColor;
                         } else if (isDashed) {
-                            ctx.setLineDash([8, 12]);
-                            ctx.globalAlpha = isOutline ? 0.3 : 0.7;
+                            // At low zoom the dash gaps shrink to sub-pixel — invisible.
+                            // Use solid semi-transparent line instead; still looks distinct
+                            // from a full-data segment but remains visible at world zoom.
+                            const dashLen = zoom >= 8 ? 8 : 0; // solid below zoom 8
+                            ctx.setLineDash(dashLen > 0 ? [dashLen, 12] : []);
+                            ctx.globalAlpha = isOutline ? 0.3 : 0.8;
                             if (!isOutline) ctx.strokeStyle = altColor;
                         } else {
                             ctx.setLineDash([]);

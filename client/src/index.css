@@ -22,7 +22,7 @@
     ────────────────────────────────────────────────────────── */
     --topbar-h:   60px;
     --panel-gap:  clamp(12px, 1vw, 20px);
-    --hud-w:      clamp(290px, 20vw, 380px);
+    --hud-w:      clamp(220px, 16vw, 280px);
     --sidebar-w:  clamp(320px, 22vw, 440px);
     --carousel-h: clamp(160px, 13vw, 220px);
 }

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Clock, Plane, Activity, Settings, Globe, Search, X } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Clock, Activity, Settings, Globe, Search, X, BarChart2 } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import SearchBar from './SearchBar';
 import FilterPanel from './FilterPanel';
@@ -17,11 +17,14 @@ export default function TopBar({
     onFilterChange,
     mapLayer,
     onMapLayerChange,
+    showStats,
+    onToggleStats,
 }) {
     const { t, lang, toggleLang } = useI18n();
     const [time, setTime] = useState('--:--:--');
     const [showSettings, setShowSettings] = useState(false);
     const [showMobileSearch, setShowMobileSearch] = useState(false);
+    const settingsRef = useRef(null);
 
     useEffect(() => {
         const interval = setInterval(() => {
@@ -29,6 +32,17 @@ export default function TopBar({
         }, 1000);
         return () => clearInterval(interval);
     }, []);
+
+    useEffect(() => {
+        if (!showSettings) return;
+        const handleClickOutside = (e) => {
+            if (settingsRef.current && !settingsRef.current.contains(e.target)) {
+                setShowSettings(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showSettings]);
 
     return (
         <div className={`top-bar${showMobileSearch ? ' mobile-search-open' : ''}`}>
@@ -41,16 +55,6 @@ export default function TopBar({
 
 
 
-                <div className="top-stat-pill">
-                    <Plane size={14} style={{ color: 'var(--color-text-dim)' }} />
-                    <span className="ts-label">{t('aircraft')}</span>
-                    <span className="ts-value">
-                        {planeCount > 0 ? planeCount : t('scanning')}
-                        {planeCount > 0 && <span className="ts-sub"> {airCount}/{groundCount}</span>}
-                    </span>
-
-
-                </div>
             </div>
 
 
@@ -85,17 +89,25 @@ export default function TopBar({
                     <Search size={16} />
                 </button>
 
-                <button className="tb-btn" onClick={toggleLang}>
+                <button
+                    className={`tb-btn ${showStats ? 'active' : ''}`}
+                    onClick={onToggleStats}
+                    title="Live Stats"
+                >
+                    <BarChart2 size={16} />
+                </button>
+
+                <button className="tb-btn tb-lang-btn" onClick={toggleLang}>
                     {lang === 'en' ? 'EN' : '中'}
                 </button>
 
-                <div className="settings-dropdown-wrapper">
+                <div className="settings-dropdown-wrapper" ref={settingsRef}>
                     <button
-                        className={`tb-btn ${showSettings ? 'active' : ''}`}
+                        className={`tb-btn tb-icon-btn ${showSettings ? 'active' : ''}`}
                         onClick={() => setShowSettings(!showSettings)}
+                        title={t('settings')}
                     >
                         <Settings size={16} />
-                        <span>{t('settings')}</span>
                     </button>
 
                     {showSettings && (

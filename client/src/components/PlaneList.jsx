@@ -66,7 +66,7 @@ export default function PlaneList({ planesDict, bounds, onSelectPlane, selectedI
             <div className="plane-list-toggle" onClick={() => setIsOpen(!isOpen)}>
                 {isOpen ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
                 <List size={16} style={{ marginLeft: '8px', marginRight: '6px' }} />
-                {t('planeList') || 'AIRCRAFT LIST'} ({Object.keys(planesDict).length})
+                {t('planeList') || 'AIRCRAFT LIST'}
             </div>
 
             <div className="plane-list-content">
