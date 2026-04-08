@@ -920,11 +920,26 @@ export default function MapView({
                 // This eliminates backward jumps (we never move backwards) and forward jumps (smooth blend).
                 const BLEND_MS = 600; // transition window after new data arrival
 
-                const drLat      = plane.drLat      ?? plane.lat;
-                const drLng      = plane.drLng      ?? plane.lng;
-                const drTs       = plane.drTs       ?? plane.targetUpdatedAt ?? Date.now();
+                let drLat      = plane.drLat      ?? plane.lat;
+                let drLng      = plane.drLng      ?? plane.lng;
+                let drTs       = plane.drTs       ?? plane.targetUpdatedAt ?? Date.now();
                 const drVelocity = plane.drVelocity ?? plane.velocity ?? 0;
                 const drHeading  = plane.drHeading  ?? plane.heading  ?? 0;
+
+                // For the selected plane: if the latest track point is newer than
+                // the DR origin, use it instead so the icon never lags behind the trail.
+                if (icao24 === currentSelected) {
+                    const pts = trackPointsRef.current;
+                    if (pts && pts.length > 0) {
+                        const lastPt = pts[pts.length - 1];
+                        const lastPtMs = lastPt[0] ? lastPt[0] * 1000 : 0;
+                        if (lastPtMs > drTs && lastPt[1] && lastPt[2]) {
+                            drLat = lastPt[1];
+                            drLng = lastPt[2];
+                            drTs  = lastPtMs;
+                        }
+                    }
+                }
 
                 if (plane.onGround || drVelocity <= 0) {
                     // Stationary: snap to DR origin (no reckoning needed)
@@ -932,7 +947,6 @@ export default function MapView({
                     plane.renderLng = drLng;
                 } else {
                     // Dead reckoning: where should the plane be right now?
-                    // elapsedSec uses nowDateMs (Date.now) to match drTs epoch.
                     const elapsedSec = Math.max(0, Math.min((nowDateMs - drTs) / 1000, 60));
                     const drPos = predictPosition(drLat, drLng, drVelocity, drHeading, elapsedSec);
 
