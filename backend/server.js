@@ -3886,11 +3886,11 @@ async function fetchTracksInternal(icao24) {
         }
 
         // ── 5. OpenSky Historical Track Augmentation ────────────────────────
-        // OpenSky time=0 returns only the current flight's track, so we can
-        // trust it without session-time filtering when it starts on the ground
-        // (i.e. full departure data is present). If the track starts mid-air,
-        // we still apply the session start filter to avoid mixing flights.
-        if (localPoints.length < 20) {
+        // Augment when: (a) sparse local data, OR (b) first local point is
+        // already airborne (high altitude) — meaning we missed the departure.
+        const firstLocalAlt = localPoints.length > 0 ? (localPoints[0].altitude ?? 0) : 0;
+        const missedDeparture = localPoints.length > 0 && firstLocalAlt > 500;
+        if (localPoints.length < 20 || missedDeparture) {
             try {
                 const osTrack = await fetchOpenSkyHistoricalTrack(icao);
                 if (osTrack && Array.isArray(osTrack.path) && osTrack.path.length > 0) {
