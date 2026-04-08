@@ -4281,34 +4281,23 @@ async function finalizeProfile(aircraft, route, liveState = null) {
     const depIata = route.origin_iata || route.departureAirport;
     const destIata = route.destination_iata || route.arrivalAirport;
 
-    await Promise.all([
-        // Departure airport coords
-        (async () => {
-            if (depIata && depIata !== 'N/A' && depIata !== '---') {
-                try {
-                    const ap = await Airport.findOne({ $or: [{ iata: depIata }, { icao: depIata }] });
-                    if (ap?.lat && ap?.lng) depCoords = { lat: ap.lat, lng: ap.lng, iata: depIata, name: ap.name };
-                } catch (e) {}
-            }
-        })(),
-        // Arrival airport coords + METAR
-        (async () => {
-            if (destIata && destIata !== '---' && destIata !== 'N/A') {
-                try {
-                    const airport = await Airport.findOne({ $or: [{ iata: destIata }, { icao: destIata }] });
-                    if (airport) {
-                        if (airport.lat && airport.lng) arrCoords = { lat: airport.lat, lng: airport.lng, iata: destIata, name: airport.name };
-                        if (airport.icao) {
-                            weather = await fetchMetar(airport.icao);
-                            if (weather && route.callsign) {
-                                Route.updateOne({ callsign: route.callsign }, { $set: { destination_weather: weather } }).catch(() => null);
-                            }
-                        }
-                    }
-                } catch (e) {}
-            }
-        })(),
-    ]);
+    // Lookup coords from globalAirportsDB (keyed by IATA)
+    if (depIata && depIata !== 'N/A' && depIata !== '---') {
+        const ap = globalAirportsDB[depIata];
+        if (ap?.lat && ap?.lng) depCoords = { lat: ap.lat, lng: ap.lng, iata: depIata, name: ap.name };
+    }
+    if (destIata && destIata !== '---' && destIata !== 'N/A') {
+        const ap = globalAirportsDB[destIata];
+        if (ap?.lat && ap?.lng) arrCoords = { lat: ap.lat, lng: ap.lng, iata: destIata, name: ap.name };
+        if (ap?.icao) {
+            try {
+                weather = await fetchMetar(ap.icao);
+                if (weather && route.callsign) {
+                    Route.updateOne({ callsign: route.callsign }, { $set: { destination_weather: weather } }).catch(() => null);
+                }
+            } catch (e) {}
+        }
+    }
 
     return {
         hex: aircraft.hex || aircraft.icao24,
