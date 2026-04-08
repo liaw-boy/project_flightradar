@@ -197,6 +197,7 @@ export default function MapView({
     t,
     translateMetar,
     syncViewport,
+    depCoords = null,
 }) {
     const [hoveredPlane, setHoveredPlane] = useState(null);
     const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
@@ -1074,6 +1075,32 @@ export default function MapView({
                     const trimmedPath = pathStartIdx > 0
                         ? activeSelectedPath.slice(pathStartIdx)
                         : activeSelectedPath;
+
+                    // ── Draw estimated departure segment (dotted line) ──────────
+                    // If we have departure airport coords and the first track point
+                    // is airborne (alt > 200m), draw a dotted line from the airport
+                    // to the first known ADS-B point.
+                    const firstPt = trimmedPath[0];
+                    const firstAlt = firstPt?.[3] ?? 0;
+                    if (depCoords && firstPt && firstAlt > 200) {
+                        const depPx = map.latLngToContainerPoint([depCoords.lat, normalizeLongitude(depCoords.lng)]);
+                        const firstPx = map.latLngToContainerPoint([firstPt[1], normalizeLongitude(firstPt[2])]);
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.setLineDash([6, 8]);
+                        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+                        ctx.lineWidth = 1.5;
+                        ctx.moveTo(depPx.x, depPx.y);
+                        ctx.lineTo(firstPx.x, firstPx.y);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                        // Airport dot
+                        ctx.beginPath();
+                        ctx.arc(depPx.x, depPx.y, 4, 0, Math.PI * 2);
+                        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                        ctx.fill();
+                        ctx.restore();
+                    }
 
                     const segments = [];
                     for (let pi = 0; pi < trimmedPath.length; pi++) {

@@ -4273,22 +4273,42 @@ app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
  * Helper to finalize the profile object and inject weather
  */
 async function finalizeProfile(aircraft, route, liveState = null) {
-    // Inject METAR if arrival is known
+    // Lookup departure and arrival airport coordinates in parallel
     let weather = null;
+    let depCoords = null;
+    let arrCoords = null;
+
+    const depIata = route.origin_iata || route.departureAirport;
     const destIata = route.destination_iata || route.arrivalAirport;
-    if (destIata && destIata !== '---' && destIata !== 'N/A') {
-        try {
-            const airport = await Airport.findOne({ $or: [{ iata: destIata }, { icao: destIata }] });
-            if (airport && airport.icao) {
-                weather = await fetchMetar(airport.icao);
-                
-                // If we got weather, non-blocking update to Route to cache it
-                if (weather && route.callsign) {
-                    Route.updateOne({ callsign: route.callsign }, { $set: { destination_weather: weather } }).catch(() => null);
-                }
+
+    await Promise.all([
+        // Departure airport coords
+        (async () => {
+            if (depIata && depIata !== 'N/A' && depIata !== '---') {
+                try {
+                    const ap = await Airport.findOne({ $or: [{ iata: depIata }, { icao: depIata }] });
+                    if (ap?.lat && ap?.lng) depCoords = { lat: ap.lat, lng: ap.lng, iata: depIata, name: ap.name };
+                } catch (e) {}
             }
-        } catch (e) {}
-    }
+        })(),
+        // Arrival airport coords + METAR
+        (async () => {
+            if (destIata && destIata !== '---' && destIata !== 'N/A') {
+                try {
+                    const airport = await Airport.findOne({ $or: [{ iata: destIata }, { icao: destIata }] });
+                    if (airport) {
+                        if (airport.lat && airport.lng) arrCoords = { lat: airport.lat, lng: airport.lng, iata: destIata, name: airport.name };
+                        if (airport.icao) {
+                            weather = await fetchMetar(airport.icao);
+                            if (weather && route.callsign) {
+                                Route.updateOne({ callsign: route.callsign }, { $set: { destination_weather: weather } }).catch(() => null);
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }
+        })(),
+    ]);
 
     return {
         hex: aircraft.hex || aircraft.icao24,
@@ -4327,6 +4347,8 @@ async function finalizeProfile(aircraft, route, liveState = null) {
             flightStatus:       route.flightStatus       || null,
             airline_name:       route.airline_name       || null,
             destination_weather: weather || route.destination_weather || null,
+            depCoords,
+            arrCoords,
         },
         aircraft: {
             type: aircraft.type || aircraft.model,

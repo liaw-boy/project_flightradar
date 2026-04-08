@@ -45,6 +45,7 @@ export default function App() {
     const trailOwnerRef = useRef(null); // 防止舊 timer / 舊 fetch 污染新選取的軌跡
     const [selectedMetadata, setSelectedMetadata] = useState(null);
     const [selectedRoute, setSelectedRoute] = useState(null);
+    const [depCoords, setDepCoords] = useState(null); // { lat, lng, iata, name }
     const [filters, setFilters] = useState({
         showGround: true,
         showEmergency: true,
@@ -306,6 +307,7 @@ export default function App() {
         setTrackPoints([]);
         setSelectedMetadata(null);
         setSelectedRoute(null);
+        setDepCoords(null);
         setTrackMode(false); // 取消追蹤模式
         setPlaybackTime(null); // [v3.1] clear playback on deselect
         
@@ -317,6 +319,21 @@ export default function App() {
         url.searchParams.delete('icao');
         window.history.replaceState({}, '', url);
     }, []);
+
+    // Fetch departure airport coords when a plane is selected
+    useEffect(() => {
+        if (!selectedIcao24) return;
+        const plane = planesDict[selectedIcao24];
+        const callsign = plane?.callsign;
+        if (!callsign) return;
+        fetch(`/api/flight/complete-details/${selectedIcao24}/${callsign}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                const coords = data?.route?.depCoords;
+                if (coords?.lat && coords?.lng) setDepCoords(coords);
+            })
+            .catch(() => {});
+    }, [selectedIcao24]);
 
     // Expose select/deselect for E2E tests (does not affect production behaviour)
     useEffect(() => {
@@ -506,6 +523,7 @@ export default function App() {
                 syncViewport={syncViewport}
                 t={t}
                 translateMetar={translateMetar}
+                depCoords={depCoords}
             />
 
             <TopBar
