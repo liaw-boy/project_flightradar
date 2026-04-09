@@ -1064,8 +1064,11 @@ export default function MapView({
                     const livePathLat = livePlane?.renderLat ?? livePlane?.lat;
                     const livePathLng = livePlane?.renderLng ?? livePlane?.lng;
 
-                    // Cap at 10 minutes: beyond that, DR drift makes the extension misleading.
-                    if (livePathLat && livePathLng && gapSec < 600) {
+                    // Cap at 10 minutes for airborne planes; 60s for on-ground / very slow planes
+                    // to prevent DR extending the trail in the wrong direction during landing/taxi.
+                    const isSlowOrGround = livePlane.onGround || (livePlane.velocity ?? 0) < 50;
+                    const liveExtCap = isSlowOrGround ? 60 : 600;
+                    if (livePathLat && livePathLng && gapSec < liveExtCap) {
                         activeSelectedPath = [...basePath, [
                             nowSec,
                             livePathLat,

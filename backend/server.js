@@ -3971,6 +3971,19 @@ async function fetchTracksInternal(icao24) {
                         osFiltered = osFiltered.filter(p => p[0] >= sessionStartUnix - 120);
                     }
 
+                    // ── Session-start validation ─────────────────────────────────
+                    // If the OpenSky track's LAST point is from before the current
+                    // session started (with 5-min buffer), the entire track belongs
+                    // to a PREVIOUS flight. Discard it to prevent showing old paths
+                    // (e.g. ETD899: shows Korea→TPE track when plane is now TPE→elsewhere).
+                    if (sessionStartUnix && osFiltered.length > 0) {
+                        const lastOsTs = osFiltered[osFiltered.length - 1][0];
+                        if (lastOsTs < sessionStartUnix - 300) {
+                            logger.info('TRACK', `${icao24}: OpenSky track pre-dates session (lastPt=${lastOsTs}, sessionStart=${sessionStartUnix}), discarding previous-flight data`);
+                            osFiltered = [];
+                        }
+                    }
+
                     if (osFiltered.length > localPoints.length) {
                         const osConverted = osFiltered.map(p => ({
                             timestamp: new Date(p[0] * 1000),
