@@ -3930,24 +3930,41 @@ async function fetchTracksInternal(icao24) {
                 const osTrack = await fetchOpenSkyHistoricalTrack(icao);
                 if (osTrack && Array.isArray(osTrack.path) && osTrack.path.length > 0) {
 
-                    // Check if OpenSky has the full flight from departure
-                    // (first point on ground = departure airport included)
-                    const firstPt = osTrack.path[0];
-                    const startsOnGround = firstPt && firstPt[5] === true;
+                    // Find the start of the CURRENT flight leg within the OpenSky track.
+                    // Walk backward to find: (a) a 3h time gap = different flight, or
+                    // (b) the last ground→airborne transition = most recent takeoff.
+                    // This prevents showing multiple flights when OpenSky returns a
+                    // track spanning an earlier flight + the current one.
+                    const ospath = osTrack.path;
+                    let osFlightStartIdx = 0;
+                    for (let i = ospath.length - 1; i >= 1; i--) {
+                        const curr = ospath[i];
+                        const prev = ospath[i - 1];
+                        // Large time gap = separate flight
+                        if (curr[0] - prev[0] > 3 * 3600) {
+                            osFlightStartIdx = i;
+                            break;
+                        }
+                        // ground → airborne transition = takeoff of current flight
+                        // (walking backward: curr=airborne, prev=on_ground)
+                        if (curr[5] === false && prev[5] === true) {
+                            osFlightStartIdx = i;
+                            break;
+                        }
+                    }
 
-                    // Only filter by session start when OpenSky doesn't have
-                    // the full departure — prevents mixing old flights mid-air.
-                    const flightStartUnix = startsOnGround
-                        ? (osTrack.path[0][0] || 0)  // trust OpenSky's own start
-                        : sessionStartUnix
-                            ? sessionStartUnix - 120
-                            : Math.floor((Date.now() - 30 * 60 * 1000) / 1000);
+                    // Fallback: if no takeoff found (track starts mid-air), filter by
+                    // session start time to avoid mixing old flights.
+                    let osFiltered = ospath
+                        .slice(osFlightStartIdx)
+                        .filter(p =>
+                            typeof p[1] === 'number' && p[1] !== 0 &&
+                            typeof p[2] === 'number' && p[2] !== 0
+                        );
 
-                    const osFiltered = osTrack.path.filter(p =>
-                        p[0] >= flightStartUnix &&
-                        typeof p[1] === 'number' && p[1] !== 0 &&
-                        typeof p[2] === 'number' && p[2] !== 0
-                    );
+                    if (osFlightStartIdx === 0 && sessionStartUnix) {
+                        osFiltered = osFiltered.filter(p => p[0] >= sessionStartUnix - 120);
+                    }
 
                     if (osFiltered.length > localPoints.length) {
                         const osConverted = osFiltered.map(p => ({
@@ -3965,7 +3982,7 @@ async function fetchTracksInternal(icao24) {
                         localPoints.forEach(p => mergedMap.set(Math.round(p.timestamp.getTime() / 1000), p));
                         localPoints = Array.from(mergedMap.values()).sort((a, b) => a.timestamp - b.timestamp);
 
-                        logger.info('TRACK', `Historical augment OK: ${icao24} — ${osFiltered.length} OpenSky pts merged → ${localPoints.length} total (startsOnGround=${startsOnGround})`);
+                        logger.info('TRACK', `Historical augment OK: ${icao24} — ${osFiltered.length} OpenSky pts merged → ${localPoints.length} total (osFlightStartIdx=${osFlightStartIdx})`);
                     }
                 }
             } catch (osErr) {
