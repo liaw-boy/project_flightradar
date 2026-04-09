@@ -3951,7 +3951,8 @@ async function fetchTracksInternal(icao24) {
                         }
                         // ground → airborne transition = takeoff of current flight
                         // (walking backward: curr=airborne, prev=on_ground)
-                        if (curr[5] === false && prev[5] === true) {
+                        // Use truthy/falsy — OpenSky may return boolean OR integer 0/1
+                        if (!curr[5] && prev[5]) {
                             osFlightStartIdx = i;
                             break;
                         }
