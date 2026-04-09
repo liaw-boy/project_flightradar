@@ -3871,6 +3871,7 @@ async function fetchTracksInternal(icao24) {
         // Fetch all 24h points for this ICAO, then find the start of the current
         // flight leg (last ground stop before the current airborne segment).
         // This joins sessions split by ADS-B ocean gaps or server restarts.
+        let localPoints = [];
         {
             const sqliteDb = require('./db/sqlite');
             const cutoff24h = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);

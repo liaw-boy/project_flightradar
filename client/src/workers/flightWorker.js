@@ -162,6 +162,9 @@ function wLog(level, msg) {
     fn(`[${ts}][WS-WORKER] ${msg}`);
 }
 
+// ── Selected plane state (persisted across reconnects) ───────────────────────
+let selectedIcao24 = null;
+
 // ── WebSocket Connection ─────────────────────────────────────────────────────
 function connectWebSocket(baseUrl) {
     const wsUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
@@ -174,6 +177,10 @@ function connectWebSocket(baseUrl) {
         wLog('info', '✅ Connected');
         reconnectDelay = 1000;
         postMessage({ type: 'WS_CONNECTED', payload: null });
+        // Re-send selected plane on reconnect so server resumes track_point push
+        if (selectedIcao24) {
+            ws.send(msgpack.encode({ type: 'SELECT_PLANE', icao24: selectedIcao24 }));
+        }
     };
 
     ws.onmessage = (event) => {
@@ -219,8 +226,9 @@ self.onmessage = (event) => {
             }
             break;
         case 'SELECT_PLANE':
+            selectedIcao24 = payload.icao24 || null; // persist across reconnects
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(msgpack.encode({ type: 'SELECT_PLANE', icao24: payload.icao24 || null }));
+                ws.send(msgpack.encode({ type: 'SELECT_PLANE', icao24: selectedIcao24 }));
             }
             break;
         case 'DISCONNECT':

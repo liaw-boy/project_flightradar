@@ -941,9 +941,9 @@ export default function MapView({
                         //   2. Not stale (< 30 min old) — prevents previous-flight data overriding DR
                         //   3. Geographically close to current ADS-B position (< ~500 km)
                         //      Rough check: ≤ 4.5 degrees lat/lng ≈ 500 km at mid-latitudes
-                        const latDiff = lastPt[1] ? Math.abs(lastPt[1] - (plane.lat ?? drLat)) : 999;
-                        const lngDiff = lastPt[2] ? Math.abs(lastPt[2] - (plane.lng ?? drLng)) : 999;
-                        if (lastPtMs > drTs && lastPt[1] && lastPt[2]
+                        const latDiff = (lastPt[1] != null) ? Math.abs(lastPt[1] - (plane.lat ?? drLat)) : 999;
+                        const lngDiff = (lastPt[2] != null) ? Math.abs(lastPt[2] - (plane.lng ?? drLng)) : 999;
+                        if (lastPtMs > drTs && lastPt[1] != null && lastPt[2] != null
                             && ageMs < 30 * 60 * 1000
                             && latDiff < 4.5 && lngDiff < 4.5) {
                             drLat = lastPt[1];
@@ -1065,7 +1065,8 @@ export default function MapView({
                     const livePathLng = livePlane?.renderLng ?? livePlane?.lng;
 
                     // Cap at 10 minutes for airborne planes; 60s for on-ground / very slow planes
-                    // to prevent DR extending the trail in the wrong direction during landing/taxi.
+                    // to prevent DR extending the trail in wrong direction during landing/taxi.
+                    // velocity is in m/s; 50 m/s ≈ 97 kt (typical slow-flight threshold)
                     const isSlowOrGround = livePlane.onGround || (livePlane.velocity ?? 0) < 50;
                     const liveExtCap = isSlowOrGround ? 60 : 600;
                     if (livePathLat && livePathLng && gapSec < liveExtCap) {
