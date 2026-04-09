@@ -927,13 +927,25 @@ export default function MapView({
                 const drHeading  = plane.drHeading  ?? plane.heading  ?? 0;
 
                 // For the selected plane: if the latest track point is newer than
-                // the DR origin, use it instead so the icon never lags behind the trail.
+                // the DR origin AND geographically close to the current ADS-B position,
+                // use it so the icon stays aligned with the trail end.
+                // Guard: reject track points from a previous flight (too old or too far away).
                 if (id === currentSelected) {
                     const pts = trackPointsRef.current;
                     if (pts && pts.length > 0) {
                         const lastPt = pts[pts.length - 1];
                         const lastPtMs = lastPt[0] ? lastPt[0] * 1000 : 0;
-                        if (lastPtMs > drTs && lastPt[1] && lastPt[2]) {
+                        const ageMs = nowDateMs - lastPtMs;
+                        // Only use track point if:
+                        //   1. Newer than current DR origin
+                        //   2. Not stale (< 30 min old) — prevents previous-flight data overriding DR
+                        //   3. Geographically close to current ADS-B position (< ~500 km)
+                        //      Rough check: ≤ 4.5 degrees lat/lng ≈ 500 km at mid-latitudes
+                        const latDiff = lastPt[1] ? Math.abs(lastPt[1] - (plane.lat ?? drLat)) : 999;
+                        const lngDiff = lastPt[2] ? Math.abs(lastPt[2] - (plane.lng ?? drLng)) : 999;
+                        if (lastPtMs > drTs && lastPt[1] && lastPt[2]
+                            && ageMs < 30 * 60 * 1000
+                            && latDiff < 4.5 && lngDiff < 4.5) {
                             drLat = lastPt[1];
                             drLng = lastPt[2];
                             drTs  = lastPtMs;

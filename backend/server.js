@@ -3879,20 +3879,24 @@ async function fetchTracksInternal(icao24) {
             ).all(icao.toLowerCase(), cutoff24h);
 
             if (allRows.length > 0) {
-                // Find start of current flight leg: the last ground stop (on_ground=1, low speed)
-                // before the most recent continuous airborne segment.
-                // Walk backwards to find where the plane was last on the ground.
+                // Find start of current flight leg.
+                // Walk backward to find: (a) a 3h time gap = different flight, or
+                // (b) the last ground→airborne transition = most recent takeoff.
+                // Using the takeoff transition (not just any on_ground point) prevents
+                // including the previous flight's arrival points when the departure
+                // ground stop isn't in the DB.
                 let flightStartIdx = 0;
                 for (let i = allRows.length - 1; i >= 1; i--) {
                     const r = allRows[i];
                     const prev = allRows[i - 1];
-                    // Large time gap (>3h) between consecutive points = different day/flight
+                    // Large time gap (>3h) = different flight
                     if (r.ts - prev.ts > 3 * 3600) {
                         flightStartIdx = i;
                         break;
                     }
-                    // Was on ground with low speed = airport stop = flight boundary
-                    if (r.on_ground && (r.velocity || 0) < 10) {
+                    // Ground → airborne transition (walking backward: r=airborne, prev=ground)
+                    // = takeoff point of current flight
+                    if (!r.on_ground && prev.on_ground) {
                         flightStartIdx = i;
                         break;
                     }
