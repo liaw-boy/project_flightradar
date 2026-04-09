@@ -22,12 +22,18 @@ function initWebSocketServer(server) {
         const initMsg = msgpack.encode({ type: 'init' });
         try { ws.send(initMsg); } catch (_) { /* client disconnected before init */ }
 
+        // Which ICAO24 this client has selected (for track_point push)
+        ws.selectedIcao24 = null;
+
         ws.on('message', (data) => {
             try {
                 const msg = msgpack.decode(new Uint8Array(data));
                 if (msg.type === 'SET_VIEWPORT') {
                     ws.bbox = msg.payload;
                     logger.debug('WS', `Viewport set: lamin=${ws.bbox.lamin?.toFixed(2)} lamax=${ws.bbox.lamax?.toFixed(2)} lomin=${ws.bbox.lomin?.toFixed(2)} lomax=${ws.bbox.lomax?.toFixed(2)}`);
+                } else if (msg.type === 'SELECT_PLANE') {
+                    ws.selectedIcao24 = msg.icao24 || null;
+                    logger.debug('WS', `Client selected plane: ${ws.selectedIcao24 || '(none)'}`);
                 }
             } catch (err) {
                 logger.error('WS', `Message handling error: ${err.message}`);
@@ -205,10 +211,25 @@ function getClientCount() {
     return wss ? wss.clients.size : 0;
 }
 
+/**
+ * Push a single track point to every client that has icao24 selected.
+ * Format: [timestamp, lat, lng, altitude, heading, velocity]
+ */
+function broadcastTrackPoint(icao24, point) {
+    if (!wss || wss.clients.size === 0) return;
+    const payload = msgpack.encode({ type: 'track_point', icao24, point });
+    wss.clients.forEach(client => {
+        if (client.readyState === 1 /* OPEN */ && client.selectedIcao24 === icao24) {
+            try { client.send(payload); } catch (_) { /* client disconnected */ }
+        }
+    });
+}
+
 module.exports = {
     initWebSocketServer,
     broadcastPlanes,
     broadcastTelemetry,
+    broadcastTrackPoint,
     getActiveViewports,
     getClientCount
 };

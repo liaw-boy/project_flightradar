@@ -126,7 +126,25 @@ export default function App() {
         fetchTrack,
         syncViewport,
         flightHistoryRef,
+        trackPointListenerRef,
+        sendWorkerMessage,
     } = useFlightData(mapInstanceRef);
+
+    // Wire live track point push — called by useFlightData when WS delivers a track_point
+    // Keep trailOwnerRef in a ref so the callback doesn't become stale
+    const trailOwnerRefForWs = trailOwnerRef; // same ref object, alias for clarity
+    useEffect(() => {
+        trackPointListenerRef.current = ({ icao24, point }) => {
+            if (trailOwnerRefForWs.current !== icao24) return; // guard: different plane selected
+            setTrackPoints(prev => {
+                if (!prev || prev.length === 0) return [point];
+                const lastTs = prev[prev.length - 1]?.[0];
+                if (point[0] <= lastTs) return prev; // already have this or newer timestamp
+                return [...prev, point];
+            });
+        };
+        return () => { trackPointListenerRef.current = null; };
+    }, [trackPointListenerRef]);
 
     // [v2.9.0] SSE EventSource — real-time server push
     // fetchPlanesRef keeps the latest fetchPlanes without causing SSE reconnects
@@ -238,6 +256,7 @@ export default function App() {
         async (icao24, plane) => {
             logToServer(`Selected plane: ${plane.callsign || 'N/A'} (ICAO: ${icao24})`, 'info', { callsign: plane.callsign, icao24 });
             trailOwnerRef.current = icao24; // 標記新目標，防止舊 fetch/timer 污染
+            sendWorkerMessage({ type: 'SELECT_PLANE', payload: { icao24 } });
             if (selectedIcao24 !== icao24) {
                 setTrackPoints([]);
                 setSelectedMetadata(null);
@@ -303,6 +322,7 @@ export default function App() {
     // 取消選擇
     const handleDeselectPlane = useCallback(() => {
         trailOwnerRef.current = null;
+        sendWorkerMessage({ type: 'SELECT_PLANE', payload: { icao24: null } });
         setSelectedIcao24(null);
         setTrackPoints([]);
         setSelectedMetadata(null);
@@ -361,37 +381,11 @@ export default function App() {
     // 當前選中的飛機資料
     const selectedPlane = selectedIcao24 ? planesDict[selectedIcao24] : null;
 
-    // [Fix] Periodic track refresh — keeps the historical trail growing as the plane flies.
-    // Uses a ref for planesDict to avoid stale closures inside the interval callback.
+    // Track points are now delivered via WebSocket push (broadcastTrackPoint backend →
+    // flightWorker.js TRACK_POINT → trackPointListenerRef). The old 30s REST polling
+    // interval is removed. The planesDictRef is still used by the auto-deselection guard.
     const planesDictRef = useRef(planesDict);
     useEffect(() => { planesDictRef.current = planesDict; }, [planesDict]);
-
-    useEffect(() => {
-        if (!selectedIcao24) return;
-        const timer = setInterval(async () => {
-            const plane = planesDictRef.current[selectedIcao24];
-            if (!plane) return;
-            try {
-                const newPoints = await fetchTrack(selectedIcao24, plane.lastContact, true); // bypass LRU
-                if (!newPoints || newPoints.length === 0) return;
-                // 確認 fetch 期間沒有切換到其他飛機
-                if (trailOwnerRef.current !== selectedIcao24) return;
-                setTrackPoints(prev => {
-                    if (!prev || prev.length === 0) return newPoints;
-                    // Merge all points, deduplicate by timestamp, sort ascending.
-                    // This prevents zigzag caused by duplicate or slightly out-of-order
-                    // points at the seam between old and new data fetches.
-                    const seen = new Set(prev.map(p => p[0]));
-                    const fresh = newPoints.filter(p => !seen.has(p[0]));
-                    if (fresh.length === 0) return prev;
-                    const merged = [...prev, ...fresh];
-                    merged.sort((a, b) => a[0] - b[0]);
-                    return merged;
-                });
-            } catch (_) {}
-        }, 30000); // every 30 s — matches backend TrackPoint ingest cycle
-        return () => clearInterval(timer);
-    }, [selectedIcao24, fetchTrack]);
 
     // [v4.1.0] Auto-Deselection Guard: 如果選中的飛機消失在數據流中，自動取消選取
     // [Fix] When trackMode is active the selected plane may legitimately move outside

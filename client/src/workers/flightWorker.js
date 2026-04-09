@@ -16,10 +16,12 @@
  *   WS_DISCONNECTED null
  *   WS_ERROR      string
  *   TELEMETRY_UPDATED { totalApiHits, nextFetchIn, accounts }
+ *   TRACK_POINT   { icao24: string, point: [ts, lat, lng, alt, hdg, vel] }
  *
  * Message protocol (Main → Worker):
  *   INIT          { baseUrl: string }
  *   SET_VIEWPORT  { lamin, lomin, lamax, lomax }
+ *   SELECT_PLANE  { icao24: string | null }
  *   DISCONNECT    null
  */
 
@@ -147,6 +149,10 @@ function handleDecodedMessage(msg) {
     if (msg.type === 'telemetry') {
         postMessage({ type: 'TELEMETRY_UPDATED', payload: msg });
     }
+
+    if (msg.type === 'track_point') {
+        postMessage({ type: 'TRACK_POINT', payload: { icao24: msg.icao24, point: msg.point } });
+    }
 }
 
 // ── Inline Logger (Workers cannot import browser logger module) ───────────────
@@ -210,6 +216,11 @@ self.onmessage = (event) => {
         case 'SET_VIEWPORT':
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(msgpack.encode({ type: 'SET_VIEWPORT', payload }));
+            }
+            break;
+        case 'SELECT_PLANE':
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(msgpack.encode({ type: 'SELECT_PLANE', icao24: payload.icao24 || null }));
             }
             break;
         case 'DISCONNECT':

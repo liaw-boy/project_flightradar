@@ -928,7 +928,7 @@ export default function MapView({
 
                 // For the selected plane: if the latest track point is newer than
                 // the DR origin, use it instead so the icon never lags behind the trail.
-                if (icao24 === currentSelected) {
+                if (id === currentSelected) {
                     const pts = trackPointsRef.current;
                     if (pts && pts.length > 0) {
                         const lastPt = pts[pts.length - 1];
@@ -1042,16 +1042,18 @@ export default function MapView({
                         : flightPath;
                     const basePath = trimmedPath.length > 1 ? trimmedPath : flightPath;
 
-                    // Only extend trail to live DR position if the last track point is
-                    // recent (< 90s gap). A larger gap means the straight-line extension
-                    // would be long and misleading — better to show nothing than a rubber band.
+                    // Extend trail to live DR position whenever the plane is visible.
+                    // renderLat/renderLng are always the current DR estimate (updated every
+                    // animation frame), so the extension is never stale regardless of how old
+                    // the last real track point is.
                     const lastPtTime = basePath[basePath.length - 1]?.[0] ?? 0;
                     const nowSec = Date.now() / 1000;
                     const gapSec = nowSec - lastPtTime;
                     const livePathLat = livePlane?.renderLat ?? livePlane?.lat;
                     const livePathLng = livePlane?.renderLng ?? livePlane?.lng;
 
-                    if (livePathLat && livePathLng && gapSec < 90) {
+                    // Cap at 10 minutes: beyond that, DR drift makes the extension misleading.
+                    if (livePathLat && livePathLng && gapSec < 600) {
                         activeSelectedPath = [...basePath, [
                             nowSec,
                             livePathLat,

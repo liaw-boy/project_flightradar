@@ -33,6 +33,8 @@ export function useFlightData(mapRef) {
     const nextScheduledFetchRef = useRef(Date.now() + 60000);
     const workerRef = useRef(null);
     const usesWebSocketRef = useRef(false);
+    // Callback set by App.jsx to receive live track point pushes
+    const trackPointListenerRef = useRef(null);
     
     // [v4.3.6] Auto-Backfill Queue for Cold Starts
     const backfillQueueRef = useRef([]);
@@ -228,33 +230,32 @@ export function useFlightData(mapRef) {
                     const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
                     const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
 
-                    // [DR] Dead Reckoning: snapshot current render position as blend origin.
-                    // renderLat/Lng is preserved from existing so the render loop blends smoothly.
+                    // [DR] No-backward fix: use current render position as DR origin.
+                    // Previously we set drLat = pData.lat (ADS-B position) which is always
+                    // slightly behind the DR-extrapolated render position, causing a 600ms
+                    // backward blend every time a global baseline update arrived (~75s cycle).
+                    // Now we continue DR forward from wherever the icon currently is, only
+                    // updating heading/velocity from the new ADS-B data. Positional drift is
+                    // bounded by the update interval × turn rate (typically < 1km).
                     const snapRenderLat = existing.renderLat ?? existing.lat;
                     const snapRenderLng = existing.renderLng ?? existing.lng;
                     const now = Date.now();
-                    // Use actual ADS-B measurement time as DR origin so dead reckoning
-                    // accounts for the propagation delay (typically 5-10s). This prevents
-                    // the plane from jumping backward to the stale ADS-B position on each update.
-                    const adsbTs = pData.lastContact
-                        ? pData.lastContact * 1000
-                        : now;
 
                     next[icao24] = {
                         ...existing,
                         ...pData,
                         isDirty,
-                        // Dead reckoning origin: where plane IS according to ADS-B
-                        drLat: pData.lat,
-                        drLng: pData.lng,
+                        // DR origin: current render position (not ADS-B position)
+                        // This prevents the icon from ever moving backward.
+                        drLat: snapRenderLat,
+                        drLng: snapRenderLng,
                         drHeading: pData.heading,
                         drVelocity: pData.velocity,
-                        drTs: adsbTs,  // measurement time, not receive time
-                        // Blend start: where the icon WAS before this update
-                        _blendFromLat: snapRenderLat,
-                        _blendFromLng: snapRenderLng,
+                        drTs: now,
+                        // No blend needed — DR continues forward from current position
+                        _blendFromLat: null,
+                        _blendFromLng: null,
                         _dataArrivedAt: now,
-                        // Keep render position frozen at blend start; loop will move it
                         renderLat: snapRenderLat,
                         renderLng: snapRenderLng,
                         // Legacy compat
@@ -583,6 +584,8 @@ export function useFlightData(mapRef) {
                 if (nextFetchIn !== undefined) {
                     setThrottleSeconds(nextFetchIn);
                 }
+            } else if (type === 'TRACK_POINT') {
+                trackPointListenerRef.current?.(payload);
             }
         };
 
@@ -613,5 +616,7 @@ export function useFlightData(mapRef) {
         syncViewport,
         deleteFromStore: (id) => trackStore.clearTrack(id), // Expose for manual cleaning
         flightHistoryRef,
+        trackPointListenerRef,
+        sendWorkerMessage: (msg) => { if (workerRef.current) workerRef.current.postMessage(msg); },
     };
 }

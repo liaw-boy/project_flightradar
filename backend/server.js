@@ -13,7 +13,7 @@ const { Worker } = require('worker_threads');
 const http = require('http');
 const zlib = require('zlib');
 const readline = require('readline');
-const { initWebSocketServer, broadcastPlanes, broadcastTelemetry, getActiveViewports, getClientCount } = require('./socketEngine');
+const { initWebSocketServer, broadcastPlanes, broadcastTelemetry, broadcastTrackPoint, getActiveViewports, getClientCount } = require('./socketEngine');
 // ── New store layer (replaces MongoDB models) ───────────────────────────
 const Aircraft      = require('./db/aircraftStore');
 const Route         = require('./db/routeStore');
@@ -2034,6 +2034,18 @@ async function ingestTrackPoints(states, timeUnix) {
 
     await Promise.all(writePromises);
 
+    // Push new track points to any WS clients that have that plane selected
+    for (const tp of batchTrackPoints) {
+        broadcastTrackPoint(tp.icao24, [
+            timeUnix,       // Unix seconds (integer — tp.timestamp is a Date object)
+            tp.lat,
+            tp.lng,
+            tp.altitude,
+            tp.heading,
+            tp.velocity
+        ]);
+    }
+
     // Update telemetry
     ingestionStats.totalPoints += batchTrackPoints.length;
     ingestionStats.totalBatches++;
@@ -3855,27 +3867,50 @@ async function fetchTracksInternal(icao24) {
     }
 
     try {
-        // ── 3. Primary fetch — session-scoped prepared statement ────────────
-        let localPoints = [];
-        if (sessionId) {
-            localPoints = await TrackPoint.findBySessionId(sessionId);
-        }
-
-        // ── 4. Sparse-data fallback — still session-bounded ─────────────────
-        // If TrackStore returned < 5 pts (e.g. server just restarted),
-        // hit SQLite directly filtering on session_id — never on icao24 alone.
-        if (localPoints.length < 5 && sessionId) {
+        // ── 3. Primary fetch — current flight leg across all sessions ──────────
+        // Fetch all 24h points for this ICAO, then find the start of the current
+        // flight leg (last ground stop before the current airborne segment).
+        // This joins sessions split by ADS-B ocean gaps or server restarts.
+        {
             const sqliteDb = require('./db/sqlite');
-            const cutoff = sessionStartUnix
-                ? sessionStartUnix - 120  // 2-min tolerance for ADS-B sensor lag at takeoff
-                : Math.floor((Date.now() - 30 * 60 * 1000) / 1000);
+            const cutoff24h = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);
+            const allRows = sqliteDb.prepare(
+                'SELECT ts, lat, lng, altitude, velocity, heading, on_ground, session_id, icao24 FROM track_points WHERE icao24 = ? AND ts >= ? ORDER BY ts ASC LIMIT 20000'
+            ).all(icao.toLowerCase(), cutoff24h);
 
-            const fallbackRows = sqliteDb.prepare(
-                'SELECT * FROM track_points WHERE session_id = ? AND ts >= ? ORDER BY ts ASC LIMIT 15000'
-            ).all(sessionId, cutoff);
+            if (allRows.length > 0) {
+                // Find start of current flight leg: the last ground stop (on_ground=1, low speed)
+                // before the most recent continuous airborne segment.
+                // Walk backwards to find where the plane was last on the ground.
+                let flightStartIdx = 0;
+                for (let i = allRows.length - 1; i >= 1; i--) {
+                    const r = allRows[i];
+                    const prev = allRows[i - 1];
+                    // Large time gap (>3h) between consecutive points = different day/flight
+                    if (r.ts - prev.ts > 3 * 3600) {
+                        flightStartIdx = i;
+                        break;
+                    }
+                    // Was on ground with low speed = airport stop = flight boundary
+                    if (r.on_ground && (r.velocity || 0) < 10) {
+                        flightStartIdx = i;
+                        break;
+                    }
+                }
 
-            if (fallbackRows.length > localPoints.length) {
-                logger.debug('TRACK', `${icao24}: sparse fallback ${fallbackRows.length} pts (session ${sessionId})`);
+                const flightRows = allRows.slice(flightStartIdx);
+                localPoints = flightRows.map(r => ({
+                    sessionId: r.session_id, icao24: r.icao24,
+                    timestamp: new Date(r.ts * 1000),
+                    lat: r.lat, lng: r.lng, altitude: r.altitude,
+                    velocity: r.velocity, heading: r.heading, onGround: !!r.on_ground,
+                }));
+                logger.debug('TRACK', `${icao24}: ${localPoints.length} pts for current leg (total 24h: ${allRows.length})`);
+            } else if (sessionId) {
+                // Fallback: session-scoped query if icao-wide returns nothing
+                const fallbackRows = sqliteDb.prepare(
+                    'SELECT * FROM track_points WHERE session_id = ? ORDER BY ts ASC LIMIT 15000'
+                ).all(sessionId);
                 localPoints = fallbackRows.map(r => ({
                     sessionId: r.session_id, icao24: r.icao24,
                     timestamp: new Date(r.ts * 1000),
@@ -3950,7 +3985,10 @@ async function fetchTracksInternal(icao24) {
         });
 
         const result = { icao24, sessionId, path };
-        trackCache.set(cacheKey, { data: result, timestamp: Date.now() });
+        // Don't cache empty results — retry on next click so fresh data can appear
+        if (path.length > 0) {
+            trackCache.set(cacheKey, { data: result, timestamp: Date.now() });
+        }
         return result;
 
     } catch (e) {

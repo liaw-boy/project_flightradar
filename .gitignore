@@ -89,3 +89,6 @@ backend/data/aerostrat.db-shm
 backend/data/aerostrat.db-wal
 backend/data/aircraft_cache.json
 backend/data/raw_jonty.json
+
+# Training data (large binary/CSV datasets, not for git)
+training_data/
