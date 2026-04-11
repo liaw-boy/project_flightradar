@@ -919,7 +919,9 @@ export default function MapView({
                 // Plane continuously moves forward based on last known position + velocity + heading.
                 // When new ADS-B data arrives, blend smoothly from old render position to new DR track.
                 // This eliminates backward jumps (we never move backwards) and forward jumps (smooth blend).
-                const BLEND_MS = 600; // transition window after new data arrival
+                // Blend duration = observed update interval (5s–90s).
+                // Spreading correction over the full interval makes DR error invisible.
+                const BLEND_MS = plane._blendDuration ?? 10000;
 
                 let drLat      = plane.drLat      ?? plane.lat;
                 let drLng      = plane.drLng      ?? plane.lng;
@@ -947,13 +949,11 @@ export default function MapView({
                     const dataArrivedAt = plane._dataArrivedAt ?? nowDateMs;
                     const timeSinceUpdate = nowDateMs - dataArrivedAt;
                     if (timeSinceUpdate >= 0 && timeSinceUpdate < BLEND_MS && plane._blendFromLat != null) {
-                        // Within blend window: ease from previous render pos to DR track.
-                        // drPos is already time-corrected (accounts for ADS-B propagation delay),
-                        // so blending toward it is always forward motion.
+                        // Long-window linear blend: spread DR correction over full interval.
+                        // Linear (not easeInOut) keeps velocity constant — no visible slowing.
                         const t = Math.max(0, Math.min(1, timeSinceUpdate / BLEND_MS));
-                        const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // easeInOut
-                        plane.renderLat = plane._blendFromLat + (drPos.lat - plane._blendFromLat) * eased;
-                        plane.renderLng = plane._blendFromLng + (drPos.lng - plane._blendFromLng) * eased;
+                        plane.renderLat = plane._blendFromLat + (drPos.lat - plane._blendFromLat) * t;
+                        plane.renderLng = plane._blendFromLng + (drPos.lng - plane._blendFromLng) * t;
                     } else {
                         // After blend window: pure dead reckoning, smooth continuous motion
                         plane.renderLat = drPos.lat;

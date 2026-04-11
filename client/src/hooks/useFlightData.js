@@ -230,18 +230,21 @@ export function useFlightData(mapRef) {
                     const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
                     const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
 
-                    // [DR v12.0] Always-correct blend.
-                    // Every new ADS-B fix resets DR to the real position.
-                    // The render position blends smoothly from wherever it currently is
-                    // (which may be ahead due to DR) to the actual ADS-B position.
-                    // This eliminates accumulated DR error and the "forward then backward
-                    // teleport" pattern caused by the old 5km threshold design.
+                    // [DR v13.0] Long-window blend (Aeris-inspired).
+                    // Blend from current render → actual ADS-B position over the
+                    // OBSERVED update interval (typically 60s), not just 600ms.
+                    // Spreading the correction over the full interval makes even
+                    // 1-2km DR errors imperceptible — the motion is continuous
+                    // and never appears to jump forward or backward.
                     const snapRenderLat = existing.renderLat ?? existing.lat;
                     const snapRenderLng = existing.renderLng ?? existing.lng;
                     const now = Date.now();
 
-                    // DR always restarts from the real ADS-B position.
-                    // Visual position blends from current render → real over BLEND_MS.
+                    // Measure actual interval between consecutive ADS-B updates.
+                    // Clamp: 5s min (WS burst) .. 90s max (long gap / first update).
+                    const prevUpdateTime = existing._dataArrivedAt ?? now;
+                    const observedInterval = Math.max(5000, Math.min(90000, now - prevUpdateTime));
+
                     const drOriginLat = pData.lat;
                     const drOriginLng = pData.lng;
                     const blendFromLat = snapRenderLat;
@@ -259,8 +262,9 @@ export function useFlightData(mapRef) {
                         _blendFromLat: blendFromLat,
                         _blendFromLng: blendFromLng,
                         _dataArrivedAt: now,
-                        renderLat: drOriginLat,
-                        renderLng: drOriginLng,
+                        _blendDuration: observedInterval,
+                        renderLat: blendFromLat,
+                        renderLng: blendFromLng,
                         // Legacy compat
                         targetLat: pData.lat,
                         targetLng: pData.lng,
@@ -556,16 +560,16 @@ export function useFlightData(mapRef) {
                     p.lastContact = wp.lastContact;
                     if (wp.typecode) p.typecode = wp.typecode;
 
-                    // [DR-WS v12.0] Match REST-path always-correct logic:
-                    // DR always restarts from the real ADS-B position.
-                    // Visual position blends from current render → real over BLEND_MS.
-                    // This eliminates accumulated DR error and teleportation.
+                    // [DR-WS v13.0] Long-window blend, same as REST path.
                     const wsSnapLat = p.renderLat ?? wp.lat;
                     const wsSnapLng = p.renderLng ?? wp.lng;
+                    const wsPrevUpdate = p._dataArrivedAt ?? now;
+                    const wsInterval = Math.max(5000, Math.min(90000, now - wsPrevUpdate));
                     p._blendFromLat = wsSnapLat;
                     p._blendFromLng = wsSnapLng;
                     p._dataArrivedAt = now;
-                    p.drLat = wp.lat;    // DR from ACTUAL position, not render
+                    p._blendDuration = wsInterval;
+                    p.drLat = wp.lat;
                     p.drLng = wp.lng;
                     p.renderLat = wsSnapLat;
                     p.renderLng = wsSnapLng;

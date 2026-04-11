@@ -19,7 +19,9 @@ const Aircraft      = require('./db/aircraftStore');
 const Route         = require('./db/routeStore');
 const Metar         = require('./db/metarStore');
 const MictronicsDb  = require('./db/mictronicsDb');
+const VrsDb         = require('./db/vrsDb');
 const { syncMictronics } = require('./scripts/syncMictronics');
+const { syncVrsRoutes } = require('./scripts/syncVrsRoutes');
 const FlightSession = require('./db/sessionStore');
 const TrackPoint    = require('./db/trackStore');
 const staticMaps    = require('./db/staticMaps');
@@ -51,6 +53,9 @@ const Airport = {
 const { crawlFlightSchedules } = require('./crawler');
 const NodeCache = require('node-cache');
 const flightController = require('./controllers/flightController');
+const authCtrl         = require('./controllers/authController');
+const userFlightsCtrl  = require('./controllers/userFlightsController');
+const { passport: oauthPassport, oauthSuccess, oauthFailure, configStatus } = require('./controllers/oauthController');
 const AEROSTRAT_VERSION = 'v10.5-Hybrid';
 const AccountPool = require('./accountPool');
 
@@ -198,14 +203,29 @@ app.use(logger.httpMiddleware); // [LOG] HTTP request logging (skips high-freq e
 // In production (Docker), serve the pre-built React app directly.
 const publicReactPath = path.join(__dirname, '..', 'public-react');
 if (fs.existsSync(publicReactPath)) {
-    app.use(express.static(publicReactPath, { maxAge: '1h' }));
+    // Assets (hashed filenames) — long cache; index.html — no cache
+    app.use('/assets', express.static(path.join(publicReactPath, 'assets'), { maxAge: '7d' }));
+    app.use(express.static(publicReactPath, { maxAge: 0, etag: false }));
     // Express 5 wildcard syntax: serve index.html for all non-API routes (SPA fallback)
     app.get('/{*path}', (req, res, next) => {
         if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/monitor')) return next();
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.sendFile(path.join(publicReactPath, 'index.html'));
     });
     logger.info('SERVER', `Serving built frontend from ${publicReactPath}`);
 }
+
+// Serve latest built CSS at stable path for login-layout adjuster tool
+app.get('/app.css', (req, res) => {
+    try {
+        const assetsDir = path.join(__dirname, '..', 'public-react', 'assets');
+        const cssFile = require('fs').readdirSync(assetsDir).find(f => /^index-.*\.css$/.test(f));
+        if (cssFile) {
+            res.setHeader('Content-Type', 'text/css');
+            res.sendFile(path.join(assetsDir, cssFile));
+        } else res.status(404).send('');
+    } catch { res.status(404).send(''); }
+});
 
 // [v5.0.1] Serve favicon.svg to System Monitor and other backend routes
 app.get('/favicon.svg', (req, res) => {
@@ -254,6 +274,36 @@ const apiLimiter = rateLimit({
 });
 app.use('/api', apiLimiter);
 app.use(express.json());
+
+// ── User Auth ────────────────────────────────────────────────────────────────
+app.post('/api/auth/register', authCtrl.register);
+app.post('/api/auth/login',    authCtrl.login);
+app.get( '/api/auth/me',       authCtrl.authMiddleware, authCtrl.me);
+
+// ── OAuth ─────────────────────────────────────────────────────────────────────
+app.use(oauthPassport.initialize());
+app.get('/api/auth/config', configStatus);
+// Google
+app.get('/api/auth/google',
+    oauthPassport.authenticate('google', { scope: ['profile', 'email'], session: false }));
+app.get('/api/auth/google/callback',
+    oauthPassport.authenticate('google', { session: false, failureRedirect: '/?oauth_error=google_failed' }),
+    oauthSuccess);
+// Facebook
+app.get('/api/auth/facebook',
+    oauthPassport.authenticate('facebook', { scope: ['email'], session: false }));
+app.get('/api/auth/facebook/callback',
+    oauthPassport.authenticate('facebook', { session: false, failureRedirect: '/?oauth_error=facebook_failed' }),
+    oauthSuccess);
+
+// ── Personal Flight Tracking ─────────────────────────────────────────────────
+const mw = authCtrl.authMiddleware;
+app.get(   '/api/flights/my',       mw, userFlightsCtrl.list);
+app.post(  '/api/flights/my',       mw, userFlightsCtrl.create);
+app.put(   '/api/flights/my/:id',   mw, userFlightsCtrl.update);
+app.delete('/api/flights/my/:id',   mw, userFlightsCtrl.remove);
+app.get(   '/api/flights/my/stats', mw, userFlightsCtrl.stats);
+app.get(   '/api/flights/my/map',   mw, userFlightsCtrl.mapData);
 
 // [v9.7] Strategic API Heartbeats
 app.post('/api/viewport', (req, res) => res.json({ status: 'ok', received: true }));
@@ -414,10 +464,15 @@ app.get('/api/flight-details/:hex/:callsign', async (req, res) => {
     const [osRes, routeRes, hexRes, photoRes, localRes] = results.map(r => r.status === 'fulfilled' ? r.value : null);
 
     const osState = osRes?.states?.[0] || {};
-    const routeInfo = routeRes?.[0] || {}; 
+    const routeInfo = routeRes?.[0] || {};
     const aircraftInfo = hexRes || {};
     const photoData = photoRes?.photos?.[0] || {};
     const localInfo = localRes || {};
+
+    // VRS fallback: if AeroDataBox has no route, try local VRS SQLite
+    const vrsRoute = VrsDb.lookup(callsign);
+    const originIata  = routeInfo.departure?.airport?.iata  || vrsRoute?.from || 'N/A';
+    const destIata    = routeInfo.arrival?.airport?.iata    || vrsRoute?.to   || '---';
 
     const mergedData = {
         hex,
@@ -433,12 +488,12 @@ app.get('/api/flight-details/:hex/:callsign', async (req, res) => {
         },
         route: {
             origin: {
-                iata: routeInfo.departure?.airport?.iata || 'N/A',
+                iata: originIata,
                 name: routeInfo.departure?.airport?.name || 'Unknown Airport',
                 city: routeInfo.departure?.airport?.municipalityName || 'Location Unavailable'
             },
             destination: {
-                iata: routeInfo.arrival?.airport?.iata || '---',
+                iata: destIata,
                 name: routeInfo.arrival?.airport?.name || 'Unknown Airport',
                 city: routeInfo.arrival?.airport?.municipalityName || 'Location Unavailable'
             }
@@ -514,7 +569,7 @@ function resolveMissingData(icao24, type) {
 
 loadMissingDataLog();
 
-app.get('/api/admin/missing-data', (req, res) => {
+app.get('/api/admin/missing-data', requireMonitorAuth, (req, res) => {
     res.json(Object.values(missingDataLog));
 });
 
@@ -688,7 +743,7 @@ const _rawAccounts = [
 ].filter(a => a.user && a.pass);
 
 const QUOTA_CACHE_FILE = path.join(__dirname, 'quota-cache.json');
-const accountPool = new AccountPool(_rawAccounts, { safeFloor: 50 });
+const accountPool = new AccountPool(_rawAccounts, { safeFloor: 5 });
 
 // ==========================================
 // 動作紀錄 API (讓前端的操作顯示在後台終端並寫入 log 檔)
@@ -1018,6 +1073,9 @@ a:hover{opacity:.75}
       <a class="sb-nav-item" href="#sync" onclick="setActive(this)">
         <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg></span> Sync Engine
       </a>
+      <a class="sb-nav-item" href="#synclog" onclick="setActive(this)">
+        <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span> Sync Log
+      </a>
       <a class="sb-nav-item" href="#sessions" onclick="setActive(this)">
         <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg></span> Sessions
       </a>
@@ -1158,6 +1216,15 @@ a:hover{opacity:.75}
           <div class="card-body">
             <div id="sources-bar" class="sources"></div>
             <div id="sync-body"></div>
+          </div>
+        </div>
+        <div id="synclog" class="card">
+          <div class="card-hd">
+            <span class="card-title">Sync Log</span>
+            <span class="card-badge" id="synclog-badge">live</span>
+          </div>
+          <div class="card-body">
+            <div id="synclog-body" style="font-family:monospace;font-size:11px;max-height:220px;overflow-y:auto;color:var(--td)"></div>
           </div>
         </div>
         <div id="sessions" class="card">
@@ -1304,15 +1371,62 @@ async function refresh() {
     }).join('');
 
     // ── Sync ──
+    const sh = stats.sourceHealth || {};
+    const now = Date.now();
+
+    function srcStatus(key) {
+      const s = sh[key] || {};
+      if (s.cbUntil && s.cbUntil > now) return 'cb';
+      if (s.consecutiveFails > 0) return 'warn';
+      if (s.lastOk && (now - s.lastOk) < 120000) return 'up';
+      return 'dim';
+    }
+
+    function srcDetail(key) {
+      const s = sh[key] || {};
+      const parts = [];
+      if (s.lastCount) parts.push(s.lastCount.toLocaleString() + ' ac');
+      if (s.lastLatency) parts.push(s.lastLatency + 'ms');
+      if (s.cbUntil && s.cbUntil > now) {
+        const minLeft = Math.round((s.cbUntil - now) / 60000);
+        parts.push('CB ' + minLeft + 'min');
+      }
+      return parts.join(' · ');
+    }
+
     document.getElementById('sources-bar').innerHTML =
-      srcPill('adsb.lol', 'up') +
-      srcPill('OpenSky', stats.activeAccount ? 'up' : 'cb') +
-      srcPill('adsb.fi', 'up');
+      srcPill('adsb.fi-snap', srcStatus('adsb.fi-snap')) +
+      srcPill('adsb.lol', srcStatus('adsb.lol')) +
+      srcPill('al-mil', srcStatus('al-mil')) +
+      srcPill('al-ladd', srcStatus('al-ladd')) +
+      srcPill('OpenSky', stats.activeAccount ? 'up' : 'dim');
+
     document.getElementById('sync-badge').textContent = 'Cycle #' + (ing.totalBatches||0);
     document.getElementById('sync-body').innerHTML =
-      row('Last batch', (ing.lastBatchSize||0) + ' planes', 'ok') +
-      row('Latency', (ing.lastBatchMs||0) + ' ms', (ing.lastBatchMs||0) < 3000 ? 'ok' : 'warn') +
-      row('Active account', stats.activeAccount || '—', '');
+      row('adsb.fi-snap', srcDetail('adsb.fi-snap') || '—', srcStatus('adsb.fi-snap') === 'up' ? 'ok' : 'warn') +
+      row('adsb.lol', srcDetail('adsb.lol') || '—', srcStatus('adsb.lol') === 'up' ? 'ok' : 'warn') +
+      row('al-mil', srcDetail('al-mil') || '—', srcStatus('al-mil') === 'up' ? 'ok' : 'dim') +
+      row('al-ladd', srcDetail('al-ladd') || '—', srcStatus('al-ladd') === 'up' ? 'ok' : 'dim') +
+      row('Last batch', (ing.lastBatchSize||0) + ' planes · ' + (ing.lastBatchMs||0) + 'ms', (ing.lastBatchMs||0) < 3000 ? 'ok' : 'warn') +
+      row('Active account', (stats.activeAccount||'—').replace(/-api-client$/,''), '');
+
+    // ── Sync Log ──
+    const logEl = document.getElementById('synclog-body');
+    if (logEl) {
+      const ts = new Date().toLocaleTimeString('zh-TW', {hour12:false});
+      const sources = Object.entries(sh).map(([k,v]) => {
+        const ok = !v.cbUntil || v.cbUntil <= now;
+        const icon = ok ? '✅' : '🔴';
+        const detail = v.lastCount ? v.lastCount.toLocaleString() + 'ac ' + (v.lastLatency||0) + 'ms' : (v.cbUntil > now ? 'CB' : '—');
+        return icon + ' ' + k + ': ' + detail;
+      }).join(' | ');
+      const line = document.createElement('div');
+      line.style.cssText = 'padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05)';
+      line.textContent = '[' + ts + '] ' + sources;
+      logEl.insertBefore(line, logEl.firstChild);
+      // 最多保留 50 行
+      while (logEl.children.length > 50) logEl.removeChild(logEl.lastChild);
+    }
 
     // ── Sessions ──
     document.getElementById('session-badge').textContent = (health.activeSessions||0) + ' active';
@@ -1361,7 +1475,7 @@ const observer = new IntersectionObserver(entries => {
 }, { root: document.querySelector('.scroll'), threshold: 0.4 });
 
 document.addEventListener('DOMContentLoaded', () => {
-  ['kpi','hardware','storage','opensky','sync','sessions','api'].forEach(id => {
+  ['kpi','hardware','storage','opensky','sync','synclog','sessions','api'].forEach(id => {
     const el = document.getElementById(id);
     if (el) observer.observe(el);
   });
@@ -1393,6 +1507,11 @@ function isMonitorAuthed(req) {
         return false;
     }
     return true;
+}
+
+function requireMonitorAuth(req, res, next) {
+    if (!isMonitorAuthed(req)) return res.status(401).json({ error: 'Unauthorized' });
+    next();
 }
 
 function getLoginHtml(error) {
@@ -1445,24 +1564,25 @@ app.use('/monitor', express.urlencoded({ extended: false }));
 
 app.post('/monitor/login', (req, res) => {
     const { password } = req.body;
-    const expected = process.env.MONITOR_PASSWORD || 'admin123';
-    if (password !== expected) {
+    const expected = process.env.MONITOR_PASSWORD;
+    if (!expected || password !== expected) {
         return res.status(401).send(getLoginHtml('密碼錯誤，請再試一次'));
     }
     const token = crypto.randomBytes(32).toString('hex');
     monitorSessions.set(token, Date.now() + MONITOR_SESSION_TTL);
-    res.setHeader('Set-Cookie', `monitor_session=${token}; HttpOnly; SameSite=Strict; Path=/monitor; Max-Age=${MONITOR_SESSION_TTL / 1000}`);
+    const securePart = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    res.setHeader('Set-Cookie', `monitor_session=${token}; HttpOnly; SameSite=Strict; Path=/${securePart}; Max-Age=${MONITOR_SESSION_TTL / 1000}`);
     res.redirect('/monitor');
 });
 
 app.get('/monitor/logout', (req, res) => {
     const token = getMonitorToken(req);
     if (token) monitorSessions.delete(token);
-    res.setHeader('Set-Cookie', 'monitor_session=; HttpOnly; SameSite=Strict; Path=/monitor; Max-Age=0');
+    res.setHeader('Set-Cookie', 'monitor_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
     res.redirect('/monitor');
 });
 
-app.get('/api/health', (req, res) => {
+app.get('/api/health', requireMonitorAuth, (req, res) => {
     const dbPath = path.join(__dirname, 'data', 'aerostrat.db');
     let dbSize = 0;
     try { if (fs.existsSync(dbPath)) dbSize = fs.statSync(dbPath).size; } catch(_) {}
@@ -1514,7 +1634,7 @@ app.get('/api/health', (req, res) => {
 });
 
 
-app.get('/api/ingestion/status', async (req, res) => {
+app.get('/api/ingestion/status', requireMonitorAuth, async (req, res) => {
     let trackPointCount = null;
     let sessionCount = null;
     try {
@@ -1548,7 +1668,7 @@ var apiStats = {
     get accounts() { return accountPool.getStats(); },
 };
 
-app.get('/api/stats', function (req, res) {
+app.get('/api/stats', requireMonitorAuth, function (req, res) {
     res.json({
         totalCalls: apiStats.totalCalls,
         stateCalls: apiStats.stateCalls,
@@ -1734,7 +1854,7 @@ function normalizeAcRecord(p) {
         lng:         p.lon,
         lat:         p.lat,
         altitude:    p.alt_baro === 'ground' ? 0 : (p.alt_baro || p.alt_geom || 0),
-        velocity:    (p.gs || 0) * 0.51444,
+        velocity:    p.gs != null ? p.gs * 0.51444 : null,
         heading:     p.track || 0,
         vRate:       (p.baro_rate || 0) * 0.00508,
         onGround:    p.alt_baro === 'ground' || false,
@@ -1997,7 +2117,8 @@ async function ingestTrackPoints(states, timeUnix) {
             heading: p.heading || 0,
             vertical_rate: (typeof p.vRate === 'number') ? p.vRate : null,
             onGround,
-            squawk: p.squawk || null
+            squawk: p.squawk || null,
+            callsign: callsign !== 'N/A' ? callsign : null,
         });
     }
 
@@ -2062,27 +2183,32 @@ async function ingestTrackPoints(states, timeUnix) {
 
 // ── Tier 1: Global Baseline ────────────────────────────────────────────────
 let _baselineRunning = false;
+// [v11.1] Interleaved fetch: adsb.fi-snap and adsb.lol alternate every 12.5s
+// combined update rate ~12.5s instead of 25s. Each source still fetched once per 25s.
+let _baselineTurn = 'snap'; // alternates: 'snap' → 'lol' → 'snap' ...
+
 async function fetchGlobalBaseline() {
     if (_baselineRunning) return;
     _baselineRunning = true;
     const t0 = performance.now();
 
-    try {
-        const [snapR, lolR] = await Promise.allSettled([
-            cbOpen('adsb.fi-snap')
-                ? Promise.reject(new Error('CB open'))
-                : fetch('https://opendata.adsb.fi/api/v2/snapshot', {
-                      headers: { 'User-Agent': 'AEROSTRAT/11.0' },
-                      signal: AbortSignal.timeout(12000),
-                  }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+    const thisTurn = _baselineTurn;
+    _baselineTurn = (thisTurn === 'snap') ? 'lol' : 'snap';
 
-            cbOpen('adsb.lol')
-                ? Promise.reject(new Error('CB open'))
-                : fetch('https://api.adsb.lol/v2/lat/0/lon/0/dist/99999', {
-                      headers: { 'User-Agent': 'AEROSTRAT/11.0' },
-                      signal: AbortSignal.timeout(10000),
-                  }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
-        ]);
+    const snapPromise = (thisTurn === 'snap' && !cbOpen('adsb.fi-snap'))
+        ? fetch('http://100.108.160.69:9876', { signal: AbortSignal.timeout(12000) })
+              .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+        : Promise.reject(new Error('skipped'));
+
+    const lolPromise = (thisTurn === 'lol' && !cbOpen('adsb.lol'))
+        ? fetch('https://api.adsb.lol/v2/lat/0/lon/0/dist/99999', {
+              headers: { 'User-Agent': 'AEROSTRAT/11.0' },
+              signal: AbortSignal.timeout(15000) })
+              .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+        : Promise.reject(new Error('skipped'));
+
+    try {
+        const [snapR, lolR] = await Promise.allSettled([snapPromise, lolPromise]);
 
         let snapStates = [];
         let lolStates  = [];
@@ -2093,7 +2219,10 @@ async function fetchGlobalBaseline() {
             cbReset('adsb.fi-snap', snapStates.length, Math.round(performance.now() - t0));
         } else {
             const msg = snapR.reason?.message || '';
-            if (msg.includes('429') || msg.includes('403')) cbTrip('adsb.fi-snap');
+            if (msg !== 'skipped') {
+                if (msg.includes('403')) cbTrip('adsb.fi-snap', 60 * 60_000);
+                else if (msg.includes('429')) cbTrip('adsb.fi-snap');
+            }
         }
 
         if (lolR.status === 'fulfilled') {
@@ -2102,11 +2231,15 @@ async function fetchGlobalBaseline() {
             cbReset('adsb.lol', lolStates.length, Math.round(performance.now() - t0));
         } else {
             const msg = lolR.reason?.message || '';
-            if (msg.includes('429') || msg.includes('503')) cbTrip('adsb.lol');
+            if (msg !== 'skipped') {
+                logger.warn('SYNC', `adsb.lol fetch failed: ${msg}`);
+                if (msg.includes('429') || msg.includes('503')) cbTrip('adsb.lol');
+            }
         }
 
         if (snapStates.length === 0 && lolStates.length === 0) {
-            logger.warn('SYNC', 'Global baseline: both sources failed — using stale cache');
+            if (thisTurn !== 'snap' || !cbOpen('adsb.fi-snap'))  // only warn if not a deliberate skip
+                logger.warn('SYNC', 'Global baseline: both sources failed — using stale cache');
             globalPlanesCache.stale = true;
             return;
         }
@@ -2220,7 +2353,8 @@ async function fetchViewportOverlay() {
                 vpSources.push('adsb.fi-v3');
                 cbReset('adsb.fi-v3', vpStates.length, Math.round(performance.now() - t0));
             } catch (e) {
-                if (e.message.includes('429')) cbTrip('adsb.fi-v3');
+                if (e.message.includes('403')) cbTrip('adsb.fi-v3', 60 * 60_000);
+                else if (e.message.includes('429')) cbTrip('adsb.fi-v3');
             }
         }
 
@@ -2626,7 +2760,7 @@ async function fetchGlobalPlanes() {
 }
 
 // ── [v11.0] Three-Tier Engine Startup ─────────────────────────────────────
-setInterval(fetchGlobalBaseline,    25_000);   // full global refresh
+setInterval(fetchGlobalBaseline,    12_500);   // interleaved: snap/lol alternate, each 25s, combined 12.5s
 setInterval(fetchViewportOverlay,    6_000);   // viewport high-frequency (halved for smoother tracking)
 setInterval(fetchSpecialCategories, 60_000);   // military + LADD (slow)
 
@@ -3875,31 +4009,112 @@ async function fetchTracksInternal(icao24) {
         {
             const sqliteDb = require('./db/sqlite');
             const cutoff24h = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);
+
+            // ── Determine query cutoff ──────────────────────────────────────────
+            // Key question: is the current session a NEW FLIGHT (hard cutoff)
+            // or a CONTINUATION after an oceanic ADS-B coverage gap (use 24h)?
+            //
+            // Strategy: peek at the last known state just before this session.
+            //   • Last state = on_ground OR altitude < 5000ft  → new flight (hard cutoff)
+            //   • Last state = cruise altitude (≥ 15000ft)     → oceanic gap, same flight
+            //   • No previous state in DB                       → treat as new (hard cutoff)
+            let queryCutoff = cutoff24h;
+
+            if (sessionStartUnix) {
+                const lookbackStart = Math.max(cutoff24h, sessionStartUnix - 4 * 3600);
+                const prevState = sqliteDb.prepare(
+                    'SELECT altitude, on_ground, ts FROM track_points WHERE icao24 = ? AND ts BETWEEN ? AND ? ORDER BY ts DESC LIMIT 1'
+                ).get(icao, lookbackStart, sessionStartUnix - 60);
+
+                let prevWasGround = !prevState
+                    || prevState.on_ground
+                    || (prevState.altitude != null && prevState.altitude < 5000);
+
+                // Extra check: even when prevState was at cruise altitude, look for any
+                // on_ground evidence BETWEEN prevState and this session start.
+                // If the aircraft touched down between those two points, this is a new
+                // flight regardless of what altitude the last tracked point showed.
+                if (!prevWasGround && prevState) {
+                    const anyGndBetween = sqliteDb.prepare(
+                        'SELECT 1 FROM track_points WHERE icao24 = ? AND ts > ? AND ts < ? AND on_ground = 1 LIMIT 1'
+                    ).get(icao, prevState.ts, sessionStartUnix - 60);
+                    if (anyGndBetween) {
+                        prevWasGround = true;
+                    }
+                }
+
+                if (prevWasGround) {
+                    // Confirmed new flight: hard cutoff at session start
+                    queryCutoff = Math.max(cutoff24h, sessionStartUnix - 600);
+                }
+                // else: cruise altitude before session, no ground evidence → oceanic gap
+                // → queryCutoff stays at cutoff24h, walk-backward will handle it
+            }
+
             const allRows = sqliteDb.prepare(
-                'SELECT ts, lat, lng, altitude, velocity, heading, on_ground, session_id, icao24 FROM track_points WHERE icao24 = ? AND ts >= ? ORDER BY ts ASC LIMIT 20000'
-            ).all(icao.toLowerCase(), cutoff24h);
+                'SELECT ts, lat, lng, altitude, velocity, heading, on_ground, session_id, icao24, callsign FROM track_points WHERE icao24 = ? AND ts >= ? ORDER BY ts ASC LIMIT 20000'
+            ).all(icao.toLowerCase(), queryCutoff);
 
             if (allRows.length > 0) {
-                // Find start of current flight leg.
-                // Walk backward to find: (a) a 3h time gap = different flight, or
-                // (b) the last ground→airborne transition = most recent takeoff.
-                // Using the takeoff transition (not just any on_ground point) prevents
-                // including the previous flight's arrival points when the departure
-                // ground stop isn't in the DB.
+                // [v11.4] Walk-backward with two boundaries:
+                //   1. ground→airborne transition = definitive takeoff
+                //   2. callsign change = different flight (if callsign data available)
+                // Oceanic ADS-B gaps (no data for hours) are NOT flight boundaries.
                 let flightStartIdx = 0;
+                const lastCallsign = allRows[allRows.length - 1].callsign || null;
+
                 for (let i = allRows.length - 1; i >= 1; i--) {
-                    const r = allRows[i];
+                    const r    = allRows[i];
                     const prev = allRows[i - 1];
-                    // Large time gap (>3h) = different flight
-                    if (r.ts - prev.ts > 3 * 3600) {
-                        flightStartIdx = i;
-                        break;
-                    }
-                    // Ground → airborne transition (walking backward: r=airborne, prev=ground)
-                    // = takeoff point of current flight
+
+                    // 1. Ground → airborne = definitive takeoff
                     if (!r.on_ground && prev.on_ground) {
                         flightStartIdx = i;
                         break;
+                    }
+
+                    // 2. Callsign change = different flight (requires callsign column populated)
+                    if (lastCallsign && prev.callsign && prev.callsign !== lastCallsign) {
+                        flightStartIdx = i;
+                        logger.debug('TRACK', `${icao24}: callsign change ${prev.callsign}→${lastCallsign} at idx ${i}`);
+                        break;
+                    }
+
+                    // 3. Altitude-gap heuristic: detects landings without on_ground data.
+                    //    Two patterns — both indicate a ground stop occurred during the gap:
+                    //
+                    //    Pattern A: approach-low → gap > 45min → departure-higher
+                    //      prev altitude < FL100 (10000ft) AND r altitude > prev + 2000ft
+                    //      e.g. prev=900ft (ILS) → 94min gap → r=4975ft (climb after takeoff)
+                    //
+                    //    Pattern B: any cruise → very long gap (>4h) → very-low departure
+                    //      Gap so long that a ground stop is almost certain,
+                    //      and r is at typical initial-climb altitude (<5000ft).
+                    //      e.g. prev=34025ft (cruise, ADS-B lost) → 990min → r=775ft (climbing)
+                    //
+                    //    Altitude unit: feet (ADS-B standard in DB).
+                    const gapSec = r.ts - prev.ts;
+                    if (gapSec > 20 * 60) {
+                        const prevAlt = prev.altitude ?? 99999;
+                        const rAlt    = r.altitude   ?? 0;
+                        // Pattern A: low approach → gap ≥ 45min → departure higher
+                        const isPatternA = gapSec > 45 * 60 && prevAlt < 10000 && rAlt > prevAlt + 2000;
+                        // Pattern A-fast: very low approach → short gap (20-45min) → departure
+                        // Catches quick turnarounds where ground stop < 45min.
+                        const isPatternAfast = gapSec <= 45 * 60 && prevAlt < 3000 && rAlt > prevAlt + 1500;
+                        // Pattern B: gap > 4h AND post-gap altitude very low (just departed)
+                        const isPatternB = gapSec > 4 * 3600 && rAlt < 5000;
+                        // Pattern D: cruise → long gap (>1h) → low departure (<5000ft)
+                        // Aircraft was at cruise, disappeared from coverage (landed somewhere),
+                        // now reappears at low altitude = just took off from destination.
+                        // Distinct from oceanic gap where both sides stay at cruise.
+                        const isPatternD = gapSec > 60 * 60 && prevAlt > 10000 && rAlt < 5000;
+                        if (isPatternA || isPatternAfast || isPatternB || isPatternD) {
+                            flightStartIdx = i;
+                            const pat = isPatternA ? 'A' : isPatternAfast ? 'A-fast' : isPatternD ? 'D' : 'B';
+                            logger.debug('TRACK', `${icao24}: alt-gap boundary [Pattern ${pat}] at idx ${i} (prev=${Math.round(prevAlt)}ft → ${Math.round(gapSec/60)}min → r=${Math.round(rAlt)}ft)`);
+                            break;
+                        }
                     }
                 }
 
@@ -3926,10 +4141,12 @@ async function fetchTracksInternal(icao24) {
         }
 
         // ── 5. OpenSky Historical Track Augmentation ────────────────────────
-        // Augment when: (a) sparse local data, OR (b) first local point is
-        // already airborne (high altitude) — meaning we missed the departure.
+        // Augment when: (a) no local data, OR (b) clearly missed departure (first
+        // local point is at high cruise altitude ≥ FL100).  The old threshold of
+        // 500 ft was too aggressive — it triggered augmentation for aircraft we
+        // just started tracking mid-climb, pulling in a previous flight's path.
         const firstLocalAlt = localPoints.length > 0 ? (localPoints[0].altitude ?? 0) : 0;
-        const missedDeparture = localPoints.length > 0 && firstLocalAlt > 500;
+        const missedDeparture = localPoints.length > 0 && firstLocalAlt > 10000;
         if (localPoints.length < 20 || missedDeparture) {
             try {
                 const osTrack = await fetchOpenSkyHistoricalTrack(icao);
@@ -3938,8 +4155,6 @@ async function fetchTracksInternal(icao24) {
                     // Find the start of the CURRENT flight leg within the OpenSky track.
                     // Walk backward to find: (a) a 3h time gap = different flight, or
                     // (b) the last ground→airborne transition = most recent takeoff.
-                    // This prevents showing multiple flights when OpenSky returns a
-                    // track spanning an earlier flight + the current one.
                     const ospath = osTrack.path;
                     let osFlightStartIdx = 0;
                     for (let i = ospath.length - 1; i >= 1; i--) {
@@ -3951,16 +4166,12 @@ async function fetchTracksInternal(icao24) {
                             break;
                         }
                         // ground → airborne transition = takeoff of current flight
-                        // (walking backward: curr=airborne, prev=on_ground)
-                        // Use truthy/falsy — OpenSky may return boolean OR integer 0/1
                         if (!curr[5] && prev[5]) {
                             osFlightStartIdx = i;
                             break;
                         }
                     }
 
-                    // Fallback: if no takeoff found (track starts mid-air), filter by
-                    // session start time to avoid mixing old flights.
                     let osFiltered = ospath
                         .slice(osFlightStartIdx)
                         .filter(p =>
@@ -3968,19 +4179,32 @@ async function fetchTracksInternal(icao24) {
                             typeof p[2] === 'number' && p[2] !== 0
                         );
 
-                    if (osFlightStartIdx === 0 && sessionStartUnix) {
-                        osFiltered = osFiltered.filter(p => p[0] >= sessionStartUnix - 120);
+                    // ── Reference time for flight-boundary checks ───────────────────
+                    // sessionStartUnix = when OUR SYSTEM first tracked this aircraft,
+                    // which may be mid-flight (e.g. aircraft entered ADS-B range late).
+                    // We use it only for "is this data from a completely different flight?"
+                    // checks, NOT as a hard trim boundary for the OpenSky history path.
+                    // Using it as a hard trim would cut off valid historical route data
+                    // for aircraft that entered our coverage late in their journey.
+                    const refStartUnix = sessionStartUnix
+                        ?? (localPoints.length > 0
+                            ? Math.floor(localPoints[0].timestamp.getTime() / 1000)
+                            : null);
+
+                    // Trim only when the takeoff was NOT found by osFlightStartIdx.
+                    // In that case, use refStartUnix as a conservative fallback boundary
+                    // to avoid including truly old data when no takeoff marker exists.
+                    if (osFlightStartIdx === 0 && refStartUnix) {
+                        osFiltered = osFiltered.filter(p => p[0] >= refStartUnix - 120);
                     }
 
                     // ── Session-start validation ─────────────────────────────────
-                    // If the OpenSky track's LAST point is from before the current
-                    // session started (with 5-min buffer), the entire track belongs
-                    // to a PREVIOUS flight. Discard it to prevent showing old paths
-                    // (e.g. ETD899: shows Korea→TPE track when plane is now TPE→elsewhere).
-                    if (sessionStartUnix && osFiltered.length > 0) {
+                    // If the OpenSky track's LAST point still predates our reference time
+                    // by > 5 min, the entire track belongs to a PREVIOUS flight — discard.
+                    if (refStartUnix && osFiltered.length > 0) {
                         const lastOsTs = osFiltered[osFiltered.length - 1][0];
-                        if (lastOsTs < sessionStartUnix - 300) {
-                            logger.info('TRACK', `${icao24}: OpenSky track pre-dates session (lastPt=${lastOsTs}, sessionStart=${sessionStartUnix}), discarding previous-flight data`);
+                        if (lastOsTs < refStartUnix - 300) {
+                            logger.info('TRACK', `${icao24}: OpenSky track pre-dates session (lastPt=${lastOsTs}, ref=${refStartUnix}), discarding previous-flight data`);
                             osFiltered = [];
                         }
                     }
@@ -3989,8 +4213,9 @@ async function fetchTracksInternal(icao24) {
                         const osConverted = osFiltered.map(p => ({
                             timestamp: new Date(p[0] * 1000),
                             lat: p[1], lng: p[2],
-                            altitude: typeof p[3] === 'number' ? p[3] : 0,
-                            heading:  typeof p[4] === 'number' ? p[4] : 0,
+                            // OpenSky returns altitude in METERS; convert to feet to match live track_points
+                            altitude: typeof p[3] === 'number' ? Math.round(p[3] * 3.28084) : 0,
+                            heading:  typeof p[4] === 'number' ? p[4] : -1,
                             velocity: 0,
                             onGround: !!p[5],
                         }));
@@ -4012,7 +4237,7 @@ async function fetchTracksInternal(icao24) {
         // ── 6. Build path array — deduplicate consecutive identical coordinates ─
         const rawPath = localPoints.map(pt => [
             Math.floor(pt.timestamp.getTime() / 1000),
-            pt.lat, pt.lng, pt.altitude || 0, pt.heading || 0, pt.velocity || 0, pt.onGround ? 1 : 0
+            pt.lat, pt.lng, pt.altitude || 0, pt.heading != null ? pt.heading : -1, pt.velocity || 0, pt.onGround ? 1 : 0
         ]);
         const path = rawPath.filter((pt, i) => {
             if (i === 0) return true;
@@ -4067,7 +4292,7 @@ app.get('/api/session/:id/track', async (req, res) => {
                 pt.lat,
                 pt.lng,
                 pt.altitude || 0,
-                pt.heading || 0,
+                pt.heading != null ? pt.heading : -1,
                 pt.velocity || 0,
                 pt.onGround ? 1 : 0
             ])
@@ -4306,13 +4531,15 @@ app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
         };
         const updatedAircraft = await Aircraft.findOneAndUpdate({ $or: [{ icao24: hex }, { hex: hex }] }, { $set: aircraftUpdate }, { upsert: true, returnDocument: 'after' });
  
-        // Flight Route Info
+        // Flight Route Info (VRS standing-data as final fallback)
+        const vrsRoute = VrsDb.lookup(callsign);
+        const validIata = (v) => v && v !== 'N/A' && v !== '---' ? v : null;
         const routeUpdate = {
             callsign,
-            origin_iata:         routeRes?.origin_iata         || dbRoute?.origin_iata         || 'N/A',
+            origin_iata:         validIata(routeRes?.origin_iata) || validIata(dbRoute?.origin_iata) || vrsRoute?.from || 'N/A',
             origin_name:         routeRes?.origin_name         || dbRoute?.origin_name         || null,
             origin_city:         routeRes?.origin_city         || dbRoute?.origin_city         || null,
-            destination_iata:    routeRes?.destination_iata    || dbRoute?.destination_iata    || '---',
+            destination_iata:    validIata(routeRes?.destination_iata) || validIata(dbRoute?.destination_iata) || vrsRoute?.to || '---',
             destination_icao:    routeRes?.destination_icao    || dbRoute?.destination_icao    || null,
             destination_name:    routeRes?.destination_name    || dbRoute?.destination_name    || null,
             destination_city:    routeRes?.destination_city    || dbRoute?.destination_city    || null,
@@ -4481,6 +4708,14 @@ cron.schedule('*/15 * * * *', () => {
 }, {
     timezone: "Asia/Taipei"
 });
+
+// ── VRS Routes Database (weekly sync, every Sunday 03:37 Taiwan time) ──
+cron.schedule('37 3 * * 0', () => {
+    console.log('🛫 [VRS] Weekly sync starting...');
+    syncVrsRoutes(msg => console.log(msg))
+        .then(r => console.log(`✅ [VRS] Weekly sync done:`, r))
+        .catch(e => console.error(`❌ [VRS] Weekly sync failed:`, e.message));
+}, { timezone: 'Asia/Taipei' });
 
 // ── Mictronics Aircraft Registry (weekly sync, every Sunday 03:17 Taiwan time) ──
 cron.schedule('17 3 * * 0', () => {
