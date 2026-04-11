@@ -230,33 +230,22 @@ export function useFlightData(mapRef) {
                     const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
                     const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
 
-                    // [DR v11.2] Drift-corrected no-backward fix.
-                    // Continue DR from current render position to prevent backward motion.
-                    // BUT: if the icon has drifted > 5km from the actual ADS-B position
-                    // (happens during long turns or ADS-B gaps), reset to the real position
-                    // with a smooth blend to avoid teleportation.
+                    // [DR v12.0] Always-correct blend.
+                    // Every new ADS-B fix resets DR to the real position.
+                    // The render position blends smoothly from wherever it currently is
+                    // (which may be ahead due to DR) to the actual ADS-B position.
+                    // This eliminates accumulated DR error and the "forward then backward
+                    // teleport" pattern caused by the old 5km threshold design.
                     const snapRenderLat = existing.renderLat ?? existing.lat;
                     const snapRenderLng = existing.renderLng ?? existing.lng;
                     const now = Date.now();
 
-                    // Haversine drift (km) between DR render pos and real ADS-B pos
-                    const dLat = (pData.lat - snapRenderLat) * Math.PI / 180;
-                    const dLng = (pData.lng - snapRenderLng) * Math.PI / 180;
-                    const sinHLat = Math.sin(dLat / 2);
-                    const sinHLng = Math.sin(dLng / 2);
-                    const a = sinHLat * sinHLat +
-                        Math.cos(snapRenderLat * Math.PI / 180) *
-                        Math.cos(pData.lat * Math.PI / 180) *
-                        sinHLng * sinHLng;
-                    const driftKm = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-                    // > 5km drift → reset to actual ADS-B position with blend
-                    // ≤ 5km drift → continue from render position (no-backward guarantee)
-                    const MAX_DRIFT_KM = 5;
-                    const drOriginLat = driftKm > MAX_DRIFT_KM ? pData.lat : snapRenderLat;
-                    const drOriginLng = driftKm > MAX_DRIFT_KM ? pData.lng : snapRenderLng;
-                    const blendFromLat = driftKm > MAX_DRIFT_KM ? snapRenderLat : null;
-                    const blendFromLng = driftKm > MAX_DRIFT_KM ? snapRenderLng : null;
+                    // DR always restarts from the real ADS-B position.
+                    // Visual position blends from current render → real over BLEND_MS.
+                    const drOriginLat = pData.lat;
+                    const drOriginLng = pData.lng;
+                    const blendFromLat = snapRenderLat;
+                    const blendFromLng = snapRenderLng;
 
                     next[icao24] = {
                         ...existing,
