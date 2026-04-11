@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getAirlineLogoUrl, normalizeLongitude, predictPosition, getAltitudeColor, initAirportDatabase } from '../utils/flightUtils';
+import { processTrailPath } from '../utils/trailSpline';
 import { getAircraftScale, getDrawSize, resolveTypecodeKey, getDynamicImage, prewarmExactSvg, AIRCRAFT_CATALOG as paths, ICON_SCALE_VERSION } from '../utils/aircraftIcons';
 import { dataManager } from '../services/dataManager';
 import { enrichPlaneDetails, getEnrichedData } from '../services/staticOsintCache';
@@ -1112,40 +1113,11 @@ export default function MapView({
                         ? activeSelectedPath.slice(pathStartIdx)
                         : activeSelectedPath;
 
-                    // ── Spike point filter ────────────────────────────────────────
-                    // Remove mid-path GPS glitches / MLAT errors that cause Bezier loops.
-                    // A point is a spike if it forms a near-U-turn (cos < -0.5, i.e. > 120°)
-                    // AND the segment distance is implausible for that time delta.
-                    // We keep the first and last points unconditionally.
-                    const trimmedPath = rawTrimmedPath.length < 3 ? rawTrimmedPath : (() => {
-                        const out = [rawTrimmedPath[0]];
-                        for (let si = 1; si < rawTrimmedPath.length - 1; si++) {
-                            const prev = rawTrimmedPath[si - 1];
-                            const cur  = rawTrimmedPath[si];
-                            const next = rawTrimmedPath[si + 1];
-                            const dt1 = cur[0] && prev[0] ? cur[0] - prev[0] : 99;
-                            const dt2 = next[0] && cur[0]  ? next[0] - cur[0]  : 99;
-                            const d1  = haversineKm(prev[1], prev[2], cur[1],  cur[2]);
-                            const d2  = haversineKm(cur[1],  cur[2],  next[1], next[2]);
-                            const spd1 = dt1 > 0 ? (d1 / dt1) * 3600 : 0; // km/h
-                            const spd2 = dt2 > 0 ? (d2 / dt2) * 3600 : 0;
-                            // Drop point if either adjacent segment implies > 1200 km/h
-                            // (Mach 1 ceiling for all subsonic commercial traffic)
-                            if (spd1 > 1200 || spd2 > 1200) continue;
-                            // Drop point if it forms a near-U-turn (angle > ~120°)
-                            // using dot-product of the two segment vectors
-                            const ax = cur[2]  - prev[2], ay = cur[1]  - prev[1];
-                            const bx = next[2] - cur[2],  by = next[1] - cur[1];
-                            const lenA = Math.hypot(ax, ay), lenB = Math.hypot(bx, by);
-                            if (lenA > 0 && lenB > 0) {
-                                const cosAngle = (ax * bx + ay * by) / (lenA * lenB);
-                                if (cosAngle < -0.5) continue; // sharp U-turn → spike
-                            }
-                            out.push(cur);
-                        }
-                        out.push(rawTrimmedPath[rawTrimmedPath.length - 1]);
-                        return out;
-                    })();
+                    // ── Full trail processing pipeline ────────────────────────────
+                    // Runs: spike removal → outlier removal → corner rounding →
+                    //       downsampling → Catmull-Rom spline → altitude smoothing
+                    //       → loop removal. Gaps are preserved across sub-paths.
+                    const trimmedPath = processTrailPath(rawTrimmedPath);
 
                     // ── Draw estimated departure segment (dotted line) ──────────
                     // If we have departure airport coords and the first track point
