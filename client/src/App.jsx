@@ -244,6 +244,19 @@ export default function App() {
         if (urlParams.lat !== null && urlParams.lng !== null) {
             map.setView([urlParams.lat, urlParams.lng], urlParams.zoom || 10);
         }
+        // If ?icao= is set, fetch its position and pan to it so bbox refresh
+        // loads the plane into planesDict (it may be outside the initial view).
+        if (urlParams.icao) {
+            fetch('/api/flights/live')
+                .then(r => r.json())
+                .then(d => {
+                    const found = (d.planes || []).find(p => p.hex === urlParams.icao);
+                    if (found?.lat && found?.lon) {
+                        map.setView([found.lat, found.lon], Math.max(map.getZoom(), 9));
+                    }
+                })
+                .catch(() => {});
+        }
         setZoom(map.getZoom());
     }, []);
 
@@ -397,21 +410,17 @@ export default function App() {
     const planesDictRef = useRef(planesDict);
     useEffect(() => { planesDictRef.current = planesDict; }, [planesDict]);
 
-    // [URL ?icao=] Auto-select plane from URL param on first load.
-    // planesDict is empty on mount; watch it until the target ICAO appears.
+    // [URL ?icao=] Wait for plane to enter planesDict (after map pans to it),
+    // then auto-select it. handleMapReady initiates the pan.
     const urlAutoSelectDoneRef = useRef(false);
     useEffect(() => {
         if (urlAutoSelectDoneRef.current) return;
         const urlIcao = parseUrlParams().icao;
         if (!urlIcao) { urlAutoSelectDoneRef.current = true; return; }
         const plane = planesDict[urlIcao];
-        if (!plane) return; // not yet in dict — wait for next update
+        if (!plane) return;
         urlAutoSelectDoneRef.current = true;
         handleSelectPlane(urlIcao, plane);
-        // Pan map to plane position
-        if (mapInstanceRef.current && plane.lat && plane.lng) {
-            mapInstanceRef.current.setView([plane.lat, plane.lng], Math.max(mapInstanceRef.current.getZoom(), 9));
-        }
     }, [planesDict, handleSelectPlane]);
 
     // [v4.1.0] Auto-Deselection Guard: 如果選中的飛機消失在數據流中，自動取消選取
