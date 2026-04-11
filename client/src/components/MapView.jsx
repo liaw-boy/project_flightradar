@@ -1632,16 +1632,16 @@ export default function MapView({
                                 ctx.scale(canvasScale, canvasScale);
                                 ctx.translate(-(vb[0] + vbW / 2), -(vb[1] + vbH / 2));
                                 ctx.lineJoin = 'round';
-                                // Pass 1: dark shadow outline (3px normalized)
-                                ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-                                ctx.lineWidth = Math.max(1.0, 3.5 / canvasScale);
+                                // Pass 1: dark shadow outline (2px normalized — reduced from 3.5)
+                                ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+                                ctx.lineWidth = Math.max(0.8, 2.0 / canvasScale);
                                 ctx.stroke(path);
                                 // Pass 2: colored fill
                                 ctx.fillStyle = altColor;
                                 ctx.fill(path);
-                                // Pass 3: thin white outline (1.2px normalized)
-                                ctx.strokeStyle = isSelected ? '#00ffff' : 'rgba(255,255,255,0.95)';
-                                ctx.lineWidth = isSelected ? Math.max(1.0, 2.5 / canvasScale) : Math.max(0.4, 1.2 / canvasScale);
+                                // Pass 3: thin white outline (1px normalized)
+                                ctx.strokeStyle = isSelected ? '#00ffff' : 'rgba(255,255,255,0.9)';
+                                ctx.lineWidth = isSelected ? Math.max(0.8, 2.0 / canvasScale) : Math.max(0.3, 1.0 / canvasScale);
                                 ctx.stroke(path);
                                 ctx.restore();
                             } else {

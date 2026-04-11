@@ -556,39 +556,19 @@ export function useFlightData(mapRef) {
                     p.lastContact = wp.lastContact;
                     if (wp.typecode) p.typecode = wp.typecode;
 
-                    // [DR-WS] Apply same drift-blend logic as REST path to prevent
-                    // mass teleportation when WebSocket reconnects or sends a batch update.
+                    // [DR-WS v12.0] Match REST-path always-correct logic:
+                    // DR always restarts from the real ADS-B position.
+                    // Visual position blends from current render → real over BLEND_MS.
+                    // This eliminates accumulated DR error and teleportation.
                     const wsSnapLat = p.renderLat ?? wp.lat;
                     const wsSnapLng = p.renderLng ?? wp.lng;
-                    const wsDLat = (wp.lat - wsSnapLat) * Math.PI / 180;
-                    const wsDLng = (wp.lng - wsSnapLng) * Math.PI / 180;
-                    const wsSinHLat = Math.sin(wsDLat / 2);
-                    const wsSinHLng = Math.sin(wsDLng / 2);
-                    const wsA = wsSinHLat * wsSinHLat +
-                        Math.cos(wsSnapLat * Math.PI / 180) *
-                        Math.cos(wp.lat * Math.PI / 180) *
-                        wsSinHLng * wsSinHLng;
-                    const wsDriftKm = 6371 * 2 * Math.atan2(Math.sqrt(wsA), Math.sqrt(1 - wsA));
-
-                    if (wsDriftKm > 5) {
-                        // Large jump → blend from current render pos to new actual pos
-                        p._blendFromLat = wsSnapLat;
-                        p._blendFromLng = wsSnapLng;
-                        p._dataArrivedAt = now;
-                        p.drLat = wp.lat;
-                        p.drLng = wp.lng;
-                        p.renderLat = wsSnapLat;
-                        p.renderLng = wsSnapLng;
-                    } else {
-                        // Normal update → continue DR from current render pos
-                        p._blendFromLat = null;
-                        p._blendFromLng = null;
-                        p._dataArrivedAt = now;
-                        p.drLat = wsSnapLat;
-                        p.drLng = wsSnapLng;
-                        p.renderLat = wsSnapLat;
-                        p.renderLng = wsSnapLng;
-                    }
+                    p._blendFromLat = wsSnapLat;
+                    p._blendFromLng = wsSnapLng;
+                    p._dataArrivedAt = now;
+                    p.drLat = wp.lat;    // DR from ACTUAL position, not render
+                    p.drLng = wp.lng;
+                    p.renderLat = wsSnapLat;
+                    p.renderLng = wsSnapLng;
                     p.drHeading = wp.heading;
                     p.drVelocity = wp.velocity;
                     p.drTs = now;
