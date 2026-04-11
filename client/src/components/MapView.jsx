@@ -926,32 +926,13 @@ export default function MapView({
                 const drVelocity = plane.drVelocity ?? plane.velocity ?? 0;
                 const drHeading  = plane.drHeading  ?? plane.heading  ?? 0;
 
-                // For the selected plane: if the latest track point is newer than
-                // the DR origin AND geographically close to the current ADS-B position,
-                // use it so the icon stays aligned with the trail end.
-                // Guard: reject track points from a previous flight (too old or too far away).
-                if (id === currentSelected) {
-                    const pts = trackPointsRef.current;
-                    if (pts && pts.length > 0) {
-                        const lastPt = pts[pts.length - 1];
-                        const lastPtMs = lastPt[0] ? lastPt[0] * 1000 : 0;
-                        const ageMs = nowDateMs - lastPtMs;
-                        // Only use track point if:
-                        //   1. Newer than current DR origin
-                        //   2. Not stale (< 30 min old) — prevents previous-flight data overriding DR
-                        //   3. Geographically close to current ADS-B position (< ~500 km)
-                        //      Rough check: ≤ 4.5 degrees lat/lng ≈ 500 km at mid-latitudes
-                        const latDiff = (lastPt[1] != null) ? Math.abs(lastPt[1] - (plane.lat ?? drLat)) : 999;
-                        const lngDiff = (lastPt[2] != null) ? Math.abs(lastPt[2] - (plane.lng ?? drLng)) : 999;
-                        if (lastPtMs > drTs && lastPt[1] != null && lastPt[2] != null
-                            && ageMs < 30 * 60 * 1000
-                            && latDiff < 4.5 && lngDiff < 4.5) {
-                            drLat = lastPt[1];
-                            drLng = lastPt[2];
-                            drTs  = lastPtMs;
-                        }
-                    }
-                }
+                // [v11.2] Track-point DR snap removed.
+                // Previously, we snapped the DR origin to the last track_point when it was
+                // "newer" than drTs. This caused the icon to jump backward to the actual
+                // ADS-B position right after clicking a plane (because drTs is set fresh on
+                // each global baseline update, which can be newer than the track_point ts).
+                // The live extension already draws the trail to renderLat/renderLng,
+                // so icon and trail are always visually aligned without this snap.
 
                 if (plane.onGround || drVelocity <= 0) {
                     // Stationary: snap to DR origin (no reckoning needed)
@@ -1064,11 +1045,21 @@ export default function MapView({
                     const livePathLat = livePlane?.renderLat ?? livePlane?.lat;
                     const livePathLng = livePlane?.renderLng ?? livePlane?.lng;
 
-                    // Cap at 10 minutes for airborne planes; 60s for on-ground / very slow planes
-                    // to prevent DR extending the trail in wrong direction during landing/taxi.
-                    // velocity is in m/s; 50 m/s ≈ 97 kt (typical slow-flight threshold)
-                    const isSlowOrGround = livePlane.onGround || (livePlane.velocity ?? 0) < 50;
-                    const liveExtCap = isSlowOrGround ? 60 : 600;
+                    // Cap DR trail extension based on flight phase:
+                    //   On ground / very slow (<50 m/s / 97kt)          → 60s
+                    //   Landing phase: alt < 600m AND vRate < -150 fpm  → 45s
+                    //   Approach: alt < 1500m                           → 120s
+                    //   Normal cruise                                   → 600s
+                    const vel = livePlane.velocity ?? 0;
+                    const alt = livePlane.altitude ?? 99999;
+                    const vRate = livePlane.vRate ?? 0;
+                    const isSlowOrGround = livePlane.onGround || vel < 50;
+                    const isLanding = !livePlane.onGround && alt < 600 && vRate < -150;
+                    const isApproach = !livePlane.onGround && alt < 1500;
+                    const liveExtCap = isSlowOrGround ? 60
+                                     : isLanding      ? 45
+                                     : isApproach     ? 120
+                                     :                  600;
                     if (livePathLat && livePathLng && gapSec < liveExtCap) {
                         activeSelectedPath = [...basePath, [
                             nowSec,
@@ -1097,10 +1088,15 @@ export default function MapView({
                     // isLive = the live-stitch segment (last point = current interpolated pos)
                     //          → drawn as elastic band (thinner, lighter)
                     // Long segments (>GC_THRESHOLD_KM) are expanded to great circle arcs.
-                    // Only draw the most recent continuous flight segment.
-                    // Find the last major gap (>2h or impossible jump) in raw points
-                    // and discard everything before it, preventing ghost trails from
-                    // previous flights of the same ICAO24 from appearing.
+                    // pathStartIdx: find the last major boundary and discard data before it.
+                    // Two cut conditions:
+                    //   1. Impossible GPS jump (>50km in <60s): removes bad data
+                    //   2. Very long gap (>6h): stale segments beyond 6h are oceanic
+                    //      phantom lines that cross the whole screen — visually confusing.
+                    //      The server walk-backward correctly scopes to the current flight,
+                    //      so this client-side cut only removes extreme stale visual noise.
+                    //      6h keeps most long-haul oceanic gaps visible while removing
+                    //      cross-Pacific phantom lines that look like random strokes.
                     let pathStartIdx = 0;
                     for (let pi = 1; pi < activeSelectedPath.length; pi++) {
                         const prev = activeSelectedPath[pi - 1];
@@ -1108,13 +1104,48 @@ export default function MapView({
                         const dt   = cur[0] && prev[0] ? cur[0] - prev[0] : 0;
                         const dist = haversineKm(prev[1], prev[2], cur[1], cur[2]);
                         const spd  = dt > 0 ? (dist / dt) * 3600 : 0;
-                        if (dt > 7200 || (dist > 50 && dt < 60 && spd > 2000)) {
+                        if (dt > 6 * 3600 || (dist > 50 && dt < 60 && spd > 2000)) {
                             pathStartIdx = pi;
                         }
                     }
-                    const trimmedPath = pathStartIdx > 0
+                    const rawTrimmedPath = pathStartIdx > 0
                         ? activeSelectedPath.slice(pathStartIdx)
                         : activeSelectedPath;
+
+                    // ── Spike point filter ────────────────────────────────────────
+                    // Remove mid-path GPS glitches / MLAT errors that cause Bezier loops.
+                    // A point is a spike if it forms a near-U-turn (cos < -0.5, i.e. > 120°)
+                    // AND the segment distance is implausible for that time delta.
+                    // We keep the first and last points unconditionally.
+                    const trimmedPath = rawTrimmedPath.length < 3 ? rawTrimmedPath : (() => {
+                        const out = [rawTrimmedPath[0]];
+                        for (let si = 1; si < rawTrimmedPath.length - 1; si++) {
+                            const prev = rawTrimmedPath[si - 1];
+                            const cur  = rawTrimmedPath[si];
+                            const next = rawTrimmedPath[si + 1];
+                            const dt1 = cur[0] && prev[0] ? cur[0] - prev[0] : 99;
+                            const dt2 = next[0] && cur[0]  ? next[0] - cur[0]  : 99;
+                            const d1  = haversineKm(prev[1], prev[2], cur[1],  cur[2]);
+                            const d2  = haversineKm(cur[1],  cur[2],  next[1], next[2]);
+                            const spd1 = dt1 > 0 ? (d1 / dt1) * 3600 : 0; // km/h
+                            const spd2 = dt2 > 0 ? (d2 / dt2) * 3600 : 0;
+                            // Drop point if either adjacent segment implies > 1200 km/h
+                            // (Mach 1 ceiling for all subsonic commercial traffic)
+                            if (spd1 > 1200 || spd2 > 1200) continue;
+                            // Drop point if it forms a near-U-turn (angle > ~120°)
+                            // using dot-product of the two segment vectors
+                            const ax = cur[2]  - prev[2], ay = cur[1]  - prev[1];
+                            const bx = next[2] - cur[2],  by = next[1] - cur[1];
+                            const lenA = Math.hypot(ax, ay), lenB = Math.hypot(bx, by);
+                            if (lenA > 0 && lenB > 0) {
+                                const cosAngle = (ax * bx + ay * by) / (lenA * lenB);
+                                if (cosAngle < -0.5) continue; // sharp U-turn → spike
+                            }
+                            out.push(cur);
+                        }
+                        out.push(rawTrimmedPath[rawTrimmedPath.length - 1]);
+                        return out;
+                    })();
 
                     // ── Draw estimated departure segment (dotted line) ──────────
                     // If we have departure airport coords and the first track point
@@ -1172,7 +1203,11 @@ export default function MapView({
                             // NOTE: 30-min threshold was too short for oceanic ADS-B gaps.
                             const impliedSpeedKph = timeDeltaSec > 0 ? (dist / timeDeltaSec) * 3600 : 0;
                             const isImpossibleJump = dist > 50 && timeDeltaSec < 60 && impliedSpeedKph > 2000;
-                            if (isAntimeridian || (isImpossibleJump && !isLive) || timeDeltaSec > 7200) {
+                            // [v11.2] Gap only for true breaks: antimeridian, impossible jump.
+                            // Long oceanic ADS-B gaps (e.g. 12h Pacific crossing) are NOT gaps —
+                            // they are part of the same flight shown as stale (dashed) segments.
+                            // Removed timeDeltaSec > 7200 gap rule to preserve long-haul paths.
+                            if (isAntimeridian || (isImpossibleJump && !isLive)) {
                                 gap = true;
                             } else if (timeDeltaSec > 300 && !isLive) {
                                 stale = true;
@@ -1196,20 +1231,27 @@ export default function MapView({
                         segments.push({ pt, seg, stale, gap, isLive });
                     }
 
-                    // ── Quadratic Bezier smooth path renderer ───────────────
-                    const drawSmoothedPath = (pts, isOutline, altColor, isDashed, isLiveSeg) => {
+                    // ── Heading-aware smooth path renderer ──────────────────
+                    // pts: array of { x, y, h } where h = aircraft heading (degrees, geographic)
+                    // Canvas convention: north = -Y, east = +X → dx=sin(h), dy=-cos(h)
+                    //
+                    // For 2-point batches (common at altitude-color boundaries during turns):
+                    //   Use heading-based CUBIC Bezier — respects the aircraft's actual
+                    //   direction at each end, producing smooth turn curves instead of
+                    //   straight lines.
+                    // For 3+ point batches: midpoint quadratic Bezier (smooth catmull-rom approx).
+                    // ctxPrev: canvas point just before pts[0] (for Catmull-Rom tangent at start)
+                    // ctxNext: canvas point just after  pts[last] (for Catmull-Rom tangent at end)
+                    const drawSmoothedPath = (pts, isOutline, altColor, isDashed, isLiveSeg, ctxPrev = null, ctxNext = null) => {
                         if (pts.length < 2) return;
-                        ctx.globalAlpha = 1.0; // reset before each segment to avoid stale alpha bleed
+                        ctx.globalAlpha = 1.0;
                         ctx.beginPath();
                         if (isLiveSeg) {
                             ctx.setLineDash([5, 7]);
                             ctx.globalAlpha = isOutline ? 0.15 : 0.5;
                             if (!isOutline) ctx.strokeStyle = altColor;
                         } else if (isDashed) {
-                            // At low zoom the dash gaps shrink to sub-pixel — invisible.
-                            // Use solid semi-transparent line instead; still looks distinct
-                            // from a full-data segment but remains visible at world zoom.
-                            const dashLen = zoom >= 8 ? 8 : 0; // solid below zoom 8
+                            const dashLen = zoom >= 8 ? 8 : 0;
                             ctx.setLineDash(dashLen > 0 ? [dashLen, 12] : []);
                             ctx.globalAlpha = isOutline ? 0.3 : 0.8;
                             if (!isOutline) ctx.strokeStyle = altColor;
@@ -1220,8 +1262,66 @@ export default function MapView({
                         }
                         ctx.moveTo(pts[0].x, pts[0].y);
                         if (pts.length === 2) {
-                            ctx.lineTo(pts[1].x, pts[1].y);
+                            const h0 = pts[0].h ?? -1;
+                            const h1 = pts[1].h ?? -1;
+                            const hasHeading = h0 >= 0 && h1 >= 0;
+
+                            const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+                            // Fixed ratio — no minimum floor.
+                            // A floor causes s >> dist at high zoom (slow takeoff = short pixel
+                            // segments), which makes the Bezier overshoot and creates S-curves.
+                            // Consistent ratio gives zoom-invariant curve shape.
+                            const s = Math.min(dist * 0.45, 180);
+
+                            // Catmull-Rom position-based tangents (always computed).
+                            // Used as fallback and as a smoothing anchor when blending with heading.
+                            const P0 = ctxPrev || pts[0];
+                            const P3 = ctxNext || pts[1];
+                            let t1x = pts[1].x - P0.x, t1y = pts[1].y - P0.y;
+                            let t2x = P3.x - pts[0].x, t2y = P3.y - pts[0].y;
+                            const t1len = Math.hypot(t1x, t1y) || 1;
+                            const t2len = Math.hypot(t2x, t2y) || 1;
+                            // Normalised position tangents
+                            const pt1x = t1x / t1len, pt1y = t1y / t1len;
+                            const pt2x = t2x / t2len, pt2y = t2y / t2len;
+
+                            let fx0, fy0, fx1, fy1; // final control-point directions
+                            if (hasHeading) {
+                                // ── Blend: 50% ADS-B heading + 50% Catmull-Rom position ──
+                                // Pure heading Bezier is accurate but sensitive to ADS-B noise
+                                // (1° jitter causes visible zigzags on tight turns).
+                                // Blending with the GPS-derived position direction smooths that
+                                // noise while preserving the aircraft's true heading curvature.
+                                const h0r = h0 * Math.PI / 180;
+                                const h1r = h1 * Math.PI / 180;
+                                const hx0 =  Math.sin(h0r), hy0 = -Math.cos(h0r);
+                                const hx1 =  Math.sin(h1r), hy1 = -Math.cos(h1r);
+                                const w = 0.5; // heading weight
+                                const bx0 = hx0 * w + pt1x * (1 - w);
+                                const by0 = hy0 * w + pt1y * (1 - w);
+                                const bx1 = hx1 * w + pt2x * (1 - w);
+                                const by1 = hy1 * w + pt2y * (1 - w);
+                                const bl0 = Math.hypot(bx0, by0) || 1;
+                                const bl1 = Math.hypot(bx1, by1) || 1;
+                                fx0 = bx0 / bl0; fy0 = by0 / bl0;
+                                fx1 = bx1 / bl1; fy1 = by1 / bl1;
+                            } else {
+                                // ── Pure Catmull-Rom position fallback ──
+                                fx0 = pt1x; fy0 = pt1y;
+                                fx1 = pt2x; fy1 = pt2y;
+                            }
+
+                            if (dist > 0.5) {
+                                ctx.bezierCurveTo(
+                                    pts[0].x + fx0 * s, pts[0].y + fy0 * s,
+                                    pts[1].x - fx1 * s, pts[1].y - fy1 * s,
+                                    pts[1].x, pts[1].y
+                                );
+                            } else {
+                                ctx.lineTo(pts[1].x, pts[1].y);
+                            }
                         } else {
+                            // Midpoint quadratic Bezier for 3+ points (outline pass)
                             for (let k = 1; k < pts.length - 1; k++) {
                                 const midX = (pts[k].x + pts[k + 1].x) / 2;
                                 const midY = (pts[k].y + pts[k + 1].y) / 2;
@@ -1235,8 +1335,6 @@ export default function MapView({
 
                     const drawTrack = (isOutline) => {
                         const baseWidth = zoom >= 12 ? 2.5 : 2;
-                        // Outline is only 1.5× wide (was 2×) — keeps it a subtle border,
-                        // not a visually separate second line.
                         ctx.lineWidth = isOutline ? baseWidth * 1.5 : baseWidth;
                         ctx.strokeStyle = isOutline ? 'rgba(0,0,0,0.55)' : '#ffffff';
 
@@ -1244,9 +1342,17 @@ export default function MapView({
                         let batchColor = null;
                         let batchStale = false;
                         let batchIsLive = false;
+                        // Catmull-Rom context: the point that precedes the current batch's
+                        // first point in the full sequence (used as P₋₁ for tangent calc).
+                        let prevCtxPt = null;
 
-                        const flushBatch = () => {
-                            if (batch.length > 1) drawSmoothedPath(batch, isOutline, batchColor, batchStale, batchIsLive);
+                        const flushBatch = (nextCtxPt = null) => {
+                            if (batch.length > 1) {
+                                drawSmoothedPath(batch, isOutline, batchColor, batchStale, batchIsLive, prevCtxPt, nextCtxPt);
+                            }
+                            // After flush, the point BEFORE the batch's shared boundary
+                            // becomes the context for the next batch's Catmull-Rom tangent.
+                            prevCtxPt = batch.length >= 2 ? batch[batch.length - 2] : prevCtxPt;
                             batch = [];
                             batchColor = null;
                             batchStale = false;
@@ -1257,28 +1363,33 @@ export default function MapView({
                             const { pt, seg, stale, gap, isLive } = segments[pi];
 
                             if (gap) {
-                                flushBatch();
-                                batch = [pt];
+                                flushBatch(null);
+                                prevCtxPt = null; // no context across data gaps
+                                batch = [{ x: pt.x, y: pt.y, h: seg[4] ?? -1 }];
                                 continue;
                             }
 
                             const altColor = isOutline ? null : getAltitudeColor(seg[3], false, false, 'ALTITUDE');
 
-                            // Flush when color, stale, or live status changes
+                            // Flush when color, stale, or live status changes.
+                            // Pass the current point as ctxNext so the outgoing Bezier
+                            // curves toward the next batch's direction (smooth junction).
                             if (batchColor !== null && (!isOutline && (altColor !== batchColor || stale !== batchStale || isLive !== batchIsLive))) {
-                                flushBatch();
+                                flushBatch({ x: pt.x, y: pt.y });
                             }
 
                             if (batch.length === 0 && pi > 0 && !segments[pi - 1].gap) {
-                                batch.push(segments[pi - 1].pt);
+                                const prevSeg = segments[pi - 1].seg;
+                                const prevPt  = segments[pi - 1].pt;
+                                batch.push({ x: prevPt.x, y: prevPt.y, h: prevSeg?.[4] ?? -1 });
                             }
 
-                            batch.push(pt);
+                            batch.push({ x: pt.x, y: pt.y, h: seg[4] ?? -1 });
                             batchColor = altColor;
                             batchStale = stale;
                             batchIsLive = isLive;
                         }
-                        flushBatch();
+                        flushBatch(null);
                     };
 
                     // Two passes for crisp layering

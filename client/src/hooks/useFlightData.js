@@ -127,7 +127,7 @@ export function useFlightData(mapRef) {
                     icao24: p.icao24,
                     data: {
                         ...p,
-                        callsign: p.callsign || 'UNKNOWN',
+                        callsign: p.callsign || p.icao24?.toUpperCase() || '',
                         registration: 'N/A', // populated later from metadata
                         aircraftType: 'Unknown',
                         lastSeenTime: data.globalLastUpdate || Math.floor(Date.now() / 1000)
@@ -230,34 +230,48 @@ export function useFlightData(mapRef) {
                     const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
                     const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
 
-                    // [DR] No-backward fix: use current render position as DR origin.
-                    // Previously we set drLat = pData.lat (ADS-B position) which is always
-                    // slightly behind the DR-extrapolated render position, causing a 600ms
-                    // backward blend every time a global baseline update arrived (~75s cycle).
-                    // Now we continue DR forward from wherever the icon currently is, only
-                    // updating heading/velocity from the new ADS-B data. Positional drift is
-                    // bounded by the update interval × turn rate (typically < 1km).
+                    // [DR v11.2] Drift-corrected no-backward fix.
+                    // Continue DR from current render position to prevent backward motion.
+                    // BUT: if the icon has drifted > 5km from the actual ADS-B position
+                    // (happens during long turns or ADS-B gaps), reset to the real position
+                    // with a smooth blend to avoid teleportation.
                     const snapRenderLat = existing.renderLat ?? existing.lat;
                     const snapRenderLng = existing.renderLng ?? existing.lng;
                     const now = Date.now();
+
+                    // Haversine drift (km) between DR render pos and real ADS-B pos
+                    const dLat = (pData.lat - snapRenderLat) * Math.PI / 180;
+                    const dLng = (pData.lng - snapRenderLng) * Math.PI / 180;
+                    const sinHLat = Math.sin(dLat / 2);
+                    const sinHLng = Math.sin(dLng / 2);
+                    const a = sinHLat * sinHLat +
+                        Math.cos(snapRenderLat * Math.PI / 180) *
+                        Math.cos(pData.lat * Math.PI / 180) *
+                        sinHLng * sinHLng;
+                    const driftKm = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+                    // > 5km drift → reset to actual ADS-B position with blend
+                    // ≤ 5km drift → continue from render position (no-backward guarantee)
+                    const MAX_DRIFT_KM = 5;
+                    const drOriginLat = driftKm > MAX_DRIFT_KM ? pData.lat : snapRenderLat;
+                    const drOriginLng = driftKm > MAX_DRIFT_KM ? pData.lng : snapRenderLng;
+                    const blendFromLat = driftKm > MAX_DRIFT_KM ? snapRenderLat : null;
+                    const blendFromLng = driftKm > MAX_DRIFT_KM ? snapRenderLng : null;
 
                     next[icao24] = {
                         ...existing,
                         ...pData,
                         isDirty,
-                        // DR origin: current render position (not ADS-B position)
-                        // This prevents the icon from ever moving backward.
-                        drLat: snapRenderLat,
-                        drLng: snapRenderLng,
+                        drLat: drOriginLat,
+                        drLng: drOriginLng,
                         drHeading: pData.heading,
                         drVelocity: pData.velocity,
                         drTs: now,
-                        // No blend needed — DR continues forward from current position
-                        _blendFromLat: null,
-                        _blendFromLng: null,
+                        _blendFromLat: blendFromLat,
+                        _blendFromLng: blendFromLng,
                         _dataArrivedAt: now,
-                        renderLat: snapRenderLat,
-                        renderLng: snapRenderLng,
+                        renderLat: drOriginLat,
+                        renderLng: drOriginLng,
                         // Legacy compat
                         targetLat: pData.lat,
                         targetLng: pData.lng,
@@ -553,8 +567,42 @@ export function useFlightData(mapRef) {
                     p.lastContact = wp.lastContact;
                     if (wp.typecode) p.typecode = wp.typecode;
 
-                    p.renderLat = wp.lat;
-                    p.renderLng = wp.lng;
+                    // [DR-WS] Apply same drift-blend logic as REST path to prevent
+                    // mass teleportation when WebSocket reconnects or sends a batch update.
+                    const wsSnapLat = p.renderLat ?? wp.lat;
+                    const wsSnapLng = p.renderLng ?? wp.lng;
+                    const wsDLat = (wp.lat - wsSnapLat) * Math.PI / 180;
+                    const wsDLng = (wp.lng - wsSnapLng) * Math.PI / 180;
+                    const wsSinHLat = Math.sin(wsDLat / 2);
+                    const wsSinHLng = Math.sin(wsDLng / 2);
+                    const wsA = wsSinHLat * wsSinHLat +
+                        Math.cos(wsSnapLat * Math.PI / 180) *
+                        Math.cos(wp.lat * Math.PI / 180) *
+                        wsSinHLng * wsSinHLng;
+                    const wsDriftKm = 6371 * 2 * Math.atan2(Math.sqrt(wsA), Math.sqrt(1 - wsA));
+
+                    if (wsDriftKm > 5) {
+                        // Large jump → blend from current render pos to new actual pos
+                        p._blendFromLat = wsSnapLat;
+                        p._blendFromLng = wsSnapLng;
+                        p._dataArrivedAt = now;
+                        p.drLat = wp.lat;
+                        p.drLng = wp.lng;
+                        p.renderLat = wsSnapLat;
+                        p.renderLng = wsSnapLng;
+                    } else {
+                        // Normal update → continue DR from current render pos
+                        p._blendFromLat = null;
+                        p._blendFromLng = null;
+                        p._dataArrivedAt = now;
+                        p.drLat = wsSnapLat;
+                        p.drLng = wsSnapLng;
+                        p.renderLat = wsSnapLat;
+                        p.renderLng = wsSnapLng;
+                    }
+                    p.drHeading = wp.heading;
+                    p.drVelocity = wp.velocity;
+                    p.drTs = now;
                     p.targetLat = wp.lat;
                     p.targetLng = wp.lng;
                     p.targetUpdatedAt = now;
