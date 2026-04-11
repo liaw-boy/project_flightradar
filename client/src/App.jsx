@@ -10,12 +10,15 @@ import MapView from './components/MapView';
 import PlaneList from './components/PlaneList';
 import TimePlayer from './components/TimePlayer';
 import StatsPanel from './components/StatsPanel';
+import AuthModal from './components/AuthModal';
+import MyFlightsPanel from './components/MyFlightsPanel';
 import { useFlightData } from './hooks/useFlightData';
 import { useI18n } from './hooks/useI18n';
 import { logToServer, logger } from './utils/logger';
 import { dataManager } from './services/dataManager';
 import { initAircraftShapes } from './utils/aircraftIcons';
 import { trackStore } from './store/FlightDataStore';
+import { authStore } from './store/authStore';
 import './App.css';
 
 // URL Parsing Utility
@@ -62,6 +65,13 @@ export default function App() {
     });
 
     const colorScheme = 'TACTICAL';
+
+    // ── Auth modals ────────────────────────────────────────────
+    const [showAuthModal, setShowAuthModal]         = useState(false);
+    const [showMyFlights, setShowMyFlights]         = useState(false);
+    const [authUser, setAuthUser]                   = useState(authStore.getUser());
+
+    useEffect(() => authStore.subscribe(({ user }) => setAuthUser(user)), []);
 
     // [v2.9.0] Map tile layer
     const [mapLayer, setMapLayer] = useState(() =>
@@ -387,6 +397,23 @@ export default function App() {
     const planesDictRef = useRef(planesDict);
     useEffect(() => { planesDictRef.current = planesDict; }, [planesDict]);
 
+    // [URL ?icao=] Auto-select plane from URL param on first load.
+    // planesDict is empty on mount; watch it until the target ICAO appears.
+    const urlAutoSelectDoneRef = useRef(false);
+    useEffect(() => {
+        if (urlAutoSelectDoneRef.current) return;
+        const urlIcao = parseUrlParams().icao;
+        if (!urlIcao) { urlAutoSelectDoneRef.current = true; return; }
+        const plane = planesDict[urlIcao];
+        if (!plane) return; // not yet in dict — wait for next update
+        urlAutoSelectDoneRef.current = true;
+        handleSelectPlane(urlIcao, plane);
+        // Pan map to plane position
+        if (mapInstanceRef.current && plane.lat && plane.lng) {
+            mapInstanceRef.current.setView([plane.lat, plane.lng], Math.max(mapInstanceRef.current.getZoom(), 9));
+        }
+    }, [planesDict, handleSelectPlane]);
+
     // [v4.1.0] Auto-Deselection Guard: 如果選中的飛機消失在數據流中，自動取消選取
     // [Fix] When trackMode is active the selected plane may legitimately move outside
     // the current BBox (e.g., mid-pan) — do NOT clear the track in that case.
@@ -539,6 +566,9 @@ export default function App() {
                 onMapLayerChange={handleMapLayerChange}
                 showStats={showStats}
                 onToggleStats={() => setShowStats(s => !s)}
+                onOpenAuth={() => setShowAuthModal(true)}
+                onOpenMyFlights={() => setShowMyFlights(true)}
+                authUser={authUser}
             />
 
             {/* Right Status Column */}
@@ -630,6 +660,26 @@ export default function App() {
                     apiStats={apiStats}
                     latency={latency}
                     planeCount={planeCount}
+                />
+            )}
+
+            {/* ── Auth / MyFlights Modals ── */}
+            {showAuthModal && (
+                <AuthModal onClose={() => setShowAuthModal(false)} />
+            )}
+
+            {showMyFlights && (
+                <MyFlightsPanel
+                    onClose={() => setShowMyFlights(false)}
+                    prefillFromPlane={selectedPlane ? {
+                        icao24:       selectedPlane.icao24,
+                        callsign:     selectedPlane.callsign || '',
+                        aircraft_type: selectedPlane.type_code || selectedPlane.aircraft_type || '',
+                        registration: selectedPlane.registration || '',
+                        dep_icao:     selectedPlane.origin_country ? '' : '',
+                        flight_number: selectedPlane.flight_number || selectedPlane.callsign || '',
+                        flight_date:  new Date().toISOString().slice(0, 10),
+                    } : null}
                 />
             )}
         </div>
