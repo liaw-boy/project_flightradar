@@ -10,8 +10,9 @@ git pull origin main
 
 echo "[2/4] Building frontend..."
 cd client
-npm install --omit=dev
+npm install
 npm run build
+npm prune --omit=dev
 cd ..
 
 echo "[3/4] Installing backend dependencies..."
