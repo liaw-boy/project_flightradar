@@ -1151,8 +1151,9 @@ export default function MapView({
                         const isLastPoint = pi === trimmedPath.length - 1;
                         const isLive = isLastPoint && !!seg[6]; // _isLiveExtension flag
                         const pt = map.latLngToContainerPoint([seg[1], normalizeLongitude(seg[2])]);
-                        let stale = false;
-                        let gap   = false;
+                        let stale  = false;
+                        let gap    = false;
+                        let bridge = false;
 
                         if (pi > 0) {
                             const prevSeg = trimmedPath[pi - 1];
@@ -1166,23 +1167,20 @@ export default function MapView({
                             const lngDiff = Math.abs(lngB - lngA);
                             const isAntimeridian = lngDiff > 180;
 
-                            // Gap detection rules:
-                            // 1. Antimeridian crossing → always break
-                            // 2. Impossible teleport (>50km in <60s at >2000km/h) → break
-                            // 3. Time gap > 2 hours → break (different flight day / multi-leg)
-                            // 4. Time gap 5–120 min → stale (dashed, ADS-B coverage gap)
-                            // 5. < 5 min gap → solid (normal polling interval / rate limit)
-                            // NOTE: 30-min threshold was too short for oceanic ADS-B gaps.
+                            // Gap detection — three tiers (Tangram-inspired):
+                            // 1. Impossible teleport (>50km in <60s >2000km/h) → true break
+                            // 2. Antimeridian crossing → true break
+                            // 3. Time gap > 1800s → bridge (gray dashed, estimated path)
+                            // 4. Time gap 300–1800s → stale (gray dashed, weak coverage)
+                            // 5. < 300s → solid (normal ADS-B polling interval)
                             const impliedSpeedKph = timeDeltaSec > 0 ? (dist / timeDeltaSec) * 3600 : 0;
                             const isImpossibleJump = dist > 50 && timeDeltaSec < 60 && impliedSpeedKph > 2000;
-                            // [v11.2] Gap only for true breaks: antimeridian, impossible jump.
-                            // Long oceanic ADS-B gaps (e.g. 12h Pacific crossing) are NOT gaps —
-                            // they are part of the same flight shown as stale (dashed) segments.
-                            // Removed timeDeltaSec > 7200 gap rule to preserve long-haul paths.
                             if (isAntimeridian || (isImpossibleJump && !isLive)) {
                                 gap = true;
+                            } else if (timeDeltaSec > 1800 && !isLive) {
+                                bridge = true; // long oceanic / ground-stop gap — gray bridge
                             } else if (timeDeltaSec > 300 && !isLive) {
-                                stale = true;
+                                stale = true; // short ADS-B coverage gap — gray dashed
                             }
 
                             // Great circle arc expansion for long non-gap segments
@@ -1200,7 +1198,7 @@ export default function MapView({
                             }
                         }
 
-                        segments.push({ pt, seg, stale, gap, isLive });
+                        segments.push({ pt, seg, stale, gap, bridge, isLive });
                     }
 
                     // ── Heading-aware smooth path renderer ──────────────────
@@ -1214,7 +1212,36 @@ export default function MapView({
                     // For 3+ point batches: midpoint quadratic Bezier (smooth catmull-rom approx).
                     // ctxPrev: canvas point just before pts[0] (for Catmull-Rom tangent at start)
                     // ctxNext: canvas point just after  pts[last] (for Catmull-Rom tangent at end)
-                    const drawSmoothedPath = (pts, isOutline, altColor, isDashed, isLiveSeg, ctxPrev = null, ctxNext = null) => {
+                    // Draw a gray dashed bridge segment (Tangram-style gap bridge).
+                    // Used for ADS-B coverage gaps — connects last known pos to next
+                    // known pos with a visual indicator that no real data exists here.
+                    const drawBridge = (from, to, isBridgeOutline) => {
+                        if (!from || !to) return;
+                        ctx.save();
+                        ctx.lineWidth = isBridgeOutline ? 2.5 : 1.5;
+                        ctx.setLineDash([4, 14]);
+                        ctx.globalAlpha = isBridgeOutline ? 0.12 : 0.45;
+                        ctx.strokeStyle = isBridgeOutline ? 'rgba(0,0,0,1)' : 'rgba(180,180,180,1)';
+                        ctx.lineCap = 'round';
+                        ctx.beginPath();
+                        ctx.moveTo(from.x, from.y);
+                        ctx.lineTo(to.x, to.y);
+                        ctx.stroke();
+                        // Mid-point marker (circle) to visually mark the gap
+                        if (!isBridgeOutline && zoom >= 7) {
+                            const mx = (from.x + to.x) / 2;
+                            const my = (from.y + to.y) / 2;
+                            ctx.setLineDash([]);
+                            ctx.globalAlpha = 0.6;
+                            ctx.fillStyle = 'rgba(180,180,180,0.8)';
+                            ctx.beginPath();
+                            ctx.arc(mx, my, 3, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                        ctx.restore();
+                    };
+
+                    const drawSmoothedPath = (pts, isOutline, altColor, isDashed, isLiveSeg, isBridge = false, ctxPrev = null, ctxNext = null) => {
                         if (pts.length < 2) return;
                         ctx.globalAlpha = 1.0;
                         ctx.beginPath();
@@ -1222,11 +1249,15 @@ export default function MapView({
                             ctx.setLineDash([5, 7]);
                             ctx.globalAlpha = isOutline ? 0.15 : 0.5;
                             if (!isOutline) ctx.strokeStyle = altColor;
+                        } else if (isBridge) {
+                            // Bridge: lighter gray, wider dash gap (handled by drawBridge, skip here)
+                            return;
                         } else if (isDashed) {
+                            // Stale: gray dashed (not altitude-colored — clearly indicates no ADS-B)
                             const dashLen = zoom >= 8 ? 8 : 0;
                             ctx.setLineDash(dashLen > 0 ? [dashLen, 12] : []);
-                            ctx.globalAlpha = isOutline ? 0.3 : 0.8;
-                            if (!isOutline) ctx.strokeStyle = altColor;
+                            ctx.globalAlpha = isOutline ? 0.2 : 0.65;
+                            if (!isOutline) ctx.strokeStyle = 'rgba(160,160,160,1)';
                         } else {
                             ctx.setLineDash([]);
                             ctx.globalAlpha = isOutline ? 0.5 : 1.0;
@@ -1313,44 +1344,51 @@ export default function MapView({
                         let batch = [];
                         let batchColor = null;
                         let batchStale = false;
+                        let batchBridge = false;
                         let batchIsLive = false;
-                        // Catmull-Rom context: the point that precedes the current batch's
-                        // first point in the full sequence (used as P₋₁ for tangent calc).
                         let prevCtxPt = null;
 
                         const flushBatch = (nextCtxPt = null) => {
                             if (batch.length > 1) {
-                                drawSmoothedPath(batch, isOutline, batchColor, batchStale, batchIsLive, prevCtxPt, nextCtxPt);
+                                drawSmoothedPath(batch, isOutline, batchColor, batchStale, batchIsLive, batchBridge, prevCtxPt, nextCtxPt);
                             }
-                            // After flush, the point BEFORE the batch's shared boundary
-                            // becomes the context for the next batch's Catmull-Rom tangent.
                             prevCtxPt = batch.length >= 2 ? batch[batch.length - 2] : prevCtxPt;
                             batch = [];
                             batchColor = null;
                             batchStale = false;
+                            batchBridge = false;
                             batchIsLive = false;
                         };
 
                         for (let pi = 0; pi < segments.length; pi++) {
-                            const { pt, seg, stale, gap, isLive } = segments[pi];
+                            const { pt, seg, stale, gap, bridge, isLive } = segments[pi];
 
                             if (gap) {
+                                // True break — impossible jump or antimeridian
                                 flushBatch(null);
-                                prevCtxPt = null; // no context across data gaps
+                                prevCtxPt = null;
+                                batch = [{ x: pt.x, y: pt.y, h: seg[4] ?? -1 }];
+                                continue;
+                            }
+
+                            if (bridge) {
+                                // Gray dashed bridge (Tangram-style) — long ADS-B coverage gap
+                                flushBatch(null);
+                                if (pi > 0 && !segments[pi - 1].gap) {
+                                    drawBridge(segments[pi - 1].pt, pt, isOutline);
+                                }
+                                prevCtxPt = null;
                                 batch = [{ x: pt.x, y: pt.y, h: seg[4] ?? -1 }];
                                 continue;
                             }
 
                             const altColor = isOutline ? null : getAltitudeColor(seg[3], false, false, 'ALTITUDE');
 
-                            // Flush when color, stale, or live status changes.
-                            // Pass the current point as ctxNext so the outgoing Bezier
-                            // curves toward the next batch's direction (smooth junction).
                             if (batchColor !== null && (!isOutline && (altColor !== batchColor || stale !== batchStale || isLive !== batchIsLive))) {
                                 flushBatch({ x: pt.x, y: pt.y });
                             }
 
-                            if (batch.length === 0 && pi > 0 && !segments[pi - 1].gap) {
+                            if (batch.length === 0 && pi > 0 && !segments[pi - 1].gap && !segments[pi - 1].bridge) {
                                 const prevSeg = segments[pi - 1].seg;
                                 const prevPt  = segments[pi - 1].pt;
                                 batch.push({ x: prevPt.x, y: prevPt.y, h: prevSeg?.[4] ?? -1 });
@@ -1359,6 +1397,7 @@ export default function MapView({
                             batch.push({ x: pt.x, y: pt.y, h: seg[4] ?? -1 });
                             batchColor = altColor;
                             batchStale = stale;
+                            batchBridge = false;
                             batchIsLive = isLive;
                         }
                         flushBatch(null);
