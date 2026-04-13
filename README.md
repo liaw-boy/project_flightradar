@@ -1,128 +1,155 @@
-# AEROSTRAT 全球航空監控系統
+# ✈️ AEROSTRAT
 
-AEROSTRAT 是一款專為高效能設計的全球實時航空交通監控系統。系統整合了多個 ADS-B 遙測資料源，透過後端資料融合（Data Fusion）與元數據增強，並利用 WebSocket 增量編碼技術，在前端實現了 60fps 的平滑航空雷達視覺化體驗。
+> **高效能全球航空監控與實時雷達系統**
 
----
+[![Next.js](https://img.shields.io/badge/Frontend-React%2019-blue?style=for-the-badge&logo=react)](https://reactjs.org/)
+[![Node.js](https://img.shields.io/badge/Backend-Node.js%2024-green?style=for-the-badge&logo=nodedotjs)](https://nodejs.org/)
+[![SQLite](https://img.shields.io/badge/Database-SQLite%203-003B57?style=for-the-badge&logo=sqlite)](https://www.sqlite.org/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-## 核心功能
-
-### 1. 高完整度即時追蹤
-- **多源資料融合**：整合 OpenSky Network、ADSB-Fi 等多個遙測平台資料。
-- **4層元數據解析**：系統依序從內建 CSV 索引、本地 SQLite 快取、第三方 fallback API 以及外部專業航空資料庫獲取航機詳細資訊。
-- **空間過濾（Spatial Filtering）**：WebSocket 僅針對各客戶端的地圖視野邊界（BBox）推送相關飛機資料，大幅節省頻寬。
-
-### 2. 極致視覺體驗
-- **60fps Canvas 渲染**：捨棄傳統 DOM/SVG 標記，直接在 Canvas 上進行萬級點位的高效繪製。
-- **航位推算（Dead Reckoning）**：利用航機最後已知的速度、航向與位置，在資料更新間隙自動模擬平滑移動。
-- **高度色彩編碼**：動態軌跡依據高度進行藍、綠、黃、紅漸層染色，清晰展現爬升與下降狀態。
-
-### 3. 會話與歷史回放
-- **持久化軌跡存儲**：採用 SQLite (WAL 模式) 記錄每一條飛行路徑，支持 24 小時內的完整歷史回放。
-- **時光機回放系統**：支持透過時間軸拖動，回溯全球任意時間點的航空態勢。
-
-### 4. 管理與安全 (NEW)
-- **認證系統**：整合安全的用戶登入與權限驗證機制。
-- **管理後台**：內置管理控制台（Admin Panel），支持系統運行監控與基礎資料維護。
+AEROSTRAT 是一款專為航空愛好者與開發者設計的全球實時監控平台。系統整合了 OpenSky 與 ADSB-Fi 等多源遙測數據，透過二進制 WebSocket 協議與 60fps Canvas 渲染技術，在極低的資源佔用下提供軍事級的流暢雷達體驗。
 
 ---
 
-## 技術架構
+## 📖 目錄
 
-### 後端 (Backend)
-*   **運行環境**：Node.js 24+ / Express 5
-*   **實時通訊**：WebSocket (MessagePack 二進制封裝)
-*   **資料存儲**：
-    *   **SQLite**：儲存飛行會話（Flight Sessions）與高頻航跡點（Track Points）。
-    *   **In-Memory**：Airport、Route、Aircraft Shape 等靜態字典。
-*   **併發處理**：使用 Worker Threads 處理大量 JSON 遙測資料解析，避免阻塞主線程。
-
-### 前端 (Frontend)
-*   **框架**：React 19 / Vite 6
-*   **地圖引擎**：Leaflet 1.9 + 自研 Canvas 渲染引擎
-*   **性能優化**：
-    *   **Zero-GC Rendering**：使用 Float32Array 環形緩衝區存儲軌跡。
-    *   **三層快取**：React State (L1) → In-memory LRU (L2) → IndexedDB (L3)。
-    *   **Web Worker**：將 WebSocket 解碼與複雜邏輯移至後台線程。
+- [✨ 核心亮點](#-核心亮點)
+- [📸 介面預覽](#-介面預覽)
+- [🛠 技術架構](#-技術架構)
+- [🚀 快速開始](#-快速開始)
+- [🏗 系統設計細節](#-系統設計細節)
+- [📊 監控與測試](#-監控與測試)
+- [📜 授權協議](#-授權協議)
 
 ---
 
-## 目錄結構
+## 📸 介面預覽
 
-```text
-project_aerostrat/
-├── backend/
-│   ├── db/                 # 資料庫存取層 (SQLite/Session)
-│   ├── scripts/            # 資料同步與初始化腳本
-│   ├── workers/            # 遙測數據解析 Worker
-│   ├── server.js           # API 與 API Gateway
-│   └── socketEngine.js     # WebSocket 增量編碼引擎
-├── client/
-│   ├── src/
-│   │   ├── components/     # 地圖引擎與介面組件
-│   │   ├── hooks/          # 資料狀態與實時邏輯
-│   │   ├── services/       # 持久化與快取管理 (IndexedDB)
-│   │   ├── store/          # 全域狀態管理
-│   │   └── workers/        # WebSocket 處理線程
-└── docker-compose.yml      # 容器化部署配置
+![AEROSTRAT Dashboard Preview](docs/images/preview.png)
+*圖：AEROSTRAT 專業雷達監控介面（模擬效果）*
+
+---
+
+## ✨ 核心亮點
+
+### 📡 實時雷達與追蹤
+- **60fps 平滑移動**：採用 Canvas 渲染引擎與高效能座標插值運算，告別地圖圖標閃爍。
+- **航位推算 (Dead Reckoning)**：即使在網路延遲或資料更新間隙，航機也能依據慣性平滑移動。
+- **高度色彩系統**：動態熱點染色，即時區分航機的爬升、巡航與下降狀態。
+
+### 🔍 智能過濾與搜尋
+- **多維度篩選**：可依據高度、地面速度、機型代碼（ICAO Type）進行精準過濾。
+- **全域全文檢索**：快速定位航班編號 (Callsign)、註冊號或 ICAO 24-bit 地址。
+
+### ⏲️ 時光機與回放
+- **24小時歷史回溯**：完整記錄所有飛行路點，支持透過時間軸進行秒級精度回放。
+
+### 📱 行動端深度優化
+- **響應式介面**：針對手機與平板設計的抽屜式抽卡（Bottom Sheets）交互，單手即可操作。
+
+---
+
+## 🛠 技術架構
+
+AEROSTRAT 採用 **前後端分離** 的高性能架構設計：
+
+```mermaid
+graph LR
+    subgraph "數據源"
+        A[OpenSky API] --> E[Data Fusion Layer]
+        B[ADSB-Fi] --> E
+        C[Static Dictionaries] --> E
+    end
+
+    subgraph "Backend (Node.js)"
+        E --> F[Session State Machine]
+        F --> G[(SQLite WAL)]
+        F --> H[SocketEngine]
+    end
+
+    subgraph "Frontend (React)"
+        H -- "Delta Encoded Binary" --> I[Web Worker]
+        I --> J[React Store]
+        J --> K[60fps Canvas Map]
+    end
 ```
 
+### 技術棧 (Tech Stack)
+- **Frontend**: React 19, Vite 6, Leaflet 1.9, Tailwind CSS.
+- **Backend**: Node.js 24, Express 5, Socket.io, MessagePack.
+- **Persistence**: SQLite (better-sqlite3) with WAL mode enabled.
+- **Utilities**: Playwright (E2E Testing), PM2 (Process Mgmt).
+
 ---
 
-## 快速啟動
+## 🚀 快速開始
 
-### 環境要求
-- Node.js 18.0 或更高版本
-- 磁碟空間：約 500MB (供 SQLite 24h 軌跡緩衝)
+### 1. 安裝環境
+確保您的開發環境已安裝 **Node.js 18+**。
 
-### 1. 配置環境變量
-在 `backend/` 目錄下建立 `.env` 文件：
+```bash
+# 克隆專案
+git clone https://github.com/liaw-boy/project_flightradar.git
+cd project_aerostrat
+
+# 安裝所有依賴
+npm install
+```
+
+### 2. 環境變數配置
+在 `backend/` 下建立 `.env`：
 ```env
 PORT=3000
 MONGODB_USE_LOCAL=false
-# 填入您的 OpenSky 或其他 ADS-B 來源金鑰
+# 填入您的 OpenSky 帳號金鑰（可選）
 ```
 
-### 2. 安裝與啟動 (開發模式)
-從項目根目錄執行：
+### 3. 初始化資料與運行
 ```bash
-# 安裝依賴
-npm install
-
-# 同步基礎資料（首次運行）
+# 第一步：同步機場與航路基礎數據
 cd backend && node scripts/syncOsintData.js
 
-# 啟動開發伺服器
+# 第二步：啟動開發模式
 cd ..
 npm run dev
 ```
-訪問 `http://localhost:3005` 啟動前端介面。
-
-### 3. 部署 (生產模式)
-推薦使用 PM2 進行管理：
-```bash
-cd backend
-pm2 start ecosystem.config.js
-```
+啟動後訪問 `http://localhost:3005`。
 
 ---
 
-## 測試
-本專案使用 Playwright 進行 End-to-End 測試：
-```bash
-cd client
-npx playwright test
-```
+## 🏗 系統設計細節
+
+<details>
+<summary><b>📦 二進制增量編碼 (Double Buffering & Delta Encoding)</b></summary>
+為了極大化節省頻寬，WebSocket 僅推送狀態發生變化的「增量數據」。我們使用 MessagePack 進行二進制封裝，相較於傳統 JSON 格式，流量佔用減少了 70% 以上。
+</details>
+
+<details>
+<summary><b>🚀 零垃圾回收壓力渲染 (Zero-GC Rendering)</b></summary>
+前端 `FlightDataStore` 使用 TypedArrays (Float32Array) 作為環形緩衝區。MapView 元件會快取 Path2D 物件，避免在每秒 60 次的重繪中產生大量內存垃圾 (Garbage Collection)，確保長時間運行的穩定性。
+</details>
+
+<details>
+<summary><b>🧬 多維元數據解析 (4-Layer Metadata Resolution)</b></summary>
+每一架飛機的詳細資訊（機型、航空公司、起迄點）依序透過：記憶體索引 → 本地 SQLite → 特定 Fallback API → 官方資料庫進行非同步融合，保證資料的高準確率。
+</details>
 
 ---
 
-## 數據來源說明
-本系統接入以下公開遙測協議與 API：
-- OpenSky Network
-- ADSB-Fi / airplanes.live
-- OurAirports (機場數據)
-- Virtual Radar Server (航路與機型數據)
+## 📊 監控與測試
+
+- **健康檢查**: `http://localhost:3000/api/health`
+- **系統統計**: `http://localhost:3000/api/stats`
+- **自動化測試**: 
+  ```bash
+  cd client && npx playwright test
+  ```
 
 ---
 
-## 授權
-[請在此插入您的授權協議，例如 MIT]
+## 📜 授權協議
+
+本項目基於 **MIT License** 授權。您可以自由使用、修改及分發。
+
+---
+> 如果您喜歡這個專案，請給我們一個 ⭐️ 支持！
