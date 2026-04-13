@@ -16,6 +16,7 @@
   "type": "commonjs",
   "dependencies": {
     "adm-zip": "^0.5.16",
+    "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.8.0",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
@@ -24,9 +25,14 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.3.0",
     "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
     "msgpack-lite": "^0.1.26",
+    "multer": "^2.1.1",
     "node-cache": "^5.1.2",
     "node-cron": "^4.2.1",
+    "passport": "^0.7.0",
+    "passport-facebook": "^3.0.0",
+    "passport-google-oauth20": "^2.0.0",
     "ws": "^8.19.0"
   },
   "devDependencies": {

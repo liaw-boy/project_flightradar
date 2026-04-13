@@ -12,13 +12,14 @@ import TimePlayer from './components/TimePlayer';
 import StatsPanel from './components/StatsPanel';
 import AuthModal from './components/AuthModal';
 import MyFlightsPanel from './components/MyFlightsPanel';
+import AdminPanel from './components/AdminPanel';
 import { useFlightData } from './hooks/useFlightData';
 import { useI18n } from './hooks/useI18n';
 import { logToServer, logger } from './utils/logger';
 import { dataManager } from './services/dataManager';
 import { initAircraftShapes } from './utils/aircraftIcons';
 import { trackStore } from './store/FlightDataStore';
-import { authStore } from './store/authStore';
+import { authStore, apiFlightMapData } from './store/authStore';
 import './App.css';
 
 // URL Parsing Utility
@@ -69,9 +70,22 @@ export default function App() {
     // ── Auth modals ────────────────────────────────────────────
     const [showAuthModal, setShowAuthModal]         = useState(false);
     const [showMyFlights, setShowMyFlights]         = useState(false);
+    const [showAdmin, setShowAdmin]                 = useState(false);
     const [authUser, setAuthUser]                   = useState(authStore.getUser());
+    const [userRoutes, setUserRoutes]               = useState(null);
+    const [showUserRoutes, setShowUserRoutes]       = useState(false);
 
     useEffect(() => authStore.subscribe(({ user }) => setAuthUser(user)), []);
+
+    // 登入 / 登出時自動重新拉取個人路線
+    useEffect(() => {
+        if (authUser) {
+            apiFlightMapData().then(data => setUserRoutes(data.routes || [])).catch(() => setUserRoutes([]));
+        } else {
+            setUserRoutes(null);
+            setShowUserRoutes(false);
+        }
+    }, [authUser]);
 
     // [v2.9.0] Map tile layer
     const [mapLayer, setMapLayer] = useState(() =>
@@ -535,6 +549,10 @@ export default function App() {
         }
     }, [planesDict, selectedIcao24, trackPoints.length]);
 
+    if (showAdmin) {
+        return <AdminPanel onClose={() => setShowAdmin(false)} />;
+    }
+
     return (
         <div className="app">
             <LoadingScreen visible={loading} />
@@ -559,6 +577,8 @@ export default function App() {
                 t={t}
                 translateMetar={translateMetar}
                 depCoords={depCoords}
+                userRoutes={userRoutes}
+                showUserRoutes={showUserRoutes}
             />
 
             <TopBar
@@ -577,7 +597,11 @@ export default function App() {
                 onToggleStats={() => setShowStats(s => !s)}
                 onOpenAuth={() => setShowAuthModal(true)}
                 onOpenMyFlights={() => setShowMyFlights(true)}
+                onOpenAdmin={() => setShowAdmin(true)}
                 authUser={authUser}
+                showUserRoutes={showUserRoutes}
+                onToggleUserRoutes={() => setShowUserRoutes(v => !v)}
+                hasUserRoutes={!!(userRoutes && userRoutes.length > 0)}
             />
 
             {/* Right Status Column */}
@@ -679,7 +703,13 @@ export default function App() {
 
             {showMyFlights && (
                 <MyFlightsPanel
-                    onClose={() => setShowMyFlights(false)}
+                    onClose={() => {
+                        setShowMyFlights(false);
+                        // 關閉時重新拉取路線，確保新增的航班反映在地圖上
+                        if (authUser) {
+                            apiFlightMapData().then(d => setUserRoutes(d.routes || [])).catch(() => {});
+                        }
+                    }}
                     prefillFromPlane={selectedPlane ? {
                         icao24:       selectedPlane.icao24,
                         callsign:     selectedPlane.callsign || '',
@@ -691,6 +721,7 @@ export default function App() {
                     } : null}
                 />
             )}
+
         </div>
     );
 }

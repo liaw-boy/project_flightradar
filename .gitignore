@@ -56,6 +56,10 @@ openspec/
 pw-screenshots/
 client/pw-screenshots/
 pw-report/
+test-results/
+
+# Documentation & Personal
+*.pdf
 
 # Screenshots dumped anywhere in root
 *.png

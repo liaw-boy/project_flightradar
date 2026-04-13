@@ -91,7 +91,9 @@ export default function PlaneList({ planesDict, bounds, onSelectPlane, selectedI
                                 {p.onGround ? 'GND' : `${Math.round(p.altitude)}m`}
                             </div>
                             <div className="col-spd">
-                                {Math.round(p.velocity * 3.6)}km/h
+                                {(p.velocity == null || (!p.onGround && p.velocity < 0.5))
+                                    ? '---'
+                                    : `${Math.round(p.velocity * 3.6)}km/h`}
                             </div>
                         </div>
                     ))}

@@ -128,23 +128,30 @@ export const AIRLINE_LOGOS = ICAO_TO_IATA;
 // ==========================================
 // 國家旗幟 Emoji
 // ==========================================
-const COUNTRY_FLAGS = {
-    'Taiwan': '🇹🇼', 'Japan': '🇯🇵', 'South Korea': '🇰🇷', 'Republic of Korea': '🇰🇷',
-    'China': '🇨🇳', 'Hong Kong': '🇭🇰', 'Macau': '🇲🇴',
-    'Singapore': '🇸🇬', 'Thailand': '🇹🇭', 'Malaysia': '🇲🇾', 'Philippines': '🇵🇭',
-    'Indonesia': '🇮🇩', 'Vietnam': '🇻🇳', 'Cambodia': '🇰🇭', 'Myanmar': '🇲🇲',
-    'India': '🇮🇳', 'Pakistan': '🇵🇰', 'Bangladesh': '🇧🇩', 'Sri Lanka': '🇱🇰',
-    'United States': '🇺🇸', 'Canada': '🇨🇦', 'Mexico': '🇲🇽', 'Brazil': '🇧🇷',
-    'Argentina': '🇦🇷', 'Chile': '🇨🇱', 'Colombia': '🇨🇴',
-    'United Kingdom': '🇬🇧', 'France': '🇫🇷', 'Germany': '🇩🇪', 'Italy': '🇮🇹',
-    'Spain': '🇪🇸', 'Netherlands': '🇳🇱', 'Switzerland': '🇨🇭', 'Austria': '🇦🇹',
-    'Sweden': '🇸🇪', 'Norway': '🇳🇴', 'Denmark': '🇩🇰', 'Finland': '🇫🇮',
-    'Poland': '🇵🇱', 'Portugal': '🇵🇹', 'Ireland': '🇮🇪', 'Belgium': '🇧🇪',
-    'Greece': '🇬🇷', 'Czechia': '🇨🇿', 'Turkey': '🇹🇷', 'Turkiye': '🇹🇷',
-    'Russia': '🇷🇺', 'Ukraine': '🇺🇦', 'Israel': '🇮🇱',
-    'United Arab Emirates': '🇦🇪', 'Saudi Arabia': '🇸🇦', 'Qatar': '🇶🇦',
-    'Australia': '🇦🇺', 'New Zealand': '🇳🇿',
-    'South Africa': '🇿🇦', 'Egypt': '🇪🇬', 'Ethiopia': '🇪🇹', 'Kenya': '🇰🇪',
+const COUNTRY_ISO = {
+    'Taiwan': 'tw', 'Japan': 'jp', 'South Korea': 'kr', 'Republic of Korea': 'kr',
+    'China': 'cn', 'Hong Kong': 'hk', 'Macau': 'mo',
+    'Singapore': 'sg', 'Thailand': 'th', 'Malaysia': 'my', 'Philippines': 'ph',
+    'Indonesia': 'id', 'Vietnam': 'vn', 'Cambodia': 'kh', 'Myanmar': 'mm',
+    'India': 'in', 'Pakistan': 'pk', 'Bangladesh': 'bd', 'Sri Lanka': 'lk',
+    'United States': 'us', 'Canada': 'ca', 'Mexico': 'mx', 'Brazil': 'br',
+    'Argentina': 'ar', 'Chile': 'cl', 'Colombia': 'co',
+    'United Kingdom': 'gb', 'France': 'fr', 'Germany': 'de', 'Italy': 'it',
+    'Spain': 'es', 'Netherlands': 'nl', 'Switzerland': 'ch', 'Austria': 'at',
+    'Sweden': 'se', 'Norway': 'no', 'Denmark': 'dk', 'Finland': 'fi',
+    'Poland': 'pl', 'Portugal': 'pt', 'Ireland': 'ie', 'Belgium': 'be',
+    'Greece': 'gr', 'Czechia': 'cz', 'Turkey': 'tr', 'Turkiye': 'tr',
+    'Russia': 'ru', 'Ukraine': 'ua', 'Israel': 'il',
+    'United Arab Emirates': 'ae', 'Saudi Arabia': 'sa', 'Qatar': 'qa',
+    'Australia': 'au', 'New Zealand': 'nz',
+    'South Africa': 'za', 'Egypt': 'eg', 'Ethiopia': 'et', 'Kenya': 'ke',
+    'Morocco': 'ma', 'Nigeria': 'ng', 'Ghana': 'gh',
+    'Jordan': 'jo', 'Kuwait': 'kw', 'Bahrain': 'bh', 'Oman': 'om',
+    'Hungary': 'hu', 'Romania': 'ro', 'Bulgaria': 'bg', 'Croatia': 'hr',
+    'Slovakia': 'sk', 'Slovenia': 'si', 'Serbia': 'rs',
+    'Kazakhstan': 'kz', 'Uzbekistan': 'uz',
+    'Nepal': 'np', 'Maldives': 'mv',
+    'Peru': 'pe', 'Ecuador': 'ec', 'Bolivia': 'bo',
 };
 
 /**
@@ -171,9 +178,9 @@ export function getCategoryName(cat) {
 /**
  * 取得國旗 Emoji
  */
-export function getCountryFlag(country) {
-    if (!country) return '';
-    return COUNTRY_FLAGS[country] || '';
+export function getCountryIso(country) {
+    if (!country) return null;
+    return COUNTRY_ISO[country] || null;
 }
 
 /**

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { X, AlertTriangle, Plane as PlaneIcon, Map, Fingerprint, Activity, MapPin, ChevronLeft, ChevronRight, Share2, Check } from 'lucide-react';
 import {
-    getAirlineLogoUrl, getAirlineName, getCountryFlag, getCategoryName,
+    getAirlineLogoUrl, getAirlineName, getCountryIso, getCategoryName,
     getNearestAirport, formatVerticalRate, getAirportDisplayData,
     formatLocalTime
 } from '../utils/flightUtils';
@@ -131,7 +131,7 @@ function ShareButton({ icao24 }) {
                 transition: 'color 0.2s', borderRadius: '6px',
             }}
         >
-            {copied ? <Check size={18} /> : <Share2 size={18} />}
+            {copied ? <Check size={20} /> : <Share2 size={20} />}
         </button>
     );
 }
@@ -167,7 +167,7 @@ export default function Sidebar({
         setIsLoadingDetails(true);
         setFusionData(null);
         
-        const callsignParam = plane.callsign ? plane.callsign.trim() : 'UNKNOWN';
+        const callsignParam = (plane.callsign && plane.callsign.trim() && plane.callsign !== plane.icao24?.toUpperCase()) ? plane.callsign.trim() : 'N/A';
         fetch(`/api/flight/complete-details/${icao24}/${callsignParam}`)
             .then(res => res.json())
             .then(data => {
@@ -307,7 +307,7 @@ export default function Sidebar({
                 <div className="sb-header-main" style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
 
                     <h2 className="sb-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {fusionData?.route?.flightNumber || plane.callsign || 'UNKNOWN'}
+                        {fusionData?.route?.flightNumber || plane.callsign || plane.icao24?.toUpperCase() || '---'}
                         {typecode && <span className="sb-badge" style={{ marginLeft: '8px' }}>{typecode}</span>}
                     </h2>
                     <div className="sb-subtitle" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -318,7 +318,7 @@ export default function Sidebar({
                 </div>
                 <div className="sb-header-actions">
                     <ShareButton icao24={icao24} />
-                    <div className="sb-close" onClick={onClose}><X size={24} /></div>
+                    <div className="sb-close" onClick={onClose}><X size={20} /></div>
                 </div>
             </div>
 
@@ -424,10 +424,14 @@ export default function Sidebar({
                     <div className="bp-row">
                         {/* Origin */}
                         <div className="bp-endpoint bp-origin">
-                            {depInfo?.country && (
-                                <span className="bp-flag">{getCountryFlag(depInfo.country)}</span>
-                            )}
-                            <div className="bp-iata">{displayDepCode}</div>
+                            <span className="bp-flag" style={{ visibility: depInfo?.country ? 'visible' : 'hidden' }}>
+                                {getCountryIso(depInfo?.country)
+                                    ? <span className={`fi fi-${getCountryIso(depInfo.country)}`} />
+                                    : null}
+                            </span>
+                            <div className={`bp-iata${(!displayDepCode || displayDepCode === 'N/A') ? ' bp-iata-na' : ''}`}>
+                                {(!displayDepCode || displayDepCode === 'N/A') ? 'N/A' : displayDepCode}
+                            </div>
                             <div className="bp-sched">
                                 <span className="bp-sched-label">SCHED OUT</span>
                                 {routeInfo.departure_time
@@ -439,12 +443,10 @@ export default function Sidebar({
                                       </span>
                                 }
                             </div>
-                            {(routeInfo.departure_terminal || routeInfo.departure_gate) && (
-                                <div className="bp-gate">
-                                    {routeInfo.departure_terminal && <span>T{routeInfo.departure_terminal}</span>}
-                                    {routeInfo.departure_gate && <span> · {routeInfo.departure_gate}</span>}
-                                </div>
-                            )}
+                            <div className="bp-gate" style={{ visibility: (routeInfo.departure_terminal || routeInfo.departure_gate) ? 'visible' : 'hidden' }}>
+                                {routeInfo.departure_terminal && <span>T{routeInfo.departure_terminal}</span>}
+                                {routeInfo.departure_gate && <span> · {routeInfo.departure_gate}</span>}
+                            </div>
                         </div>
 
                         {/* Arc + Plane */}
@@ -457,10 +459,14 @@ export default function Sidebar({
 
                         {/* Destination */}
                         <div className="bp-endpoint bp-dest">
-                            {arrInfo?.country && (
-                                <span className="bp-flag">{getCountryFlag(arrInfo.country)}</span>
-                            )}
-                            <div className="bp-iata">{displayArrCode}</div>
+                            <span className="bp-flag" style={{ visibility: arrInfo?.country ? 'visible' : 'hidden' }}>
+                                {getCountryIso(arrInfo?.country)
+                                    ? <span className={`fi fi-${getCountryIso(arrInfo.country)}`} />
+                                    : null}
+                            </span>
+                            <div className={`bp-iata${(!displayArrCode || displayArrCode === '---' || displayArrCode === 'N/A') ? ' bp-iata-na' : ''}`}>
+                                {(!displayArrCode || displayArrCode === '---' || displayArrCode === 'N/A') ? 'N/A' : displayArrCode}
+                            </div>
                             <div className="bp-sched">
                                 <span className="bp-sched-label">SCHED IN</span>
                                 {routeInfo.arrival_time
@@ -468,12 +474,10 @@ export default function Sidebar({
                                     : <span className="bp-sched-time bp-sched-na">N/A</span>
                                 }
                             </div>
-                            {(routeInfo.arrival_terminal || routeInfo.arrival_gate) && (
-                                <div className="bp-gate" style={{ textAlign: 'right' }}>
-                                    {routeInfo.arrival_terminal && <span>T{routeInfo.arrival_terminal}</span>}
-                                    {routeInfo.arrival_gate && <span> · {routeInfo.arrival_gate}</span>}
-                                </div>
-                            )}
+                            <div className="bp-gate" style={{ visibility: (routeInfo.arrival_terminal || routeInfo.arrival_gate) ? 'visible' : 'hidden', textAlign: 'right' }}>
+                                {routeInfo.arrival_terminal && <span>T{routeInfo.arrival_terminal}</span>}
+                                {routeInfo.arrival_gate && <span> · {routeInfo.arrival_gate}</span>}
+                            </div>
                         </div>
                     </div>
 

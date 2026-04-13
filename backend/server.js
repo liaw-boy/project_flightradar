@@ -280,6 +280,38 @@ app.post('/api/auth/register', authCtrl.register);
 app.post('/api/auth/login',    authCtrl.login);
 app.get( '/api/auth/me',       authCtrl.authMiddleware, authCtrl.me);
 
+// ── Admin API ────────────────────────────────────────────────────────────────
+const { authMiddleware: am, adminMiddleware: adm } = authCtrl;
+const db = require('./db/sqlite');
+
+// List all users
+app.get('/api/admin/users', am, adm, (req, res) => {
+    const users = db.prepare(
+        'SELECT id, username, email, is_admin, avatar_color, created_at FROM users ORDER BY id'
+    ).all();
+    res.json({ users });
+});
+
+// Delete a user
+app.delete('/api/admin/users/:id', am, adm, (req, res) => {
+    const targetId = Number(req.params.id);
+    if (targetId === req.user.id) return res.status(400).json({ error: 'cannot delete yourself' });
+    const r = db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+    if (r.changes === 0) return res.status(404).json({ error: 'user not found' });
+    res.json({ ok: true });
+});
+
+// Toggle admin status
+app.put('/api/admin/users/:id/admin', am, adm, (req, res) => {
+    const targetId = Number(req.params.id);
+    if (targetId === req.user.id) return res.status(400).json({ error: 'cannot change your own admin status' });
+    const user = db.prepare('SELECT id, is_admin FROM users WHERE id = ?').get(targetId);
+    if (!user) return res.status(404).json({ error: 'user not found' });
+    const newVal = user.is_admin ? 0 : 1;
+    db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(newVal, targetId);
+    res.json({ ok: true, is_admin: newVal });
+});
+
 // ── OAuth ─────────────────────────────────────────────────────────────────────
 app.use(oauthPassport.initialize());
 app.get('/api/auth/config', configStatus);
@@ -1038,6 +1070,15 @@ a:hover{opacity:.75}
 .mob-nav::-webkit-scrollbar{display:none}
 .mob-nav a{flex-shrink:0;font-size:11px;font-weight:600;color:var(--td);text-decoration:none;padding:5px 12px;border-radius:20px;border:1px solid var(--border);white-space:nowrap;transition:all .2s}
 .mob-nav a:hover,.mob-nav a.active{background:var(--teal);color:#171821;border-color:var(--teal)}
+.mon-table{width:100%;border-collapse:collapse;font-size:12px}
+.mon-table th{text-align:left;padding:8px 12px;color:var(--td);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid var(--border)}
+.mon-table td{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle}
+.mon-table tr:last-child td{border-bottom:none}
+.mon-table tr:hover td{background:rgba(255,255,255,.03)}
+.mon-btn{font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;border:1px solid rgba(169,223,216,.3);background:rgba(169,223,216,.08);color:var(--teal);cursor:pointer;transition:all .15s;margin-right:4px}
+.mon-btn:hover{background:rgba(169,223,216,.18)}
+.mon-btn-danger{border-color:rgba(248,113,113,.3);background:rgba(248,113,113,.08);color:#f87171}
+.mon-btn-danger:hover{background:rgba(248,113,113,.2)}
 </style>
 </head>
 <body>
@@ -1082,6 +1123,11 @@ a:hover{opacity:.75}
       <a class="sb-nav-item" href="#api" onclick="setActive(this)">
         <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span> API Analytics
       </a>
+      <div class="sb-divider"></div>
+      <div class="sb-section-lbl">Admin</div>
+      <a class="sb-nav-item" href="#users" onclick="setActive(this);loadUsers()">
+        <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> Users
+      </a>
     </nav>
     <div class="sb-footer">AEROSTRAT Hybrid Dynamics</div>
   </aside>
@@ -1113,6 +1159,7 @@ a:hover{opacity:.75}
       <a href="#sync">Sync</a>
       <a href="#sessions">Sessions</a>
       <a href="#api">API</a>
+      <a href="#users" onclick="loadUsers()">Users</a>
     </nav>
 
     <!-- Scroll area -->
@@ -1240,6 +1287,17 @@ a:hover{opacity:.75}
             <span class="card-badge" id="api-badge">—</span>
           </div>
           <div class="card-body" id="api-body"></div>
+        </div>
+
+        <!-- Users Management -->
+        <div id="users" class="card">
+          <div class="card-hd">
+            <span class="card-title">User Management</span>
+            <button class="mon-btn" onclick="loadUsers()" style="margin-left:auto">Refresh</button>
+          </div>
+          <div class="card-body">
+            <div id="users-table-wrap"><div style="color:var(--td);font-size:13px">Click the section to load users.</div></div>
+          </div>
         </div>
       </div>
 
@@ -1483,6 +1541,51 @@ document.addEventListener('DOMContentLoaded', () => {
 
 refresh();
 setInterval(refresh, 5000);
+
+// ── Users admin ──────────────────────────────────────────────────
+async function loadUsers() {
+  const wrap = document.getElementById('users-table-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="color:var(--td);font-size:13px;padding:20px">Loading...</div>';
+  try {
+    const r = await fetch('/monitor/api/users');
+    if (!r.ok) throw new Error(await r.text());
+    const { users } = await r.json();
+    if (!users.length) { wrap.innerHTML = '<div style="color:var(--td);padding:20px">No users found.</div>'; return; }
+    const rows = users.map(u => \`
+      <tr id="urow-\${u.id}">
+        <td style="color:var(--td)">\${u.id}</td>
+        <td style="font-weight:600;color:var(--t)">\${u.username}</td>
+        <td style="color:var(--td)">\${u.email || '—'}</td>
+        <td>\${u.is_admin ? '<span style="color:#a9dfd8;font-weight:700">Admin</span>' : '<span style="color:var(--td)">User</span>'}</td>
+        <td style="color:var(--td);font-size:11px">\${new Date(u.created_at*1000).toLocaleDateString()}</td>
+        <td>
+          \${u.is_admin ? '' : \`<button class="mon-btn" onclick="toggleAdmin(\${u.id})">Make Admin</button>\`}
+          <button class="mon-btn mon-btn-danger" onclick="deleteUser(\${u.id}, '\${u.username}')">Delete</button>
+        </td>
+      </tr>\`).join('');
+    wrap.innerHTML = \`<table class="mon-table"><thead><tr>
+      <th>ID</th><th>Username</th><th>Email</th><th>Role</th><th>Joined</th><th>Actions</th>
+    </tr></thead><tbody>\${rows}</tbody></table>\`;
+  } catch(e) {
+    wrap.innerHTML = \`<div style="color:#f87171;padding:20px">Error: \${e.message}</div>\`;
+  }
+}
+
+async function deleteUser(id, name) {
+  if (!confirm(\`Delete user "\${name}"? This cannot be undone.\`)) return;
+  const r = await fetch(\`/monitor/api/users/\${id}\`, { method: 'DELETE' });
+  const j = await r.json();
+  if (j.ok) { document.getElementById(\`urow-\${id}\`)?.remove(); }
+  else alert('Error: ' + (j.error || 'unknown'));
+}
+
+async function toggleAdmin(id) {
+  const r = await fetch(\`/monitor/api/users/\${id}/admin\`, { method: 'PUT' });
+  const j = await r.json();
+  if (j.ok) loadUsers();
+  else alert('Error: ' + (j.error || 'unknown'));
+}
 </script>
 </body>
 </html>`;
@@ -1512,6 +1615,20 @@ function isMonitorAuthed(req) {
 function requireMonitorAuth(req, res, next) {
     if (!isMonitorAuthed(req)) return res.status(401).json({ error: 'Unauthorized' });
     next();
+}
+
+// Accepts EITHER monitor session OR JWT admin token
+function requireAdminAccess(req, res, next) {
+    if (isMonitorAuthed(req)) return next();
+    const header = req.headers.authorization || '';
+    const token  = header.startsWith('Bearer ') ? header.slice(7) : null;
+    if (token) {
+        try {
+            const payload = require('jsonwebtoken').verify(token, process.env.JWT_SECRET || 'aerostrat-secret-change-in-prod');
+            if (payload.is_admin) return next();
+        } catch {}
+    }
+    return res.status(401).json({ error: 'Unauthorized' });
 }
 
 function getLoginHtml(error) {
@@ -1582,7 +1699,31 @@ app.get('/monitor/logout', (req, res) => {
     res.redirect('/monitor');
 });
 
-app.get('/api/health', requireMonitorAuth, (req, res) => {
+// ── Monitor User Management API (monitor session auth) ────────────
+app.get('/monitor/api/users', requireMonitorAuth, (req, res) => {
+    const users = db.prepare(
+        'SELECT id, username, email, is_admin, avatar_color, created_at FROM users ORDER BY id'
+    ).all();
+    res.json({ users });
+});
+
+app.delete('/monitor/api/users/:id', requireMonitorAuth, (req, res) => {
+    const id = Number(req.params.id);
+    const r = db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    if (r.changes === 0) return res.status(404).json({ error: 'user not found' });
+    res.json({ ok: true });
+});
+
+app.put('/monitor/api/users/:id/admin', requireMonitorAuth, (req, res) => {
+    const id = Number(req.params.id);
+    const user = db.prepare('SELECT id, is_admin FROM users WHERE id = ?').get(id);
+    if (!user) return res.status(404).json({ error: 'user not found' });
+    const newVal = user.is_admin ? 0 : 1;
+    db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(newVal, id);
+    res.json({ ok: true, is_admin: newVal });
+});
+
+app.get('/api/health', requireAdminAccess, (req, res) => {
     const dbPath = path.join(__dirname, 'data', 'aerostrat.db');
     let dbSize = 0;
     try { if (fs.existsSync(dbPath)) dbSize = fs.statSync(dbPath).size; } catch(_) {}
@@ -1634,7 +1775,7 @@ app.get('/api/health', requireMonitorAuth, (req, res) => {
 });
 
 
-app.get('/api/ingestion/status', requireMonitorAuth, async (req, res) => {
+app.get('/api/ingestion/status', requireAdminAccess, async (req, res) => {
     let trackPointCount = null;
     let sessionCount = null;
     try {
@@ -1668,7 +1809,7 @@ var apiStats = {
     get accounts() { return accountPool.getStats(); },
 };
 
-app.get('/api/stats', requireMonitorAuth, function (req, res) {
+app.get('/api/stats', requireAdminAccess, function (req, res) {
     res.json({
         totalCalls: apiStats.totalCalls,
         stateCalls: apiStats.stateCalls,
@@ -1847,7 +1988,10 @@ async function fetchOpenSky(params = {}) {
  * All three return the same ADSBexchange v2 compatible format with `ac[]` array.
  * Extra fields (desc, ownOp, year, nav_modes) are passed through for DB write-back.
  */
-function normalizeAcRecord(p) {
+// sourceNowMs: the API response's own `now` field (ms). Used to compute the true
+// position timestamp regardless of server-clock drift between sources.
+function normalizeAcRecord(p, sourceNowMs) {
+    const nowSec = (sourceNowMs != null ? sourceNowMs : Date.now()) / 1000;
     return {
         icao24:      p.hex?.toLowerCase(),
         callsign:    (p.flight || '').trim(),
@@ -1867,6 +2011,9 @@ function normalizeAcRecord(p) {
         navModes:    p.nav_modes || null,
         category:    p.category || null,
         isMil:       !!(p.mil || p.dbFlags === 1),
+        // posTime: actual position measurement time (seconds). Derived from the
+        // source's own clock to avoid server-clock vs feeder-clock drift issues.
+        posTime:     p.seen_pos != null ? (nowSec - p.seen_pos) : null,
     };
 }
 
@@ -2083,7 +2230,18 @@ async function ingestTrackPoints(states, timeUnix) {
         //   - velocity changed > 5 m/s (~10 kts)
         //   - time since last stored > 60 seconds (heartbeat guarantee)
         const lsp = lastStoredPoint.get(icao24);
+
+        // posTime: actual position measurement time (seconds), computed from the
+        // source API's own clock (sourceNow - seen_pos). Falls back to server
+        // ingest time if the source didn't provide posTime.
+        const posTime = (p.posTime != null) ? p.posTime : timeUnix;
+
         if (lsp) {
+            // [Staleness guard] Skip if this position is more than 10s older than the
+            // last point we already stored. Prevents feeder/lol interleaving from writing
+            // backwards-in-time positions that create zigzag artifacts on the trail.
+            if (lsp.posTs != null && posTime < lsp.posTs - 10) continue;
+
             // Use L1-norm distance threshold (~55m) instead of exact equality.
             // ADS-B parked aircraft have sub-50m transponder jitter that would
             // pass an exact-equality check and trigger unnecessary writes every 15s.
@@ -2101,7 +2259,8 @@ async function ingestTrackPoints(states, timeUnix) {
             altitude: p.altitude || 0,
             heading: p.heading || 0,
             velocity: p.velocity || 0,
-            ts: timeUnix
+            ts: timeUnix,
+            posTs: posTime,  // actual measurement time for future staleness checks
         });
 
         // Build track point with ALL available telemetry fields
@@ -2214,7 +2373,7 @@ async function fetchGlobalBaseline() {
         let lolStates  = [];
 
         if (snapR.status === 'fulfilled') {
-            snapStates = (snapR.value.ac || []).map(p => normalizeAcRecord(p))
+            snapStates = (snapR.value.ac || []).map(p => normalizeAcRecord(p, snapR.value.now))
                 .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
             cbReset('adsb.fi-snap', snapStates.length, Math.round(performance.now() - t0));
         } else {
@@ -2226,7 +2385,7 @@ async function fetchGlobalBaseline() {
         }
 
         if (lolR.status === 'fulfilled') {
-            lolStates = (lolR.value.ac || []).map(p => normalizeAcRecord(p))
+            lolStates = (lolR.value.ac || []).map(p => normalizeAcRecord(p, lolR.value.now))
                 .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
             cbReset('adsb.lol', lolStates.length, Math.round(performance.now() - t0));
         } else {
@@ -2317,7 +2476,7 @@ async function fetchViewportOverlay() {
         let vpSources = [];
 
         if (alR.status === 'fulfilled') {
-            const states = (alR.value.ac || []).map(p => normalizeAcRecord(p))
+            const states = (alR.value.ac || []).map(p => normalizeAcRecord(p, alR.value.now))
                 .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
             vpStates = vpStates.concat(states);
             vpSources.push('al-point');
@@ -2329,7 +2488,7 @@ async function fetchViewportOverlay() {
 
         if (reR.status === 'fulfilled') {
             // re-api uses "aircraft" key (readsb native)
-            const states = (reR.value.aircraft || []).map(p => normalizeAcRecord(p))
+            const states = (reR.value.aircraft || []).map(p => normalizeAcRecord(p, reR.value.now))
                 .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
             vpStates = vpStates.concat(states);
             vpSources.push('re-api');
@@ -2348,7 +2507,7 @@ async function fetchViewportOverlay() {
                 );
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 const data = await r.json();
-                vpStates = (data.ac || []).map(p => normalizeAcRecord(p))
+                vpStates = (data.ac || []).map(p => normalizeAcRecord(p, data.now))
                     .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
                 vpSources.push('adsb.fi-v3');
                 cbReset('adsb.fi-v3', vpStates.length, Math.round(performance.now() - t0));

@@ -9,6 +9,7 @@
         "preview": "vite preview"
     },
     "dependencies": {
+        "flag-icons": "^7.5.0",
         "leaflet": "^1.9.4",
         "lucide-react": "^0.577.0",
         "msgpack-lite": "^0.1.26",

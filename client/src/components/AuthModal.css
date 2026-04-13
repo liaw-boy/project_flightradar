@@ -1,0 +1,786 @@
+/* ══════════════════════════════════════════════════════
+   AEROSTRAT  —  Split + Boarding Pass Login
+   ══════════════════════════════════════════════════════ */
+
+/* Overlay — full screen */
+.auth-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    display: flex;
+    align-items: stretch;
+    background: #040814;
+}
+
+/* ── Modal — full screen container ── */
+.auth-modal {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    overflow: hidden;
+    animation: authIn 0.38s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes authIn {
+    from { opacity: 0; transform: scale(0.96) translateY(16px); }
+    to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+
+/* ════════════════════════════════
+   LEFT PANEL — fills full screen
+   ════════════════════════════════ */
+.auth-left {
+    flex: 1;
+    flex-shrink: 0;
+    background: #080f22;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Subtle grid */
+.auth-left::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(196,162,96,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(196,162,96,0.04) 1px, transparent 1px);
+    background-size: 32px 32px;
+    pointer-events: none;
+}
+
+/* Horizon glow */
+.auth-left::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 45%;
+    background: linear-gradient(to top, rgba(196,162,96,0.06) 0%, transparent 100%);
+    pointer-events: none;
+}
+
+/* ── Runway SVG — runway-x:85% runway-y:49% scale:1.0 opacity:0.4 ── */
+.auth-runway {
+    position: absolute;
+    left: 85%;
+    top: 49%;
+    transform: translate(-50%, -50%) scale(1.0) rotate(0deg);
+    transform-origin: center center;
+    pointer-events: none;
+    opacity: 0.4;
+    overflow: visible;
+    z-index: 1;
+}
+
+/* ── Scene group: plane + rings — scale together as one unit ── */
+/* scene-x: 9%, scene-y: 50%                                    */
+/* scale(3.0) applied here so plane AND rings resize together    */
+.auth-scene {
+    position: absolute;
+    left: 9%;
+    top: 50%;
+    transform: scale(3.0);
+    transform-origin: 0 0;   /* scale from the anchor point */
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* Radar rings — ring-max: 430px */
+.auth-rings {
+    position: absolute;
+    top: 0; left: 0;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+.auth-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid rgba(196, 162, 96, 0.12);
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* Cross-hair lines through scene origin */
+.auth-crosshair {
+    position: absolute;
+    top: 0; left: 0;
+    width: 0; height: 0;
+    pointer-events: none;
+}
+
+.auth-ch-h {
+    position: absolute;
+    top: 0; left: -600px; right: -600px;
+    height: 1px;
+    background: linear-gradient(to right, transparent, rgba(196,162,96,0.1), transparent);
+}
+
+.auth-ch-v {
+    position: absolute;
+    left: 0; top: -400px; bottom: -400px;
+    width: 1px;
+    background: linear-gradient(to bottom, transparent, rgba(196,162,96,0.1), transparent);
+}
+
+/* A380 SVG — base 265px (× scene scale 1.4 = 371px visual) */
+.auth-plane-svg {
+    position: absolute;
+    top: 0; left: 0;
+    width: 265px;
+    height: auto;
+    transform: translate(-50%, -50%) rotate(90deg);
+    overflow: visible;
+    z-index: 2;
+    filter:
+        drop-shadow(0 0 20px rgba(196, 162, 96, 0.5))
+        drop-shadow(0 0 6px rgba(255, 255, 255, 0.25));
+}
+
+.plane-body {
+    fill: none;
+    stroke: rgba(220, 235, 255, 0.85);
+    stroke-width: 0.35px;
+}
+
+.plane-accent {
+    fill: none;
+    stroke: rgba(196, 162, 96, 0.5);
+    stroke-width: 0.22px;
+}
+
+/* Bottom label */
+.auth-left-footer {
+    position: absolute;
+    bottom: 16px;
+    left: 0; right: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.auth-left-tag {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: rgba(196,162,96,0.6);
+    text-transform: uppercase;
+}
+.auth-left-tag:first-child {
+    font-size: 13px;
+    color: rgba(196,162,96,0.75);
+    letter-spacing: 4px;
+}
+
+/* ════════════════════════════════
+   RIGHT PANEL — Boarding Pass
+   ════════════════════════════════ */
+
+/* punch-holes on boarding pass card edges */
+.auth-right::before,
+.auth-right::after {
+    content: '';
+    position: absolute;
+    width: 18px; height: 18px;
+    background: #080f22;
+    border-radius: 50%;
+    z-index: 5;
+}
+
+.auth-right::before { left: -9px;  top: 22%; }
+.auth-right::after  { right: -9px; top: 22%; }
+
+/* Airline header */
+.auth-bp-header {
+    background: #1a2744;
+    padding: 11px 20px 10px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+}
+
+.auth-bp-header::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(255,255,255,0.02) 10px, rgba(255,255,255,0.02) 20px);
+}
+
+.auth-bp-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+    z-index: 1;
+    flex: 1;
+}
+
+.auth-bp-icon {
+    width: 34px; height: 34px;
+    background: linear-gradient(135deg, #c4a260, #e8c878);
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+.auth-bp-name {
+    color: #fff;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 2.5px;
+}
+
+.auth-bp-sub {
+    color: rgba(196,162,96,0.65);
+    font-size: 8px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-top: 1px;
+}
+
+.auth-bp-right {
+    position: relative;
+    z-index: 1;
+    text-align: right;
+    margin-right: 12px;
+    flex-shrink: 0;
+}
+
+.auth-bp-class-label {
+    color: rgba(255,255,255,0.38);
+    font-size: 7px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+}
+
+.auth-bp-class-val {
+    color: #c4a260;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.auth-close {
+    position: relative;
+    z-index: 1;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.35);
+    width: 26px; height: 26px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.auth-close:hover {
+    background: rgba(239,68,68,0.18);
+    border-color: rgba(239,68,68,0.4);
+    color: #f87171;
+}
+
+/* Route section */
+.auth-bp-route {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px 0;
+    flex-shrink: 0;
+}
+
+.auth-bp-code {
+    font-size: 28px;
+    font-weight: 900;
+    letter-spacing: -1px;
+    color: #1a2744;
+    line-height: 1;
+}
+
+.auth-bp-city {
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #8896aa;
+    margin-top: 2px;
+}
+
+.auth-bp-mid {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 0 10px;
+}
+
+.auth-bp-line {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 3px;
+}
+
+.auth-bp-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    border: 1.5px solid #1a2744;
+    flex-shrink: 0;
+}
+
+.auth-bp-dash {
+    flex: 1;
+    height: 1.5px;
+    background: repeating-linear-gradient(to right, #1a2744 0, #1a2744 3px, transparent 3px, transparent 7px);
+}
+
+.auth-bp-plane {
+    font-size: 13px;
+    flex-shrink: 0;
+    transform: rotate(90deg);
+}
+
+.auth-bp-fltnum {
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: #8896aa;
+    text-transform: uppercase;
+}
+
+/* Info grid */
+.auth-bp-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    padding: 12px 20px 0;
+    border-top: 1px dashed rgba(26,39,68,0.15);
+    margin-top: 12px;
+    flex-shrink: 0;
+}
+
+.auth-bp-cell { padding-right: 10px; }
+.auth-bp-cl { font-size: 7px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #8896aa; }
+.auth-bp-cv { font-size: 11px; font-weight: 700; color: #1a2744; margin-top: 2px; letter-spacing: 0.3px; }
+
+/* Tabs */
+.auth-tabs {
+    display: flex;
+    margin: 8px 20px 0;
+    background: rgba(26,39,68,0.07);
+    border-radius: 7px;
+    padding: 3px;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.auth-tab {
+    flex: 1;
+    padding: 7px;
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    font-family: var(--font-main);
+    font-size: 12px;
+    font-weight: 600;
+    color: #8896aa;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.auth-tab.active {
+    background: #1a2744;
+    color: #fff;
+    box-shadow: 0 1px 4px rgba(26,39,68,0.28);
+}
+
+.auth-tab:hover:not(.active) {
+    background: rgba(26,39,68,0.08);
+    color: #1a2744;
+}
+
+/* Form */
+.auth-form {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 20px 0;
+    flex: 1;
+}
+
+.auth-fg {
+    margin-bottom: 10px;
+    padding-bottom: 7px;
+    border-bottom: 1px dashed rgba(26,39,68,0.12);
+}
+
+.auth-fl {
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #8896aa;
+    margin-bottom: 5px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.auth-opt {
+    font-size: 6px;
+    background: rgba(26,39,68,0.08);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: #aab0bb;
+}
+
+.auth-fi {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.auth-ficon {
+    position: absolute;
+    left: 10px;
+    color: #8896aa;
+    pointer-events: none;
+}
+
+.auth-fi input {
+    width: 100%;
+    padding: 9px 10px 9px 32px;
+    background: rgba(26,39,68,0.05);
+    border: 1.5px solid rgba(26,39,68,0.12);
+    border-radius: 6px;
+    font-family: var(--font-main);
+    font-size: 13px;
+    font-weight: 500;
+    color: #1a2744;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.auth-fi input::placeholder { color: rgba(136,150,170,0.5); }
+
+.auth-fi input:focus {
+    border-color: #1a2744;
+    background: rgba(26,39,68,0.07);
+    box-shadow: 0 0 0 3px rgba(26,39,68,0.06);
+}
+
+/* Error */
+.auth-error {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #c0392b;
+    font-size: 11px;
+    padding: 7px 10px;
+    background: rgba(192,57,43,0.07);
+    border: 1px solid rgba(192,57,43,0.18);
+    border-radius: 5px;
+    margin-top: 6px;
+}
+
+/* Tear line */
+.auth-tear {
+    position: relative;
+    margin: 6px -20px 0;
+    display: flex;
+    align-items: center;
+}
+
+.auth-tear::before,
+.auth-tear::after {
+    content: '';
+    position: absolute;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+/* outer "punch" matches modal bg — both sides same dark panel */
+.auth-tear::before {
+    left: -8px;
+    background: #080f22;
+}
+.auth-tear::after {
+    right: -8px;
+    background: #080f22;
+}
+
+.auth-tear-line {
+    flex: 1;
+    margin: 0 12px;
+    border-top: 2px dashed rgba(26,39,68,0.4);
+}
+
+/* ── Tear animations ───────────────────────────────────────── */
+
+/*
+ * 撕票物理感：
+ * 1. 無搖晃，直接拉緊一瞬間斷開
+ * 2. 虛線在斷開瞬間閃金色
+ * 3. stub 往下衝出（帶輕微旋轉）
+ * 4. 卡片底部背景同步被 clip 掉
+ */
+
+/* stub：微微拉緊 → 瞬間斷開往下衝（慢版） */
+@keyframes stubRip {
+    0%   { transform: translateY(0)     rotate(0deg);   opacity: 1; }
+    10%  { transform: translateY(-6px)  rotate(0deg);   opacity: 1; } /* 拉緊 */
+    18%  { transform: translateY(-6px)  rotate(0deg);   opacity: 1; } /* 緊繃 hold */
+    /* ── 斷！── */
+    26%  { transform: translateY(14px)  rotate(2deg);   opacity: 1; }
+    55%  { transform: translateY(60px)  rotate(5deg);   opacity: 0.75; }
+    100% { transform: translateY(160px) rotate(9deg);   opacity: 0; }
+}
+
+/* 虛線：在斷開瞬間閃金色 */
+@keyframes tearLineRip {
+    0%   { border-top-color: rgba(26,39,68,0.4); border-top-width: 2px; }
+    16%  { border-top-color: rgba(26,39,68,0.4); border-top-width: 2px; }
+    22%  { border-top-color: rgba(196,162,96,1);  border-top-width: 3px; } /* 撕裂閃光 */
+    30%  { border-top-color: rgba(26,39,68,0.0);  border-top-width: 2px; }
+    100% { border-top-color: rgba(26,39,68,0.0); }
+}
+
+/* 卡片底部：用動態量測的 --tear-clip-h 精確對準缺口，瞬間 clip */
+@keyframes cardClipBottom {
+    0%,  24% { clip-path: inset(0 0 0 0 round 12px); }
+    26%, 100% { clip-path: inset(0 0 var(--tear-clip-h, 90px) 0 round 12px 12px 0 0); }
+}
+
+/* 卡片本體：等 stub 衝走再往上飛出（相對位移，不含外層 translate/scale） */
+@keyframes cardExit {
+    0%,  45% { transform: translateY(0);    opacity: 1; }
+    100%     { transform: translateY(-12%); opacity: 0; }
+}
+
+/* ── 套用 ── */
+.auth-tearing {
+    /* 不再負責 cardExit — 讓 auth-right 自己飛，stub 不受牽連 */
+    pointer-events: none;
+    overflow: visible;      /* stub 往下飛不被容器裁切 */
+    scrollbar-width: none;
+}
+.auth-tearing::-webkit-scrollbar { display: none; }
+
+/* 虛線閃光 */
+.auth-tearing .auth-tear .auth-tear-line {
+    animation: tearLineRip 0.55s ease-out 0s both;
+}
+
+/* stub：從撕裂線下方往下飛 */
+.auth-stub--tear {
+    animation: stubRip 2s cubic-bezier(0.2, 0, 0.5, 1) 0s both;
+    transform-origin: top center;
+    position: relative;
+    z-index: 20;
+}
+
+/* auth-right：clip 底部（移除 stub 區域）＋ 整張往上飛 */
+.auth-tearing .auth-right {
+    --tear-clip-h: 90px; /* JS 動態覆蓋 */
+    overflow: visible;
+    animation:
+        cardClipBottom 3s ease-out 0s both,
+        cardExit       4s cubic-bezier(0.4, 0, 1, 1) 0s both;
+}
+
+/* ── Stub ── 現在是 auth-right 的 sibling，需要自己帶背景和寬度 */
+.auth-stub {
+    width: 367px;          /* 與 auth-right 同寬 */
+    background: #f5f2eb;   /* 登機證同色 */
+    border-radius: 0 0 12px 12px;
+    padding: 8px 20px 10px;
+    flex-shrink: 0;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.45);
+}
+
+.auth-submit {
+    width: 100%;
+    padding: 11px;
+    background: #1a2744;
+    border: none;
+    border-radius: 7px;
+    color: #fff;
+    font-family: var(--font-main);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.22s;
+    box-shadow: 0 2px 8px rgba(26,39,68,0.25);
+}
+
+.auth-submit:hover {
+    background: #243660;
+    box-shadow: 0 4px 16px rgba(26,39,68,0.35);
+    transform: translateY(-1px);
+}
+
+.auth-submit:active { transform: translateY(0); }
+.auth-submit:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+/* Barcode */
+.auth-barcode {
+    display: flex;
+    align-items: flex-end;
+    gap: 1.5px;
+    margin-top: 10px;
+    height: 24px;
+    justify-content: center;
+    opacity: 0.15;
+}
+
+.auth-barcode span {
+    display: block;
+    background: #1a2744;
+    border-radius: 1px;
+    width: 2px;
+    flex-shrink: 0;
+}
+
+/* ── Social login ── */
+.auth-social {
+    padding: 7px 20px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.auth-social-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1.5px solid rgba(26,39,68,0.15);
+    background: #fff;
+    color: #1a2744;
+    font-family: var(--font-main);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.auth-social-btn:hover {
+    border-color: rgba(26,39,68,0.3);
+    background: #f8f9fb;
+    box-shadow: 0 2px 8px rgba(26,39,68,0.1);
+    transform: translateY(-1px);
+}
+
+.auth-social-btn.facebook {
+    background: #1877F2;
+    border-color: #1877F2;
+    color: #fff;
+}
+
+.auth-social-btn.facebook:hover {
+    background: #166FE5;
+    border-color: #166FE5;
+}
+
+.auth-social-btn span { flex: 1; text-align: center; }
+
+/* Divider */
+.auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 2px;
+}
+
+.auth-divider-line {
+    flex: 1;
+    height: 1px;
+    background: rgba(26,39,68,0.12);
+}
+
+.auth-divider span {
+    font-size: 10px;
+    font-weight: 600;
+    color: #aab0bb;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+/* last field no border */
+.auth-fg.last {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+/* ── Right area — wrapper, scrollbar shows here (outside card) ── */
+.auth-right-area {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%) scale(1.40);
+    transform-origin: center center;
+    pointer-events: none;
+    z-index: 10;
+    /* scroll lives here so bar appears outside the cream card */
+    max-height: calc(100dvh / 1.40 - 20px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    border-radius: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(196,162,96,0.35) transparent;
+}
+.auth-right-area::-webkit-scrollbar       { width: 5px; }
+.auth-right-area::-webkit-scrollbar-track { background: transparent; }
+.auth-right-area::-webkit-scrollbar-thumb { background: rgba(196,162,96,0.35); border-radius: 3px; }
+
+/* ── Boarding pass card — card-width: 367px ── */
+.auth-right {
+    width: 367px;
+    background: #f5f2eb;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;         /* no internal scrollbar */
+    position: relative;
+    pointer-events: all;
+    box-shadow:
+        0 2px 0 #d4c9b0,
+        0 24px 60px rgba(0,0,0,0.65);
+}
+
+/* ── Mobile ── */
+@media (max-width: 640px) {
+    .auth-right-area {
+        position: fixed;
+        width: 100%;
+        bottom: 0;
+        top: auto;
+        padding: 0;
+        align-items: flex-end;
+    }
+    .auth-right {
+        max-width: 100%;
+        width: 100%;
+        border-radius: 16px 16px 0 0;
+        max-height: 80dvh;
+    }
+    .auth-right::before, .auth-right::after { display: none; }
+    .auth-plane-svg { width: 160px; }
+}

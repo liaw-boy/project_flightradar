@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import { I18nProvider } from './hooks/useI18n';
 import './index.css';
+import 'flag-icons/css/flag-icons.min.css';
 
 class ErrorBoundary extends React.Component {
     constructor(props) {

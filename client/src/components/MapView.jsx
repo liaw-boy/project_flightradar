@@ -9,6 +9,29 @@ import { enrichPlaneDetails, getEnrichedData } from '../services/staticOsintCach
 import HoverCard from './HoverCard';
 import { logger } from '../utils/logger';
 
+// ── 大圓弧插值（個人路線用）────────────────────────────────────────────────────
+function _greatCirclePoints(lat1, lng1, lat2, lng2, n = 64) {
+    const toRad = d => d * Math.PI / 180;
+    const toDeg = r => r * 180 / Math.PI;
+    const φ1 = toRad(lat1), λ1 = toRad(lng1);
+    const φ2 = toRad(lat2), λ2 = toRad(lng2);
+    const x1 = Math.cos(φ1)*Math.cos(λ1), y1 = Math.cos(φ1)*Math.sin(λ1), z1 = Math.sin(φ1);
+    const x2 = Math.cos(φ2)*Math.cos(λ2), y2 = Math.cos(φ2)*Math.sin(λ2), z2 = Math.sin(φ2);
+    const dot = Math.max(-1, Math.min(1, x1*x2 + y1*y2 + z1*z2));
+    const Ω = Math.acos(dot);
+    if (Ω < 0.001) return [[lat1, lng1], [lat2, lng2]];
+    const sinΩ = Math.sin(Ω);
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        const a = Math.sin((1-t)*Ω) / sinΩ;
+        const b = Math.sin(t*Ω) / sinΩ;
+        const x = a*x1 + b*x2, y = a*y1 + b*y2, z = a*z1 + b*z2;
+        pts.push([toDeg(Math.atan2(z, Math.sqrt(x*x + y*y))), toDeg(Math.atan2(y, x))]);
+    }
+    return pts;
+}
+
 /**
  * Custom Leaflet Canvas Layer for High-Performance Rendering
  */
@@ -199,6 +222,8 @@ export default function MapView({
     translateMetar,
     syncViewport,
     depCoords = null,
+    userRoutes = null,
+    showUserRoutes = false,
 }) {
     const [hoveredPlane, setHoveredPlane] = useState(null);
     const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
@@ -227,6 +252,7 @@ export default function MapView({
     const fpsWindowRef   = useRef(performance.now());
     const fpsRef         = useRef(0);
     const airportLayerRef = useRef(null);
+    const userRoutesLayerRef = useRef(null);
     const airportMarkersLoadedRef = useRef(false);
     const airportMarkersMapRef = useRef(new Map());
     const tileLayerRef = useRef(null);     // [v2.9.0] current tile layer
@@ -565,6 +591,7 @@ export default function MapView({
         }).catch(err => logger.error('INIT', `Failed to load airports: ${err.message}`));
 
         airportLayerRef.current = L.layerGroup();
+        userRoutesLayerRef.current = L.layerGroup().addTo(map);
         updateAirportVisibility(map);
 
         return () => {
@@ -893,6 +920,27 @@ export default function MapView({
             // catastrophic easing explosion (timeSinceUpdate ≈ -1.7 trillion ms).
             const nowDateMs = Date.now();
 
+            // ── Stale resume detection ────────────────────────────────────────
+            // If the animate loop was paused > 2s (admin panel, tab hidden, etc.)
+            // snap all planes to their latest known position and reset interpolation.
+            // This prevents accumulated elapsed time from triggering instant jumps.
+            if (rawDt > 2000) {
+                Object.values(currentPlanes).forEach(plane => {
+                    const snapLat = plane._pendingLat ?? plane._interpToLat ?? plane.lat;
+                    const snapLng = plane._pendingLng ?? plane._interpToLng ?? plane.lng;
+                    plane.renderLat      = snapLat;
+                    plane.renderLng      = snapLng;
+                    plane._interpFromLat = snapLat;
+                    plane._interpFromLng = snapLng;
+                    plane._interpToLat   = snapLat;
+                    plane._interpToLng   = snapLng;
+                    plane._interpStartMs = nowDateMs;
+                    plane._pendingLat    = undefined;
+                    plane._pendingLng    = undefined;
+                    plane._pendingDurMs  = undefined;
+                });
+            }
+
             // [PERF-3 Fix] Single unified loop: Interpolation + Trail Recording + Enrichment
             // Merges two separate Object.keys() iterations into one pass per frame.
             Object.keys(currentPlanes).forEach(id => {
@@ -915,49 +963,52 @@ export default function MapView({
                     prewarmExactSvg(activeTypecode);
                 }
 
-                // === Dead Reckoning Interpolation ===
-                // Plane continuously moves forward based on last known position + velocity + heading.
-                // When new ADS-B data arrives, blend smoothly from old render position to new DR track.
-                // This eliminates backward jumps (we never move backwards) and forward jumps (smooth blend).
-                // Blend duration = observed update interval (5s–90s).
-                // Spreading correction over the full interval makes DR error invisible.
-                const BLEND_MS = plane._blendDuration ?? 10000;
-
-                let drLat      = plane.drLat      ?? plane.lat;
-                let drLng      = plane.drLng      ?? plane.lng;
-                let drTs       = plane.drTs       ?? plane.targetUpdatedAt ?? Date.now();
-                const drVelocity = plane.drVelocity ?? plane.velocity ?? 0;
-                const drHeading  = plane.drHeading  ?? plane.heading  ?? 0;
-
-                // [v11.2] Track-point DR snap removed.
-                // Previously, we snapped the DR origin to the last track_point when it was
-                // "newer" than drTs. This caused the icon to jump backward to the actual
-                // ADS-B position right after clicking a plane (because drTs is set fresh on
-                // each global baseline update, which can be newer than the track_point ts).
-                // The live extension already draws the trail to renderLat/renderLng,
-                // so icon and trail are always visually aligned without this snap.
-
-                if (plane.onGround || drVelocity <= 0) {
-                    // Stationary: snap to DR origin (no reckoning needed)
-                    plane.renderLat = drLat;
-                    plane.renderLng = drLng;
+                // === Snapshot Interpolation v1.0 ===
+                // Phase 1 (t: 0→1): linear interpolation between two known ADS-B positions.
+                //   - No heading field used → no 1° quantization wobble
+                //   - t is monotonically increasing → plane never goes backward
+                //   - Direction derived from coordinate difference → exact, not noisy
+                //
+                // Phase 2 (t > 1): gentle continuation in the A→B direction while waiting
+                //   for the next API update. Uses measured velocity vector from coordinates,
+                //   not the ADS-B heading field.
+                if (plane.onGround) {
+                    // Ground: always snap to latest known position
+                    plane.renderLat = plane._interpToLat ?? plane.lat;
+                    plane.renderLng = plane._interpToLng ?? plane.lng;
                 } else {
-                    // Dead reckoning: where should the plane be right now?
-                    const elapsedSec = Math.max(0, Math.min((nowDateMs - drTs) / 1000, 60));
-                    const drPos = predictPosition(drLat, drLng, drVelocity, drHeading, elapsedSec);
+                    const fromLat = plane._interpFromLat ?? plane.lat;
+                    const fromLng = plane._interpFromLng ?? plane.lng;
+                    const toLat   = plane._interpToLat   ?? plane.lat;
+                    const toLng   = plane._interpToLng   ?? plane.lng;
+                    const startMs = plane._interpStartMs ?? nowDateMs;
+                    const durMs   = plane._interpDurMs   ?? 10000;
+                    const elapsed = nowDateMs - startMs;
 
-                    const dataArrivedAt = plane._dataArrivedAt ?? nowDateMs;
-                    const timeSinceUpdate = nowDateMs - dataArrivedAt;
-                    if (timeSinceUpdate >= 0 && timeSinceUpdate < BLEND_MS && plane._blendFromLat != null) {
-                        // Long-window linear blend: spread DR correction over full interval.
-                        // Linear (not easeInOut) keeps velocity constant — no visible slowing.
-                        const t = Math.max(0, Math.min(1, timeSinceUpdate / BLEND_MS));
-                        plane.renderLat = plane._blendFromLat + (drPos.lat - plane._blendFromLat) * t;
-                        plane.renderLng = plane._blendFromLng + (drPos.lng - plane._blendFromLng) * t;
+                    if (elapsed <= durMs) {
+                        // Lerp between two confirmed positions — no extrapolation
+                        const t = elapsed / durMs;
+                        plane.renderLat = fromLat + (toLat - fromLat) * t;
+                        plane.renderLng = fromLng + (toLng - fromLng) * t;
+                    } else if (plane._pendingLat !== undefined) {
+                        // Current lerp complete and next position queued — swap immediately
+                        plane._interpFromLat = toLat;
+                        plane._interpFromLng = toLng;
+                        plane._interpToLat   = plane._pendingLat;
+                        plane._interpToLng   = plane._pendingLng;
+                        plane._interpStartMs = nowDateMs;
+                        plane._interpDurMs   = plane._pendingDurMs ?? durMs;
+                        plane._pendingLat    = undefined;
+                        plane._pendingLng    = undefined;
+                        plane._pendingDurMs  = undefined;
+                        // Apply first frame of new lerp
+                        const t2 = Math.min((nowDateMs - plane._interpStartMs) / plane._interpDurMs, 1);
+                        plane.renderLat = plane._interpFromLat + (plane._interpToLat - plane._interpFromLat) * t2;
+                        plane.renderLng = plane._interpFromLng + (plane._interpToLng - plane._interpFromLng) * t2;
                     } else {
-                        // After blend window: pure dead reckoning, smooth continuous motion
-                        plane.renderLat = drPos.lat;
-                        plane.renderLng = drPos.lng;
+                        // Waiting for next update — hold at last known position
+                        plane.renderLat = toLat;
+                        plane.renderLng = toLng;
                     }
                 }
             });
@@ -1201,211 +1252,106 @@ export default function MapView({
                         segments.push({ pt, seg, stale, gap, bridge, isLive });
                     }
 
-                    // ── Heading-aware smooth path renderer ──────────────────
-                    // pts: array of { x, y, h } where h = aircraft heading (degrees, geographic)
-                    // Canvas convention: north = -Y, east = +X → dx=sin(h), dy=-cos(h)
+                    // ── [v16.1] Altitude-Colored Trail Renderer ─────────────────────
+                    // Per-segment coloring: color = altitude gradient (tar1090 HSL),
+                    // opacity = time fade toward the past.
                     //
-                    // For 2-point batches (common at altitude-color boundaries during turns):
-                    //   Use heading-based CUBIC Bezier — respects the aircraft's actual
-                    //   direction at each end, producing smooth turn curves instead of
-                    //   straight lines.
-                    // For 3+ point batches: midpoint quadratic Bezier (smooth catmull-rom approx).
-                    // ctxPrev: canvas point just before pts[0] (for Catmull-Rom tangent at start)
-                    // ctxNext: canvas point just after  pts[last] (for Catmull-Rom tangent at end)
-                    // Draw a gray dashed bridge segment (Tangram-style gap bridge).
-                    // Used for ADS-B coverage gaps — connects last known pos to next
-                    // known pos with a visual indicator that no real data exists here.
-                    const drawBridge = (from, to, isBridgeOutline) => {
-                        if (!from || !to) return;
-                        ctx.save();
-                        ctx.lineWidth = isBridgeOutline ? 2.5 : 1.5;
-                        ctx.setLineDash([4, 14]);
-                        ctx.globalAlpha = isBridgeOutline ? 0.12 : 0.45;
-                        ctx.strokeStyle = isBridgeOutline ? 'rgba(0,0,0,1)' : 'rgba(180,180,180,1)';
-                        ctx.lineCap = 'round';
-                        ctx.beginPath();
-                        ctx.moveTo(from.x, from.y);
-                        ctx.lineTo(to.x, to.y);
-                        ctx.stroke();
-                        // Mid-point marker (circle) to visually mark the gap
-                        if (!isBridgeOutline && zoom >= 7) {
-                            const mx = (from.x + to.x) / 2;
-                            const my = (from.y + to.y) / 2;
-                            ctx.setLineDash([]);
-                            ctx.globalAlpha = 0.6;
-                            ctx.fillStyle = 'rgba(180,180,180,0.8)';
-                            ctx.beginPath();
-                            ctx.arc(mx, my, 3, 0, Math.PI * 2);
-                            ctx.fill();
-                        }
-                        ctx.restore();
-                    };
+                    // Rules:
+                    //   gap/antimeridian  → break the path (new sub-path)
+                    //   bridge (>1800s gap) → thin gray dashed connector
+                    //   stale (300–1800s)  → opacity × 0.4
+                    //   opacity           → 25% (oldest) → 100% (newest)
+                    //   color             → getAltitudeColor(seg altitude, scheme)
+                    //   curve             → per-segment midpoint quadratic Bézier
 
-                    const drawSmoothedPath = (pts, isOutline, altColor, isDashed, isLiveSeg, isBridge = false, ctxPrev = null, ctxNext = null) => {
-                        if (pts.length < 2) return;
-                        ctx.globalAlpha = 1.0;
-                        ctx.beginPath();
-                        if (isLiveSeg) {
-                            ctx.setLineDash([5, 7]);
-                            ctx.globalAlpha = isOutline ? 0.15 : 0.5;
-                            if (!isOutline) ctx.strokeStyle = altColor;
-                        } else if (isBridge) {
-                            // Bridge: lighter gray, wider dash gap (handled by drawBridge, skip here)
-                            return;
-                        } else if (isDashed) {
-                            // Stale: gray dashed (not altitude-colored — clearly indicates no ADS-B)
-                            const dashLen = zoom >= 8 ? 8 : 0;
-                            ctx.setLineDash(dashLen > 0 ? [dashLen, 12] : []);
-                            ctx.globalAlpha = isOutline ? 0.2 : 0.65;
-                            if (!isOutline) ctx.strokeStyle = 'rgba(160,160,160,1)';
-                        } else {
-                            ctx.setLineDash([]);
-                            ctx.globalAlpha = isOutline ? 0.5 : 1.0;
-                            if (!isOutline) ctx.strokeStyle = altColor;
-                        }
-                        ctx.moveTo(pts[0].x, pts[0].y);
-                        if (pts.length === 2) {
-                            const h0 = pts[0].h ?? -1;
-                            const h1 = pts[1].h ?? -1;
-                            const hasHeading = h0 >= 0 && h1 >= 0;
+                    {
+                        const LINE_W = zoom >= 12 ? 2 : 1.5;
 
-                            const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-                            // Fixed ratio — no minimum floor.
-                            // A floor causes s >> dist at high zoom (slow takeoff = short pixel
-                            // segments), which makes the Bezier overshoot and creates S-curves.
-                            // Consistent ratio gives zoom-invariant curve shape.
-                            const s = Math.min(dist * 0.45, 180);
-
-                            // Catmull-Rom position-based tangents (always computed).
-                            // Used as fallback and as a smoothing anchor when blending with heading.
-                            const P0 = ctxPrev || pts[0];
-                            const P3 = ctxNext || pts[1];
-                            let t1x = pts[1].x - P0.x, t1y = pts[1].y - P0.y;
-                            let t2x = P3.x - pts[0].x, t2y = P3.y - pts[0].y;
-                            const t1len = Math.hypot(t1x, t1y) || 1;
-                            const t2len = Math.hypot(t2x, t2y) || 1;
-                            // Normalised position tangents
-                            const pt1x = t1x / t1len, pt1y = t1y / t1len;
-                            const pt2x = t2x / t2len, pt2y = t2y / t2len;
-
-                            let fx0, fy0, fx1, fy1; // final control-point directions
-                            if (hasHeading) {
-                                // ── Blend: 50% ADS-B heading + 50% Catmull-Rom position ──
-                                // Pure heading Bezier is accurate but sensitive to ADS-B noise
-                                // (1° jitter causes visible zigzags on tight turns).
-                                // Blending with the GPS-derived position direction smooths that
-                                // noise while preserving the aircraft's true heading curvature.
-                                const h0r = h0 * Math.PI / 180;
-                                const h1r = h1 * Math.PI / 180;
-                                const hx0 =  Math.sin(h0r), hy0 = -Math.cos(h0r);
-                                const hx1 =  Math.sin(h1r), hy1 = -Math.cos(h1r);
-                                const w = 0.5; // heading weight
-                                const bx0 = hx0 * w + pt1x * (1 - w);
-                                const by0 = hy0 * w + pt1y * (1 - w);
-                                const bx1 = hx1 * w + pt2x * (1 - w);
-                                const by1 = hy1 * w + pt2y * (1 - w);
-                                const bl0 = Math.hypot(bx0, by0) || 1;
-                                const bl1 = Math.hypot(bx1, by1) || 1;
-                                fx0 = bx0 / bl0; fy0 = by0 / bl0;
-                                fx1 = bx1 / bl1; fy1 = by1 / bl1;
-                            } else {
-                                // ── Pure Catmull-Rom position fallback ──
-                                fx0 = pt1x; fy0 = pt1y;
-                                fx1 = pt2x; fy1 = pt2y;
-                            }
-
-                            if (dist > 0.5) {
-                                ctx.bezierCurveTo(
-                                    pts[0].x + fx0 * s, pts[0].y + fy0 * s,
-                                    pts[1].x - fx1 * s, pts[1].y - fy1 * s,
-                                    pts[1].x, pts[1].y
-                                );
-                            } else {
-                                ctx.lineTo(pts[1].x, pts[1].y);
-                            }
-                        } else {
-                            // Midpoint quadratic Bezier for 3+ points (outline pass)
-                            for (let k = 1; k < pts.length - 1; k++) {
-                                const midX = (pts[k].x + pts[k + 1].x) / 2;
-                                const midY = (pts[k].y + pts[k + 1].y) / 2;
-                                ctx.quadraticCurveTo(pts[k].x, pts[k].y, midX, midY);
-                            }
-                            ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
-                        }
-                        ctx.stroke();
+                        ctx.lineWidth  = LINE_W;
+                        ctx.lineCap    = 'round';
+                        ctx.lineJoin   = 'round';
                         ctx.setLineDash([]);
-                    };
 
-                    const drawTrack = (isOutline) => {
-                        const baseWidth = zoom >= 12 ? 2.5 : 2;
-                        ctx.lineWidth = isOutline ? baseWidth * 1.5 : baseWidth;
-                        ctx.strokeStyle = isOutline ? 'rgba(0,0,0,0.55)' : '#ffffff';
-
-                        let batch = [];
-                        let batchColor = null;
-                        let batchStale = false;
-                        let batchBridge = false;
-                        let batchIsLive = false;
-                        let prevCtxPt = null;
-
-                        const flushBatch = (nextCtxPt = null) => {
-                            if (batch.length > 1) {
-                                drawSmoothedPath(batch, isOutline, batchColor, batchStale, batchIsLive, batchBridge, prevCtxPt, nextCtxPt);
-                            }
-                            prevCtxPt = batch.length >= 2 ? batch[batch.length - 2] : prevCtxPt;
-                            batch = [];
-                            batchColor = null;
-                            batchStale = false;
-                            batchBridge = false;
-                            batchIsLive = false;
-                        };
-
-                        for (let pi = 0; pi < segments.length; pi++) {
-                            const { pt, seg, stale, gap, bridge, isLive } = segments[pi];
-
-                            if (gap) {
-                                // True break — impossible jump or antimeridian
-                                flushBatch(null);
-                                prevCtxPt = null;
-                                batch = [{ x: pt.x, y: pt.y, h: seg[4] ?? -1 }];
-                                continue;
-                            }
-
-                            if (bridge) {
-                                // Gray dashed bridge (Tangram-style) — long ADS-B coverage gap
-                                flushBatch(null);
-                                if (pi > 0 && !segments[pi - 1].gap) {
-                                    drawBridge(segments[pi - 1].pt, pt, isOutline);
+                        // ── Split into gap-free sub-paths ──
+                        const subPaths = [];
+                        let cur = [];
+                        for (let si = 0; si < segments.length; si++) {
+                            const s = segments[si];
+                            if (s.gap) {
+                                if (cur.length > 1) subPaths.push({ pts: cur, isBridge: false });
+                                cur = [s];
+                            } else if (s.bridge) {
+                                if (cur.length > 1) subPaths.push({ pts: cur, isBridge: false });
+                                if (cur.length > 0) {
+                                    subPaths.push({ pts: [cur[cur.length - 1], s], isBridge: true });
                                 }
-                                prevCtxPt = null;
-                                batch = [{ x: pt.x, y: pt.y, h: seg[4] ?? -1 }];
+                                cur = [s];
+                            } else {
+                                cur.push(s);
+                            }
+                        }
+                        if (cur.length > 1) subPaths.push({ pts: cur, isBridge: false });
+
+                        // ── Draw each sub-path ──
+                        for (const { pts, isBridge } of subPaths) {
+                            const n = pts.length;
+                            if (n < 2) continue;
+
+                            if (isBridge) {
+                                ctx.globalAlpha = 0.3;
+                                ctx.strokeStyle = '#94a3b8';
+                                ctx.setLineDash([4, 10]);
+                                ctx.beginPath();
+                                ctx.moveTo(pts[0].pt.x, pts[0].pt.y);
+                                ctx.lineTo(pts[1].pt.x, pts[1].pt.y);
+                                ctx.stroke();
+                                ctx.setLineDash([]);
                                 continue;
                             }
 
-                            const altColor = isOutline ? null : getAltitudeColor(seg[3], false, false, 'ALTITUDE');
+                            // Per-segment: altitude color + time-based opacity fade
+                            for (let i = 0; i < n - 1; i++) {
+                                const progress  = n > 2 ? i / (n - 2) : 1; // 0=oldest → 1=newest
+                                const baseAlpha = 0.25 + 0.75 * progress;   // 25% → 100%
+                                const isStale   = pts[i].stale;
+                                const alpha     = isStale ? baseAlpha * 0.4 : baseAlpha;
 
-                            if (batchColor !== null && (!isOutline && (altColor !== batchColor || stale !== batchStale || isLive !== batchIsLive))) {
-                                flushBatch({ x: pt.x, y: pt.y });
+                                const alt   = pts[i].seg[3] ?? 0;
+                                const color = getAltitudeColor(alt, alt <= 0, false, colorSchemeRef.current);
+
+                                ctx.globalAlpha = alpha;
+                                ctx.strokeStyle = color;
+
+                                // Midpoint Bézier: start at mid(i-1, i), control at i, end at mid(i, i+1)
+                                // First segment starts at pt[0]; last segment ends at pt[n-1]
+                                ctx.beginPath();
+                                if (i === 0) {
+                                    ctx.moveTo(pts[0].pt.x, pts[0].pt.y);
+                                } else {
+                                    ctx.moveTo(
+                                        (pts[i - 1].pt.x + pts[i].pt.x) / 2,
+                                        (pts[i - 1].pt.y + pts[i].pt.y) / 2
+                                    );
+                                }
+                                if (i === n - 2) {
+                                    ctx.quadraticCurveTo(
+                                        pts[i].pt.x, pts[i].pt.y,
+                                        pts[i + 1].pt.x, pts[i + 1].pt.y
+                                    );
+                                } else {
+                                    ctx.quadraticCurveTo(
+                                        pts[i].pt.x, pts[i].pt.y,
+                                        (pts[i].pt.x + pts[i + 1].pt.x) / 2,
+                                        (pts[i].pt.y + pts[i + 1].pt.y) / 2
+                                    );
+                                }
+                                ctx.stroke();
                             }
-
-                            if (batch.length === 0 && pi > 0 && !segments[pi - 1].gap && !segments[pi - 1].bridge) {
-                                const prevSeg = segments[pi - 1].seg;
-                                const prevPt  = segments[pi - 1].pt;
-                                batch.push({ x: prevPt.x, y: prevPt.y, h: prevSeg?.[4] ?? -1 });
-                            }
-
-                            batch.push({ x: pt.x, y: pt.y, h: seg[4] ?? -1 });
-                            batchColor = altColor;
-                            batchStale = stale;
-                            batchBridge = false;
-                            batchIsLive = isLive;
                         }
-                        flushBatch(null);
-                    };
 
-                    // Two passes for crisp layering
-                    drawTrack(true);  // Black outline pass
-                    drawTrack(false); // Altitude-gradient colored pass
+                        ctx.globalAlpha = 1.0;
+                        ctx.setLineDash([]);
+                    }
 
                     ctx.restore();
                 }
@@ -1809,6 +1755,32 @@ export default function MapView({
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
         };
     }, [mapInstance]); // Starts ONLY when map is ready. Size (1) is stable after first mount.
+
+    // ── 個人路線弧線 overlay ────────────────────────────────────────────────────
+    useEffect(() => {
+        const layer = userRoutesLayerRef.current;
+        if (!layer) return;
+        layer.clearLayers();
+        if (!showUserRoutes || !userRoutes || userRoutes.length === 0) return;
+
+        const GOLD = '#c4a260';
+
+        for (const r of userRoutes) {
+            const pts = _greatCirclePoints(r.dep_lat, r.dep_lng, r.arr_lat, r.arr_lng, 64);
+            L.polyline(pts, {
+                color: GOLD,
+                weight: 1.5,
+                opacity: 0.55,
+                dashArray: '6 4',
+            }).addTo(layer);
+            L.circleMarker([r.dep_lat, r.dep_lng], {
+                radius: 3, color: GOLD, fillColor: GOLD, fillOpacity: 0.85, weight: 1,
+            }).addTo(layer);
+            L.circleMarker([r.arr_lat, r.arr_lng], {
+                radius: 3, color: GOLD, fillColor: GOLD, fillOpacity: 0.85, weight: 1,
+            }).addTo(layer);
+        }
+    }, [userRoutes, showUserRoutes]);
 
     return (
         <div ref={mapContainerRef} className="map-container">

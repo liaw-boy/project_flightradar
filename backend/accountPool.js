@@ -328,9 +328,14 @@ class AccountPool {
             savedAccounts.forEach(s => {
                 const a = this._accounts.find(x => x.user === s.user);
                 if (!a) return;
-                a.remainingCredits = s.remainingCredits ?? null;
+                // If account was never used this session, treat credits as null (healthy/unknown)
+                // to avoid stale below-SAFE_FLOOR values blocking unused accounts
+                const wasUsed = (s.dailyUsed ?? 0) > 0 || (s.rateLimits ?? 0) > 0;
+                a.remainingCredits = wasUsed ? (s.remainingCredits ?? null) : null;
                 a.rateLimitCount   = s.rateLimits       ?? 0;
                 a.lockedUntil      = s.unlockTime ? new Date(s.unlockTime).getTime() : null;
+                a.consecutiveFails = s.consecutiveFails ?? 0;
+                a.dailyUsed        = s.dailyUsed        ?? 0;
             });
 
             logger.info('POOL', `Quota cache loaded for ${this._accounts.length} accounts`);

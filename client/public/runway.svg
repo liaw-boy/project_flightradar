@@ -1,0 +1,211 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 900" width="500" height="900" style="background:transparent;">
+  <defs>
+    <style>
+      /* Filled surfaces */
+      .rwy-fill    { fill: rgba(38,42,50,0.85); stroke: none; }
+      .twy-fill    { fill: rgba(30,34,42,0.75); stroke: none; }
+      .apron-fill  { fill: rgba(28,32,40,0.70); stroke: none; }
+      /* Edges & markings */
+      .rwy-edge    { stroke: rgba(196,162,96,0.60); stroke-width: 1.5; fill: none; }
+      .rwy-mark    { stroke: rgba(255,255,255,0.85); stroke-width: 2;   fill: none; }
+      .rwy-center  { stroke: rgba(255,255,255,0.80); stroke-width: 1.5; fill: none; stroke-dasharray: 30 15; }
+      .rwy-tdz     { stroke: rgba(255,255,255,0.60); stroke-width: 1.4; fill: none; }
+      .rwy-aim     { stroke: rgba(255,255,255,0.70); stroke-width: 1.8; fill: none; }
+      .twy-edge    { stroke: rgba(196,162,96,0.50); stroke-width: 1;   fill: none; }
+      .twy-cl      { stroke: rgba(196,162,96,0.80); stroke-width: 1.2; fill: none; stroke-dasharray: 14 8; }
+      .apron-edge  { stroke: rgba(196,162,96,0.45); stroke-width: 1;   fill: none; stroke-dasharray: 6 4; }
+      .hold        { stroke: rgba(255,220,50,0.75);  stroke-width: 1.8; fill: none; stroke-dasharray: 8 4 2 4; }
+      .rwy-num     { font-family: 'Arial Narrow', Arial, sans-serif; font-size: 20px; font-weight: 700;
+                     fill: rgba(255,255,255,0.80); letter-spacing: 3px; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <!-- ══════════════════════════════════════
+       FILLED SURFACES (bottom layer)
+  ═══════════════════════════════════════ -->
+
+  <!-- Taxiway Alpha fill (west) -->
+  <rect class="twy-fill" x="135" y="60" width="30" height="780"/>
+  <!-- Taxiway Bravo fill (east) -->
+  <rect class="twy-fill" x="335" y="60" width="30" height="780"/>
+  <!-- Top loop fill -->
+  <path class="twy-fill" d="M 135 60 Q 135 15 250 15 Q 365 15 365 60 L 335 60 Q 335 45 250 45 Q 165 45 165 60 Z"/>
+  <!-- Bottom loop fill -->
+  <path class="twy-fill" d="M 135 840 Q 135 885 250 885 Q 365 885 365 840 L 335 840 Q 335 855 250 855 Q 165 855 165 840 Z"/>
+  <!-- Cross connectors fill -->
+  <rect class="twy-fill" x="135" y="168" width="83" height="24"/>
+  <rect class="twy-fill" x="282" y="168" width="83" height="24"/>
+  <rect class="twy-fill" x="135" y="668" width="83" height="24"/>
+  <rect class="twy-fill" x="282" y="668" width="83" height="24"/>
+  <rect class="twy-fill" x="135" y="438" width="83" height="24"/>
+  <rect class="twy-fill" x="282" y="438" width="83" height="24"/>
+
+  <!-- Apron west fill -->
+  <rect class="apron-fill" x="42" y="50" width="100" height="260" rx="5"/>
+  <!-- Apron east fill -->
+  <rect class="apron-fill" x="358" y="590" width="100" height="250" rx="5"/>
+
+  <!-- Main runway fill -->
+  <rect class="rwy-fill" x="218" y="60" width="64" height="780"/>
+
+  <!-- ══════════════════════════════════════
+       RUNWAY 18/36  (vertical, N-S)
+       x-centre: 250, width: 64px (x 218–282)
+       y: 60 → 840
+  ═══════════════════════════════════════ -->
+
+  <!-- Runway edges -->
+  <line class="rwy-edge" x1="218" y1="60"  x2="218" y2="840"/>
+  <line class="rwy-edge" x1="282" y1="60"  x2="282" y2="840"/>
+
+  <!-- Threshold bars -->
+  <line class="rwy-mark" x1="218" y1="60"  x2="282" y2="60"/>
+  <line class="rwy-mark" x1="218" y1="840" x2="282" y2="840"/>
+
+  <!-- RWY 18 — threshold stripes (top) -->
+  <line class="rwy-mark" x1="221" y1="74"  x2="236" y2="74"/>
+  <line class="rwy-mark" x1="221" y1="83"  x2="236" y2="83"/>
+  <line class="rwy-mark" x1="221" y1="92"  x2="236" y2="92"/>
+  <line class="rwy-mark" x1="221" y1="101" x2="236" y2="101"/>
+  <line class="rwy-mark" x1="264" y1="74"  x2="279" y2="74"/>
+  <line class="rwy-mark" x1="264" y1="83"  x2="279" y2="83"/>
+  <line class="rwy-mark" x1="264" y1="92"  x2="279" y2="92"/>
+  <line class="rwy-mark" x1="264" y1="101" x2="279" y2="101"/>
+  <!-- Number 18 -->
+  <text class="rwy-num" x="250" y="124">18</text>
+
+  <!-- RWY 36 — threshold stripes (bottom) -->
+  <line class="rwy-mark" x1="221" y1="826" x2="236" y2="826"/>
+  <line class="rwy-mark" x1="221" y1="817" x2="236" y2="817"/>
+  <line class="rwy-mark" x1="221" y1="808" x2="236" y2="808"/>
+  <line class="rwy-mark" x1="221" y1="799" x2="236" y2="799"/>
+  <line class="rwy-mark" x1="264" y1="826" x2="279" y2="826"/>
+  <line class="rwy-mark" x1="264" y1="817" x2="279" y2="817"/>
+  <line class="rwy-mark" x1="264" y1="808" x2="279" y2="808"/>
+  <line class="rwy-mark" x1="264" y1="799" x2="279" y2="799"/>
+  <!-- Number 36 -->
+  <text class="rwy-num" x="250" y="790">36</text>
+
+  <!-- Centreline -->
+  <line class="rwy-center" x1="250" y1="120" x2="250" y2="780"/>
+
+  <!-- Aiming point top -->
+  <line class="rwy-aim" x1="224" y1="178" x2="224" y2="234"/>
+  <line class="rwy-aim" x1="230" y1="178" x2="230" y2="234"/>
+  <line class="rwy-aim" x1="270" y1="178" x2="270" y2="234"/>
+  <line class="rwy-aim" x1="276" y1="178" x2="276" y2="234"/>
+
+  <!-- Aiming point bottom -->
+  <line class="rwy-aim" x1="224" y1="666" x2="224" y2="722"/>
+  <line class="rwy-aim" x1="230" y1="666" x2="230" y2="722"/>
+  <line class="rwy-aim" x1="270" y1="666" x2="270" y2="722"/>
+  <line class="rwy-aim" x1="276" y1="666" x2="276" y2="722"/>
+
+  <!-- TDZ top (3 pairs) -->
+  <line class="rwy-tdz" x1="223" y1="140" x2="223" y2="158"/>
+  <line class="rwy-tdz" x1="229" y1="140" x2="229" y2="158"/>
+  <line class="rwy-tdz" x1="271" y1="140" x2="271" y2="158"/>
+  <line class="rwy-tdz" x1="277" y1="140" x2="277" y2="158"/>
+
+  <line class="rwy-tdz" x1="223" y1="248" x2="223" y2="266"/>
+  <line class="rwy-tdz" x1="229" y1="248" x2="229" y2="266"/>
+  <line class="rwy-tdz" x1="271" y1="248" x2="271" y2="266"/>
+  <line class="rwy-tdz" x1="277" y1="248" x2="277" y2="266"/>
+
+  <line class="rwy-tdz" x1="223" y1="286" x2="223" y2="304"/>
+  <line class="rwy-tdz" x1="229" y1="286" x2="229" y2="304"/>
+  <line class="rwy-tdz" x1="271" y1="286" x2="271" y2="304"/>
+  <line class="rwy-tdz" x1="277" y1="286" x2="277" y2="304"/>
+
+  <!-- TDZ bottom (3 pairs) -->
+  <line class="rwy-tdz" x1="223" y1="742" x2="223" y2="760"/>
+  <line class="rwy-tdz" x1="229" y1="742" x2="229" y2="760"/>
+  <line class="rwy-tdz" x1="271" y1="742" x2="271" y2="760"/>
+  <line class="rwy-tdz" x1="277" y1="742" x2="277" y2="760"/>
+
+  <line class="rwy-tdz" x1="223" y1="596" x2="223" y2="614"/>
+  <line class="rwy-tdz" x1="229" y1="596" x2="229" y2="614"/>
+  <line class="rwy-tdz" x1="271" y1="596" x2="271" y2="614"/>
+  <line class="rwy-tdz" x1="277" y1="596" x2="277" y2="614"/>
+
+  <line class="rwy-tdz" x1="223" y1="558" x2="223" y2="576"/>
+  <line class="rwy-tdz" x1="229" y1="558" x2="229" y2="576"/>
+  <line class="rwy-tdz" x1="271" y1="558" x2="271" y2="576"/>
+  <line class="rwy-tdz" x1="277" y1="558" x2="277" y2="576"/>
+
+  <!-- Distance ticks on edges -->
+  <line class="rwy-edge" x1="212" y1="240" x2="218" y2="240"/>
+  <line class="rwy-edge" x1="212" y1="360" x2="218" y2="360"/>
+  <line class="rwy-edge" x1="212" y1="480" x2="218" y2="480"/>
+  <line class="rwy-edge" x1="212" y1="600" x2="218" y2="600"/>
+  <line class="rwy-edge" x1="212" y1="720" x2="218" y2="720"/>
+  <line class="rwy-edge" x1="282" y1="240" x2="288" y2="240"/>
+  <line class="rwy-edge" x1="282" y1="360" x2="288" y2="360"/>
+  <line class="rwy-edge" x1="282" y1="480" x2="288" y2="480"/>
+  <line class="rwy-edge" x1="282" y1="600" x2="288" y2="600"/>
+  <line class="rwy-edge" x1="282" y1="720" x2="288" y2="720"/>
+
+  <!-- ══════════════════════════════════════
+       TAXIWAY ALPHA (west parallel)  x: 150
+  ═══════════════════════════════════════ -->
+  <line class="twy-edge" x1="150" y1="60"  x2="150" y2="840"/>
+  <line class="twy-cl" x1="150" y1="60" x2="150" y2="840"/>
+
+  <!-- TAXIWAY BRAVO (east parallel)  x: 350 -->
+  <line class="twy-edge" x1="350" y1="60"  x2="350" y2="840"/>
+  <line class="twy-cl" x1="350" y1="60" x2="350" y2="840"/>
+
+  <!-- End connectors -->
+  <!-- Top loop -->
+  <path class="twy-edge" d="M 150 60 Q 150 30 250 30 Q 350 30 350 60"/>
+  <!-- Bottom loop -->
+  <path class="twy-edge" d="M 150 840 Q 150 870 250 870 Q 350 870 350 840"/>
+
+  <!-- High-speed exits west -->
+  <path class="twy-edge" d="M 218 200 Q 185 220 150 250"/>
+  <path class="twy-edge" d="M 218 600 Q 185 630 150 660"/>
+
+  <!-- High-speed exits east -->
+  <path class="twy-edge" d="M 282 240 Q 315 265 350 290"/>
+  <path class="twy-edge" d="M 282 580 Q 315 610 350 640"/>
+
+  <!-- Cross connectors (Charlie, Delta) -->
+  <line class="twy-edge" x1="150" y1="180" x2="218" y2="180"/>
+  <line class="twy-cl" x1="150" y1="180" x2="218" y2="180"/>
+  <line class="twy-edge" x1="150" y1="680" x2="218" y2="680"/>
+  <line class="twy-cl" x1="150" y1="680" x2="218" y2="680"/>
+  <line class="twy-edge" x1="282" y1="180" x2="350" y2="180"/>
+  <line class="twy-cl" x1="282" y1="180" x2="350" y2="180"/>
+  <line class="twy-edge" x1="282" y1="680" x2="350" y2="680"/>
+  <line class="twy-cl" x1="282" y1="680" x2="350" y2="680"/>
+
+  <!-- Mid connector -->
+  <line class="twy-edge" x1="150" y1="450" x2="218" y2="450"/>
+  <line class="twy-edge" x1="282" y1="450" x2="350" y2="450"/>
+  <line class="twy-cl" x1="150" y1="450" x2="218" y2="450"/>
+  <line class="twy-cl" x1="282" y1="450" x2="350" y2="450"/>
+
+  <!-- Hold-short lines -->
+  <line class="hold" x1="210" y1="175" x2="290" y2="175"/>
+  <line class="hold" x1="210" y1="685" x2="290" y2="685"/>
+
+  <!-- ══════════════════════════════════════
+       APRON west (terminal)
+  ═══════════════════════════════════════ -->
+  <rect class="apron-edge" x="42" y="50" width="100" height="260" rx="5"/>
+  <line class="apron-edge" x1="142" y1="90"  x2="120" y2="90"/>
+  <line class="apron-edge" x1="142" y1="130" x2="120" y2="130"/>
+  <line class="apron-edge" x1="142" y1="170" x2="120" y2="170"/>
+  <line class="apron-edge" x1="142" y1="210" x2="120" y2="210"/>
+  <line class="apron-edge" x1="142" y1="250" x2="120" y2="250"/>
+  <line class="twy-cl" x1="118" y1="50" x2="118" y2="310"/>
+
+  <!-- APRON east (cargo) -->
+  <rect class="apron-edge" x="358" y="590" width="100" height="250" rx="5"/>
+  <line class="apron-edge" x1="358" y1="630" x2="380" y2="630"/>
+  <line class="apron-edge" x1="358" y1="670" x2="380" y2="670"/>
+  <line class="apron-edge" x1="358" y1="710" x2="380" y2="710"/>
+  <line class="apron-edge" x1="358" y1="750" x2="380" y2="750"/>
+  <line class="twy-cl" x1="382" y1="590" x2="382" y2="840"/>
+
+</svg>

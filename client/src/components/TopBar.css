@@ -168,6 +168,85 @@
     transform-origin: top right;
 }
 
+/* ── User menu ── */
+.tb-user-btn {
+    gap: 6px;
+    max-width: 140px;
+}
+
+.tb-username {
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+}
+
+.tb-login-btn {
+    gap: 6px;
+    color: var(--color-accent-cyan);
+    border-color: rgba(34, 211, 238, 0.3);
+    background: rgba(34, 211, 238, 0.06);
+}
+
+.tb-login-btn:hover {
+    background: rgba(34, 211, 238, 0.15);
+    border-color: var(--color-accent-cyan);
+    box-shadow: 0 0 12px rgba(34, 211, 238, 0.2);
+}
+
+.user-menu-popover {
+    width: 180px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.user-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 9px 12px;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    color: var(--color-text-primary);
+    font-family: var(--font-main);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s;
+}
+
+.user-menu-item:hover {
+    background: rgba(255,255,255,0.07);
+}
+
+.user-menu-item.danger {
+    color: #f87171;
+}
+
+.user-menu-item.danger:hover {
+    background: rgba(239,68,68,0.12);
+}
+
+.user-menu-item.admin {
+    color: #a9dfd8;
+}
+
+.user-menu-item.admin:hover {
+    background: rgba(169,223,216,0.12);
+}
+
+.user-menu-divider {
+    height: 1px;
+    background: var(--color-glass-border);
+    margin: 4px 0;
+}
+
 /* 超小螢幕：popover 左右撐滿，fixed 定位避免被裁切 */
 @media (max-width: 480px) {
     .settings-dropdown-wrapper {

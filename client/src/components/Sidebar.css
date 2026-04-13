@@ -96,12 +96,20 @@
     opacity: 0.9;
 }
 
+.sb-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
 .sb-close {
     cursor: pointer;
     color: var(--color-text-dim);
     transition: all 0.2s ease;
     padding: 4px;
-    margin-top: -4px;
+    display: flex;
+    align-items: center;
 }
 
 .sb-close:hover {
@@ -1003,9 +1011,18 @@
 .bp-dest   { align-items: flex-end; }
 
 .bp-flag {
-    font-size: 20px;
     line-height: 1;
     margin-bottom: 2px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+}
+
+.bp-flag .fi {
+    width: 28px;
+    height: 20px;
+    border-radius: 3px;
+    display: block;
 }
 
 .bp-iata {
@@ -1015,6 +1032,13 @@
     color: #f8fafc;
     line-height: 1;
     font-family: var(--font-main);
+}
+
+.bp-iata-na {
+    font-size: 24px;
+    color: var(--color-text-dim);
+    letter-spacing: 0;
+    opacity: 0.4;
 }
 
 .bp-sched {

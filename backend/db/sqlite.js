@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS track_points (
     heading       REAL,
     vertical_rate REAL,
     on_ground     INTEGER DEFAULT 0,
-    squawk        TEXT
+    squawk        TEXT,
+    callsign      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tp_session ON track_points(session_id, ts);
 CREATE INDEX IF NOT EXISTS idx_tp_icao24  ON track_points(icao24);
@@ -73,16 +74,93 @@ CREATE TABLE IF NOT EXISTS mictronics_aircraft (
 CREATE INDEX IF NOT EXISTS idx_mic_typecode ON mictronics_aircraft(typecode);
 `);
 
-// ── TTL cleanup (72 h) — run on startup and every hour ───────────────────
+// ── User Accounts ─────────────────────────────────────────────────────────
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT UNIQUE NOT NULL,
+    email         TEXT UNIQUE,
+    password_hash TEXT NOT NULL,
+    avatar_color  TEXT DEFAULT '#4CAF50',
+    created_at    INTEGER DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+`);
+
+// ── User Personal Flight Records ───────────────────────────────────────────
+db.exec(`
+CREATE TABLE IF NOT EXISTS user_flights (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    flight_date   TEXT NOT NULL,
+    flight_number TEXT,
+    callsign      TEXT,
+    icao24        TEXT,
+    aircraft_type TEXT,
+    registration  TEXT,
+    dep_icao      TEXT,
+    arr_icao      TEXT,
+    dep_time      TEXT,
+    arr_time      TEXT,
+    seat_number   TEXT,
+    seat_class    TEXT CHECK(seat_class IN ('economy','business','first','premium_economy')),
+    notes         TEXT,
+    created_at    INTEGER DEFAULT (unixepoch()),
+    updated_at    INTEGER DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_uf_user_id   ON user_flights(user_id);
+CREATE INDEX IF NOT EXISTS idx_uf_date      ON user_flights(flight_date);
+`);
+
+// ── Batched TTL cleanup (24 h) — non-blocking, yields between chunks ─────
+const PRUNE_BATCH = 5000;            // ~120ms DELETE blocks — short enough for healthy event loop
+const PRUNE_PAUSE_MS = 500;          // 500ms pause — ample time for HTTP I/O between batches
+const _pruneStmt = db.prepare(
+    'DELETE FROM track_points WHERE rowid IN (SELECT rowid FROM track_points WHERE ts < ? LIMIT ?)'
+);
+
 function pruneOldTrackPoints() {
-    const cutoff = Math.floor(Date.now() / 1000) - 72 * 3600;
-    const info = db.prepare('DELETE FROM track_points WHERE ts < ?').run(cutoff);
-    if (info.changes > 0) {
-        console.log(`[SQLite] Pruned ${info.changes} track points older than 24h`);
-        db.pragma('wal_checkpoint(RESTART)');
+    const cutoff = Math.floor(Date.now() / 1000) - 24 * 3600;
+    let totalDeleted = 0;
+
+    function batch() {
+        try {
+            const info = _pruneStmt.run(cutoff, PRUNE_BATCH);
+            totalDeleted += info.changes;
+            if (info.changes >= PRUNE_BATCH) {
+                if (totalDeleted % 500000 === 0) {
+                    console.log(`[SQLite] Prune progress: ${totalDeleted} rows deleted so far…`);
+                }
+                setTimeout(batch, PRUNE_PAUSE_MS);
+            } else {
+                if (totalDeleted > 0) {
+                    console.log(`[SQLite] Pruned ${totalDeleted} track points older than 24h`);
+                }
+                db.pragma('wal_checkpoint(PASSIVE)');
+            }
+        } catch (e) {
+            console.error('[SQLite] Prune batch error:', e.message);
+        }
+    }
+    batch();
+}
+
+// ── Periodic WAL checkpoint — every 5 minutes ────────────────────────────
+function walCheckpoint() {
+    try {
+        const result = db.pragma('wal_checkpoint(PASSIVE)');
+        const r = result[0];
+        if (r && r.log > 0) {
+            console.log(`[SQLite] WAL checkpoint: ${r.busy} busy, ${r.log} log pages, ${r.checkpointed} checkpointed`);
+        }
+    } catch (e) {
+        console.error('[SQLite] WAL checkpoint error:', e.message);
     }
 }
-pruneOldTrackPoints();
+
+// Defer startup prune 5s so server starts listening first
+setTimeout(pruneOldTrackPoints, 5000);
 setInterval(pruneOldTrackPoints, 3600 * 1000);
+setInterval(walCheckpoint, 5 * 60 * 1000);
 
 module.exports = db;

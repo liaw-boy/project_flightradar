@@ -1,6 +1,7 @@
 const Aircraft = require('../db/aircraftStore');
 const Route = require('../db/routeStore');
 const MictronicsDb = require('../db/mictronicsDb');
+const VrsDb = require('../db/vrsDb');
 const { AirportDictionary, RouteDictionary } = require('../db/staticMaps');
 const logger = require('../logger');
 
@@ -502,10 +503,23 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
             }
         } 
 
-        // Process Route Data
-        let routeInfo = { origin_iata: 'N/A', destination_iata: 'N/A', destination_weather: null, flightNumber: callsign };
+        // Process Route Data (VRS standing-data as final fallback)
+        const vrsRoute = VrsDb.lookup(callsign);
+        let routeInfo = {
+            origin_iata: vrsRoute?.from || 'N/A',
+            destination_iata: vrsRoute?.to || '---',
+            destination_weather: null,
+            flightNumber: callsign
+        };
         if (results[2].status === 'fulfilled' && results[2].value) {
-            routeInfo = { ...routeInfo, ...results[2].value };
+            const resolved = results[2].value;
+            const validIata = (v) => v && v !== 'N/A' && v !== '---' ? v : null;
+            routeInfo = {
+                ...routeInfo,
+                ...resolved,
+                origin_iata:      validIata(resolved.origin_iata)      || vrsRoute?.from || 'N/A',
+                destination_iata: validIata(resolved.destination_iata) || vrsRoute?.to   || '---',
+            };
         }
 
         // [v12.5] ADSB-Fi Overrides for High-Fidelity Labels

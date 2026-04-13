@@ -9,9 +9,9 @@ const db = require('./sqlite');
 // ── Prepared statements ──────────────────────────────────────────────────
 const stmtInsert = db.prepare(`
     INSERT INTO track_points
-        (session_id, icao24, ts, lat, lng, altitude, velocity, heading, vertical_rate, on_ground, squawk)
+        (session_id, icao24, ts, lat, lng, altitude, velocity, heading, vertical_rate, on_ground, squawk, callsign)
     VALUES
-        (@sessionId, @icao24, @ts, @lat, @lng, @altitude, @velocity, @heading, @verticalRate, @onGround, @squawk)
+        (@sessionId, @icao24, @ts, @lat, @lng, @altitude, @velocity, @heading, @verticalRate, @onGround, @squawk, @callsign)
 `);
 
 const stmtLatestBySession = db.prepare(`
@@ -45,6 +45,7 @@ const insertBatch = db.transaction((points) => {
             verticalRate: p.vertical_rate ?? p.verticalRate ?? null,
             onGround:     p.onGround     ? 1 : 0,
             squawk:       p.squawk       || null,
+            callsign:     p.callsign     || null,
         });
     }
 });

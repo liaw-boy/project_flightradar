@@ -198,16 +198,22 @@ export function useFlightData(mapRef) {
                 if (!next[icao24]) {
                     const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
                     const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
+                    const now0 = Date.now();
 
                     next[icao24] = {
                         ...pData,
                         isDirty: true,
                         lastCallsign: '',
+                        // Snapshot Interpolation — first appearance: start and end at same point
+                        _interpFromLat: pData.lat,
+                        _interpFromLng: pData.lng,
+                        _interpToLat:   pData.lat,
+                        _interpToLng:   pData.lng,
+                        _interpStartMs: now0,
+                        _interpDurMs:   8000,
+                        _dataArrivedAt: now0,
                         renderLat: pData.lat,
                         renderLng: pData.lng,
-                        targetLat: pData.lat,
-                        targetLng: pData.lng,
-                        targetUpdatedAt: Date.now(),
                         globalX: globalPt.x,
                         globalY: globalPt.y
                     };
@@ -230,45 +236,48 @@ export function useFlightData(mapRef) {
                     const zoom = mapRef.current ? mapRef.current.getZoom() : 5;
                     const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
 
-                    // [DR v13.0] Long-window blend (Aeris-inspired).
-                    // Blend from current render → actual ADS-B position over the
-                    // OBSERVED update interval (typically 60s), not just 600ms.
-                    // Spreading the correction over the full interval makes even
-                    // 1-2km DR errors imperceptible — the motion is continuous
-                    // and never appears to jump forward or backward.
-                    const snapRenderLat = existing.renderLat ?? existing.lat;
-                    const snapRenderLng = existing.renderLng ?? existing.lng;
+                    // [Snapshot Interpolation v2.0 — Buffered]
+                    // Always interpolate between two *confirmed* positions.
+                    // New data is queued as _pending; the animate loop swaps it in
+                    // once the current lerp completes — zero extrapolation, zero wobble.
                     const now = Date.now();
-
-                    // Measure actual interval between consecutive ADS-B updates.
-                    // Clamp: 5s min (WS burst) .. 90s max (long gap / first update).
                     const prevUpdateTime = existing._dataArrivedAt ?? now;
-                    const observedInterval = Math.max(5000, Math.min(90000, now - prevUpdateTime));
+                    const observedDurMs  = Math.max(3000, Math.min(30000, now - prevUpdateTime));
 
-                    const drOriginLat = pData.lat;
-                    const drOriginLng = pData.lng;
-                    const blendFromLat = snapRenderLat;
-                    const blendFromLng = snapRenderLng;
+                    const interpRunning = existing._interpFromLat !== existing._interpToLat ||
+                                          existing._interpFromLng !== existing._interpToLng;
+
+                    let interpUpdate;
+                    if (!interpRunning) {
+                        // First real movement: start lerp immediately from last known → new
+                        interpUpdate = {
+                            _interpFromLat: existing._interpToLat ?? existing.lat,
+                            _interpFromLng: existing._interpToLng ?? existing.lng,
+                            _interpToLat:   pData.lat,
+                            _interpToLng:   pData.lng,
+                            _interpStartMs: now,
+                            _interpDurMs:   observedDurMs,
+                            _pendingLat:    undefined,
+                            _pendingLng:    undefined,
+                            _pendingDurMs:  undefined,
+                        };
+                    } else {
+                        // Lerp already in progress — queue new position, don't interrupt
+                        interpUpdate = {
+                            _pendingLat:   pData.lat,
+                            _pendingLng:   pData.lng,
+                            _pendingDurMs: observedDurMs,
+                        };
+                    }
 
                     next[icao24] = {
                         ...existing,
                         ...pData,
                         isDirty,
-                        drLat: drOriginLat,
-                        drLng: drOriginLng,
-                        drHeading: pData.heading,
-                        drVelocity: pData.velocity,
-                        drTs: now,
-                        _blendFromLat: blendFromLat,
-                        _blendFromLng: blendFromLng,
+                        ...interpUpdate,
                         _dataArrivedAt: now,
-                        _blendDuration: observedInterval,
-                        renderLat: blendFromLat,
-                        renderLng: blendFromLng,
-                        // Legacy compat
-                        targetLat: pData.lat,
-                        targetLng: pData.lng,
-                        targetUpdatedAt: now,
+                        renderLat: existing.renderLat ?? existing.lat,
+                        renderLng: existing.renderLng ?? existing.lng,
                         globalX: globalPt.x,
                         globalY: globalPt.y
                     };
@@ -560,25 +569,32 @@ export function useFlightData(mapRef) {
                     p.lastContact = wp.lastContact;
                     if (wp.typecode) p.typecode = wp.typecode;
 
-                    // [DR-WS v13.0] Long-window blend, same as REST path.
-                    const wsSnapLat = p.renderLat ?? wp.lat;
-                    const wsSnapLng = p.renderLng ?? wp.lng;
+                    // [Snapshot Interpolation v2.0 — WS path — Buffered]
                     const wsPrevUpdate = p._dataArrivedAt ?? now;
-                    const wsInterval = Math.max(5000, Math.min(90000, now - wsPrevUpdate));
-                    p._blendFromLat = wsSnapLat;
-                    p._blendFromLng = wsSnapLng;
+                    const wsDurMs = Math.max(3000, Math.min(30000, now - wsPrevUpdate));
+
+                    const wsInterpRunning = p._interpFromLat !== p._interpToLat ||
+                                            p._interpFromLng !== p._interpToLng;
+
+                    if (!wsInterpRunning) {
+                        // First real movement: start lerp from last known → new
+                        p._interpFromLat = p._interpToLat ?? wp.lat;
+                        p._interpFromLng = p._interpToLng ?? wp.lng;
+                        p._interpToLat   = wp.lat;
+                        p._interpToLng   = wp.lng;
+                        p._interpStartMs = now;
+                        p._interpDurMs   = wsDurMs;
+                        p._pendingLat    = undefined;
+                        p._pendingLng    = undefined;
+                        p._pendingDurMs  = undefined;
+                    } else {
+                        // Queue new position — don't interrupt current lerp
+                        p._pendingLat  = wp.lat;
+                        p._pendingLng  = wp.lng;
+                        p._pendingDurMs = wsDurMs;
+                    }
+
                     p._dataArrivedAt = now;
-                    p._blendDuration = wsInterval;
-                    p.drLat = wp.lat;
-                    p.drLng = wp.lng;
-                    p.renderLat = wsSnapLat;
-                    p.renderLng = wsSnapLng;
-                    p.drHeading = wp.heading;
-                    p.drVelocity = wp.velocity;
-                    p.drTs = now;
-                    p.targetLat = wp.lat;
-                    p.targetLng = wp.lng;
-                    p.targetUpdatedAt = now;
                     p.globalX = globalPt.x;
                     p.globalY = globalPt.y;
 

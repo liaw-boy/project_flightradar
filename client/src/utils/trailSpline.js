@@ -555,16 +555,25 @@ export function processTrailPath(rawPath) {
 
         if (elevPts.length < 2) { output.push(...pts); continue; }
 
-        // Step 3: Sharp corner rounding
-        elevPts = roundSharpCorners3D(elevPts, 20);
+        // Step 3: Sharp corner rounding — REMOVED.
+        // Root cause of "ellipse on straight line" bug:
+        // ADS-B/MLAT position noise (100–1000m) creates apparent heading changes of
+        // 10–20° between consecutive points on an actually-straight path.
+        // roundSharpCorners3D at 20° threshold fires on almost every MLAT point,
+        // inserting Bézier arc points that the CR spline then amplifies into visible
+        // ellipses and loops. The CR spline already handles real turns naturally;
+        // pre-rounding is redundant and harmful on noisy radar data.
 
-        // Step 4: Adaptive downsampling (cap at 800 before spline)
-        if (elevPts.length > 800) {
-            elevPts = adaptiveDownsample(elevPts, 800);
+        // Step 4: Adaptive downsampling (cap at 400 before spline)
+        if (elevPts.length > 400) {
+            elevPts = adaptiveDownsample(elevPts, 400);
         }
 
         // Step 5: Catmull-Rom spline
-        elevPts = catmullRomSpline3D(elevPts, 6, 20);
+        // Reduced from (6, 20) → (3, 6): fewer interpolated points per segment.
+        // The midpoint-quadratic renderer already smooths the output visually;
+        // high interpolation counts amplified CR oscillations on noisy input data.
+        elevPts = catmullRomSpline3D(elevPts, 3, 6);
 
         // Step 6: Altitude smoothing
         const smoothedAlts = smoothAltitudeProfile(elevPts.map(p => p[2]), 0);
