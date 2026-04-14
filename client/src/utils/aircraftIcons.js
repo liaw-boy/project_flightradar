@@ -258,7 +258,7 @@ export function initAircraftIcons() {
     let count = 0;
     for (const [tc, entry] of Object.entries(AIRCRAFT_CATALOG)) {
         imageCache[tc] = {
-            normal: createCachedImage(entry, '#ffce00'),
+            normal: createCachedImage(entry, '#D4AF37'),
             selected: createCachedImage(entry, '#00ffff')
         };
         count++;
@@ -546,7 +546,7 @@ function _buildGhImage(svgText, color, isSelected = false) {
     // adsb.fi style: white outline with drop-shadow for visibility on dark maps.
     const stripped = svgText
         .replace(/\s(?:fill|stroke|stroke-width|paint-order)="(?!none)[^"]*"/gi, '');
-    const strokeColor = isSelected ? '#00ffff' : 'rgba(255,255,255,0.92)';
+    const strokeColor = isSelected ? '#FFD700' : 'rgba(255,255,255,0.92)';
     const styled = stripped.replace(
         '</svg>',
         `<style>
@@ -591,8 +591,8 @@ export function prewarmExactSvg(typecode) {
                 return;
             }
             exactImageCache.set(tc, {
-                normal:   _buildGhImage(text, '#ffce00', false),
-                selected: _buildGhImage(text, '#00ffff', true),
+                normal:   _buildGhImage(text, '#D4AF37', false),
+                selected: _buildGhImage(text, '#FFD700', true),
             });
         })
         .catch(() => { clearTimeout(timeout); exactImageCache.set(tc, null); _persistMiss(tc); })

@@ -4,6 +4,34 @@ import { trackStore } from '../store/FlightDataStore';
 import { dataManager } from '../services/dataManager';
 import { logger } from '../utils/logger';
 
+// ── Haversine distance (km) for interpolation sanity check ──────────────────
+function _hKm(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 +
+              Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+/**
+ * 判斷新座標是否為不可能的跳躍（MLAT 噪音 / 資料凍結後暴跳）。
+ * 若為跳躍，傳回 true → 呼叫端應 snap 而非插值。
+ *
+ * 閾值（與 trailSpline.js 一致）：
+ *   - dist > 20km in < 120s
+ *   - 或 implied speed > 1500 km/h AND dist > 3km
+ */
+function _isImpossibleJump(fromLat, fromLng, toLat, toLng, dtMs) {
+    if (!fromLat || !toLat) return false;
+    const dist = _hKm(fromLat, fromLng, toLat, toLng);
+    if (dist < 0.05) return false; // < 50m，完全沒動，不是跳躍
+    const dtSec = dtMs / 1000;
+    if (dtSec <= 0) return dist > 20;
+    const spdKph = (dist / dtSec) * 3600;
+    return (dist > 20 && dtSec < 120) || (spdKph > 1500 && dist > 3 && dtSec < 120);
+}
+
 /**
  * 飛行資料管理 Hook
  * - 定時從後端 /api/states 拉取全球飛機資料
@@ -237,22 +265,25 @@ export function useFlightData(mapRef) {
                     const globalPt = latLngToGlobalPixels(pData.lat, pData.lng, zoom, sharedPointRef.current);
 
                     // [Snapshot Interpolation v2.0 — Buffered]
-                    // Always interpolate between two *confirmed* positions.
-                    // New data is queued as _pending; the animate loop swaps it in
-                    // once the current lerp completes — zero extrapolation, zero wobble.
+                    // [Snapshot Interpolation v2.1 — Buffered + Jump Guard]
+                    // Always interpolate between two confirmed positions.
+                    // Impossible jumps (MLAT noise / stale-then-teleport) → snap directly.
                     const now = Date.now();
                     const prevUpdateTime = existing._dataArrivedAt ?? now;
                     const observedDurMs  = Math.max(3000, Math.min(30000, now - prevUpdateTime));
 
-                    const interpRunning = existing._interpFromLat !== existing._interpToLat ||
-                                          existing._interpFromLng !== existing._interpToLng;
+                    // Current render position is the most accurate "from" reference
+                    const curRenderLat = existing.renderLat ?? existing._interpToLat ?? existing.lat;
+                    const curRenderLng = existing.renderLng ?? existing._interpToLng ?? existing.lng;
 
-                    let interpUpdate;
-                    if (!interpRunning) {
-                        // First real movement: start lerp immediately from last known → new
-                        interpUpdate = {
-                            _interpFromLat: existing._interpToLat ?? existing.lat,
-                            _interpFromLng: existing._interpToLng ?? existing.lng,
+                    // Impossible jump → snap to new position, reset interpolation
+                    if (_isImpossibleJump(curRenderLat, curRenderLng, pData.lat, pData.lng, observedDurMs)) {
+                        next[icao24] = {
+                            ...existing,
+                            ...pData,
+                            isDirty,
+                            _interpFromLat: pData.lat,
+                            _interpFromLng: pData.lng,
                             _interpToLat:   pData.lat,
                             _interpToLng:   pData.lng,
                             _interpStartMs: now,
@@ -260,15 +291,32 @@ export function useFlightData(mapRef) {
                             _pendingLat:    undefined,
                             _pendingLng:    undefined,
                             _pendingDurMs:  undefined,
+                            _dataArrivedAt: now,
+                            renderLat: pData.lat,
+                            renderLng: pData.lng,
+                            globalX: globalPt.x,
+                            globalY: globalPt.y
                         };
-                    } else {
-                        // Lerp already in progress — queue new position, don't interrupt
-                        interpUpdate = {
-                            _pendingLat:   pData.lat,
-                            _pendingLng:   pData.lng,
-                            _pendingDurMs: observedDurMs,
-                        };
+                        return; // skip normal interp update below
                     }
+
+                    // Lerp from the last confirmed ADS-B position to the new one.
+                    // Dead reckoning has been removed from the animation loop, so
+                    // renderLat always stays at _interpToLat once the lerp finishes —
+                    // using _interpToLat as "from" gives a clean start with no overshoot.
+                    const fromLat = existing._interpToLat ?? existing.lat;
+                    const fromLng = existing._interpToLng ?? existing.lng;
+                    const interpUpdate = {
+                        _interpFromLat: fromLat,
+                        _interpFromLng: fromLng,
+                        _interpToLat:   pData.lat,
+                        _interpToLng:   pData.lng,
+                        _interpStartMs: now,
+                        _interpDurMs:   observedDurMs,
+                        _pendingLat:    undefined,
+                        _pendingLng:    undefined,
+                        _pendingDurMs:  undefined,
+                    };
 
                     next[icao24] = {
                         ...existing,
@@ -569,29 +617,54 @@ export function useFlightData(mapRef) {
                     p.lastContact = wp.lastContact;
                     if (wp.typecode) p.typecode = wp.typecode;
 
-                    // [Snapshot Interpolation v2.0 — WS path — Buffered]
+                    // [EMA Position Smoothing — Aeris MLAT technique]
+                    // α=0.72: 72% new + 28% prev — smooths MLAT noise (~100m)
+                    // without significantly delaying ADS-B positions (~10m).
+                    // First appearance: initialise EMA directly from raw position.
+                    const EMA_ALPHA = 0.72;
+                    const emaLat = (p._emaLat != null)
+                        ? EMA_ALPHA * wp.lat + (1 - EMA_ALPHA) * p._emaLat
+                        : wp.lat;
+                    const emaLng = (p._emaLng != null)
+                        ? EMA_ALPHA * wp.lng + (1 - EMA_ALPHA) * p._emaLng
+                        : wp.lng;
+                    p._emaLat = emaLat;
+                    p._emaLng = emaLng;
+
+                    // [Snapshot Interpolation v2.1 — WS path — Buffered + Jump Guard]
                     const wsPrevUpdate = p._dataArrivedAt ?? now;
                     const wsDurMs = Math.max(3000, Math.min(30000, now - wsPrevUpdate));
 
-                    const wsInterpRunning = p._interpFromLat !== p._interpToLat ||
-                                            p._interpFromLng !== p._interpToLng;
+                    const wsRenderLat = p.renderLat ?? p._interpToLat ?? emaLat;
+                    const wsRenderLng = p.renderLng ?? p._interpToLng ?? emaLng;
 
-                    if (!wsInterpRunning) {
-                        // First real movement: start lerp from last known → new
-                        p._interpFromLat = p._interpToLat ?? wp.lat;
-                        p._interpFromLng = p._interpToLng ?? wp.lng;
-                        p._interpToLat   = wp.lat;
-                        p._interpToLng   = wp.lng;
+                    if (_isImpossibleJump(wsRenderLat, wsRenderLng, wp.lat, wp.lng, wsDurMs)) {
+                        // Impossible jump → snap, reset interpolation state
+                        // Impossible jump → snap to EMA position
+                        p._interpFromLat = emaLat;
+                        p._interpFromLng = emaLng;
+                        p._interpToLat   = emaLat;
+                        p._interpToLng   = emaLng;
                         p._interpStartMs = now;
                         p._interpDurMs   = wsDurMs;
                         p._pendingLat    = undefined;
                         p._pendingLng    = undefined;
                         p._pendingDurMs  = undefined;
+                        p.renderLat      = emaLat;
+                        p.renderLng      = emaLng;
                     } else {
-                        // Queue new position — don't interrupt current lerp
-                        p._pendingLat  = wp.lat;
-                        p._pendingLng  = wp.lng;
-                        p._pendingDurMs = wsDurMs;
+                        // Lerp from last confirmed position to new EMA position.
+                        // Dead reckoning removed — icon stays at _interpToLat when idle,
+                        // so using _interpToLat as "from" is always accurate (no overshoot).
+                        p._interpFromLat = p._interpToLat ?? emaLat;
+                        p._interpFromLng = p._interpToLng ?? emaLng;
+                        p._interpToLat   = emaLat;
+                        p._interpToLng   = emaLng;
+                        p._interpStartMs = now;
+                        p._interpDurMs   = wsDurMs;
+                        p._pendingLat    = undefined;
+                        p._pendingLng    = undefined;
+                        p._pendingDurMs  = undefined;
                     }
 
                     p._dataArrivedAt = now;

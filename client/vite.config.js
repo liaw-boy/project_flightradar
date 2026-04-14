@@ -6,6 +6,19 @@ export default defineConfig({
     plugins: [
         react()
     ],
+    optimizeDeps: {
+        include: [
+            '@deck.gl/core',
+            '@deck.gl/react',
+            '@deck.gl/layers',
+            '@deck.gl/mesh-layers',
+            '@luma.gl/core',
+            '@luma.gl/webgl',
+            '@loaders.gl/core',
+            '@loaders.gl/gltf',
+        ],
+        exclude: ['maplibre-gl'],
+    },
     server: {
         host: '0.0.0.0',
         port: 3005,

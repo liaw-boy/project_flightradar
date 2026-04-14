@@ -95,3 +95,11 @@ export async function apiFlightStats() {
 export async function apiFlightMapData() {
     return apiFetch('/api/flights/my/map');
 }
+
+export async function apiLookupCallsign(cs) {
+    return fetch(`/api/lookup/callsign/${encodeURIComponent(cs)}`).then(r => r.json()).catch(() => ({ found: false }));
+}
+
+export async function apiLookupAirport(code) {
+    return fetch(`/api/lookup/airport/${encodeURIComponent(code)}`).then(r => r.json()).catch(() => ({ found: false }));
+}

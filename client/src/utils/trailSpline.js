@@ -485,140 +485,37 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 // ─── Main entry point ────────────────────────────────────────────────────────
 
 /**
- * Run the full trail processing pipeline on a raw AEROSTRAT track.
+ * Process raw AEROSTRAT track for display.
  *
  * Input format:  [timestamp, lat, lng, altitude, heading, velocity, isLive?][]
- * Output format: same (with interpolated values for splined intermediate points)
+ * Output format: same
  *
- * Gaps (time > 1800s or impossible jump > 50km in < 60s) are preserved —
- * the spline is applied within each contiguous sub-path only.
+ * For clean ADS-B data (adsb.fi / adsb.lol, accuracy ~10m), complex spline
+ * processing creates artifacts rather than improving the path. The renderer
+ * (MapView.jsx) already handles gap detection, bridging, and per-segment
+ * coloring. This function only filters invalid coordinates and removes exact
+ * duplicate consecutive positions.
  *
- * The live extension point (index 6 = true) is always preserved as-is at
- * the end and is never splined.
+ * The heavy pipeline (spike removal, Catmull-Rom spline, loop removal) has
+ * been removed because it was designed for MLAT noise (~km errors) and
+ * produced visible overshoots and phantom detours on clean ADS-B tracks.
  */
 export function processTrailPath(rawPath) {
-    if (!rawPath || rawPath.length < 2) return rawPath;
+    if (!rawPath || rawPath.length < 2) return rawPath ?? [];
 
-    // Separate live extension if present
-    const lastPt = rawPath[rawPath.length - 1];
-    const hasLive = !!lastPt[6];
-    const workPath = hasLive ? rawPath.slice(0, -1) : rawPath;
+    const out = [];
+    let prevLat = null, prevLng = null;
 
-    if (workPath.length < 2) return rawPath;
-
-    // Split into contiguous sub-paths at gap boundaries
-    const GAP_TIME   = 1800; // seconds — same as existing renderer
-    const GAP_DIST   = 50;   // km
-    const GAP_SPEED  = 2000; // km/h implied speed
-
-    const subPaths = []; // array of { pts: rawPts, gapBefore: bool }
-    let current = [workPath[0]];
-    for (let i = 1; i < workPath.length; i++) {
-        const prev = workPath[i - 1];
-        const cur  = workPath[i];
-        const dt   = (cur[0] && prev[0]) ? cur[0] - prev[0] : 0;
-        const dist = haversineKm(prev[1], prev[2], cur[1], cur[2]);
-        const spd  = dt > 0 ? (dist / dt) * 3600 : 0;
-        const isGap = (dist > GAP_DIST && dt < 60 && spd > GAP_SPEED);
-        if (isGap) {
-            subPaths.push({ pts: current, gapBefore: subPaths.length > 0 });
-            current = [cur];
-        } else {
-            current.push(cur);
-        }
-    }
-    subPaths.push({ pts: current, gapBefore: subPaths.length > 0 });
-
-    // Process each sub-path
-    const output = [];
-    for (const { pts, gapBefore } of subPaths) {
-        if (pts.length < 2) {
-            if (output.length > 0 || !gapBefore) output.push(...pts);
-            else output.push(...pts);
-            continue;
-        }
-
-        // Convert to ElevatedPoint [lng, lat, alt]
-        let elevPts = pts.map(p => [p[2], p[1], p[3] ?? 0]);
-        const alts  = pts.map(p => p[3] ?? null);
-
-        // Step 1: Spike removal
-        const s1 = removeSpikePoints(elevPts.map(p => [p[0], p[1]]), alts);
-        // Rebuild elevPts from filtered indices
-        elevPts = s1.path.map((p, i) => [p[0], p[1], s1.altitudes[i] ?? 0]);
-
-        if (elevPts.length < 2) { output.push(...pts); continue; }
-
-        // Step 2: Distance outlier removal
-        const s2 = removeDistanceOutliers(elevPts.map(p => [p[0], p[1]]), elevPts.map(p => p[2]));
-        elevPts = s2.path.map((p, i) => [p[0], p[1], s2.altitudes[i] ?? 0]);
-
-        if (elevPts.length < 2) { output.push(...pts); continue; }
-
-        // Step 3: Sharp corner rounding — REMOVED.
-        // Root cause of "ellipse on straight line" bug:
-        // ADS-B/MLAT position noise (100–1000m) creates apparent heading changes of
-        // 10–20° between consecutive points on an actually-straight path.
-        // roundSharpCorners3D at 20° threshold fires on almost every MLAT point,
-        // inserting Bézier arc points that the CR spline then amplifies into visible
-        // ellipses and loops. The CR spline already handles real turns naturally;
-        // pre-rounding is redundant and harmful on noisy radar data.
-
-        // Step 4: Adaptive downsampling (cap at 400 before spline)
-        if (elevPts.length > 400) {
-            elevPts = adaptiveDownsample(elevPts, 400);
-        }
-
-        // Step 5: Catmull-Rom spline
-        // Reduced from (6, 20) → (3, 6): fewer interpolated points per segment.
-        // The midpoint-quadratic renderer already smooths the output visually;
-        // high interpolation counts amplified CR oscillations on noisy input data.
-        elevPts = catmullRomSpline3D(elevPts, 3, 6);
-
-        // Step 6: Altitude smoothing
-        const smoothedAlts = smoothAltitudeProfile(elevPts.map(p => p[2]), 0);
-        elevPts = elevPts.map((p, i) => [p[0], p[1], smoothedAlts[i]]);
-
-        // Step 7: Loop removal
-        elevPts = removePathLoops(elevPts);
-
-        // Convert back to AEROSTRAT format
-        // Interpolate timestamps, headings, velocities from original pts
-        const origLen = pts.length;
-        const splineLen = elevPts.length;
-        const tsStart = pts[0][0] ?? 0;
-        const tsEnd   = pts[origLen - 1][0] ?? 0;
-
-        const splined = elevPts.map((ep, si) => {
-            const frac = splineLen > 1 ? si / (splineLen - 1) : 0;
-            // Find surrounding original points for heading/velocity interpolation
-            const origFrac = frac * (origLen - 1);
-            const oi = Math.min(Math.floor(origFrac), origLen - 2);
-            const ot = origFrac - oi;
-            const pA = pts[oi], pB = pts[oi + 1];
-
-            const ts  = tsStart + frac * (tsEnd - tsStart);
-            const lat = ep[1];
-            const lng = ep[0];
-            const alt = ep[2];
-
-            // Heading interpolation (circular)
-            const hA = pA[4] ?? 0, hB = pB[4] ?? hA;
-            let dh = hB - hA;
-            if (dh > 180) dh -= 360;
-            if (dh < -180) dh += 360;
-            const hdg = (hA + dh * ot + 360) % 360;
-
-            const vel = (pA[5] ?? 0) + ((pB[5] ?? 0) - (pA[5] ?? 0)) * ot;
-
-            return [ts, lat, lng, alt, hdg, vel];
-        });
-
-        output.push(...splined);
+    for (const p of rawPath) {
+        const lat = p[1], lng = p[2];
+        // Drop NaN / non-finite coordinates
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        // Drop exact consecutive duplicates (parked aircraft transponder jitter)
+        if (lat === prevLat && lng === prevLng) continue;
+        out.push(p);
+        prevLat = lat;
+        prevLng = lng;
     }
 
-    // Re-attach live extension
-    if (hasLive) output.push(lastPt);
-
-    return output;
+    return out;
 }

@@ -1,155 +1,328 @@
-# ✈️ AEROSTRAT
+# AEROSTRAT
 
 > **高效能全球航空監控與實時雷達系統**
 
-[![Next.js](https://img.shields.io/badge/Frontend-React%2019-blue?style=for-the-badge&logo=react)](https://reactjs.org/)
-[![Node.js](https://img.shields.io/badge/Backend-Node.js%2024-green?style=for-the-badge&logo=nodedotjs)](https://nodejs.org/)
-[![SQLite](https://img.shields.io/badge/Database-SQLite%203-003B57?style=for-the-badge&logo=sqlite)](https://www.sqlite.org/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![React](https://img.shields.io/badge/Frontend-React%2019-61DAFB?style=flat-square&logo=react)](https://reactjs.org/)
+[![Node.js](https://img.shields.io/badge/Backend-Node.js%2024-339933?style=flat-square&logo=nodedotjs)](https://nodejs.org/)
+[![SQLite](https://img.shields.io/badge/Database-SQLite%203-003B57?style=flat-square&logo=sqlite)](https://www.sqlite.org/)
+[![Playwright](https://img.shields.io/badge/Tests-Playwright-45ba4b?style=flat-square&logo=playwright)](https://playwright.dev/)
 
-AEROSTRAT 是一款專為航空愛好者與開發者設計的全球實時監控平台。系統整合了 OpenSky 與 ADSB-Fi 等多源遙測數據，透過二進制 WebSocket 協議與 60fps Canvas 渲染技術，在極低的資源佔用下提供軍事級的流暢雷達體驗。
+AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系統整合 OpenSky、ADSB-Fi 等多源資料，透過二進制 WebSocket 協議與 60fps Canvas 渲染技術，提供流暢專業的雷達體驗。
 
----
-
-## 📖 目錄
-
-- [✨ 核心亮點](#-核心亮點)
-- [📸 介面預覽](#-介面預覽)
-- [🛠 技術架構](#-技術架構)
-- [🚀 快速開始](#-快速開始)
-- [🏗 系統設計細節](#-系統設計細節)
-- [📊 監控與測試](#-監控與測試)
-- [📜 授權協議](#-授權協議)
+**線上展示 →** https://flyradar.spkuan.cc
 
 ---
 
-## 📸 介面預覽
+## 目錄
 
-![AEROSTRAT Dashboard Preview](docs/images/preview.png)
-*圖：AEROSTRAT 專業雷達監控介面（模擬效果）*
-
----
-
-## ✨ 核心亮點
-
-### 📡 實時雷達與追蹤
-- **60fps 平滑移動**：採用 Canvas 渲染引擎與高效能座標插值運算，告別地圖圖標閃爍。
-- **航位推算 (Dead Reckoning)**：即使在網路延遲或資料更新間隙，航機也能依據慣性平滑移動。
-- **高度色彩系統**：動態熱點染色，即時區分航機的爬升、巡航與下降狀態。
-
-### 🔍 智能過濾與搜尋
-- **多維度篩選**：可依據高度、地面速度、機型代碼（ICAO Type）進行精準過濾。
-- **全域全文檢索**：快速定位航班編號 (Callsign)、註冊號或 ICAO 24-bit 地址。
-
-### ⏲️ 時光機與回放
-- **24小時歷史回溯**：完整記錄所有飛行路點，支持透過時間軸進行秒級精度回放。
-
-### 📱 行動端深度優化
-- **響應式介面**：針對手機與平板設計的抽屜式抽卡（Bottom Sheets）交互，單手即可操作。
+- [介面預覽](#介面預覽)
+- [主要功能](#主要功能)
+- [技術架構](#技術架構)
+- [目錄結構](#目錄結構)
+- [快速開始](#快速開始)
+- [環境變數](#環境變數)
+- [部署](#部署)
+- [測試](#測試)
+- [資安說明](#資安說明)
 
 ---
 
-## 🛠 技術架構
+## 介面預覽
 
-AEROSTRAT 採用 **前後端分離** 的高性能架構設計：
+### 主畫面 — 全球雷達地圖
 
-```mermaid
-graph LR
-    subgraph "數據源"
-        A[OpenSky API] --> E[Data Fusion Layer]
-        B[ADSB-Fi] --> E
-        C[Static Dictionaries] --> E
-    end
+![主畫面](docs/images/01-homepage.png)
 
-    subgraph "Backend (Node.js)"
-        E --> F[Session State Machine]
-        F --> G[(SQLite WAL)]
-        F --> H[SocketEngine]
-    end
+*全球 ADS-B 即時飛機分佈，金色點陣為各架飛機，點擊後顯示側邊欄詳情*
 
-    subgraph "Frontend (React)"
-        H -- "Delta Encoded Binary" --> I[Web Worker]
-        I --> J[React Store]
-        J --> K[60fps Canvas Map]
-    end
+### 即時飛機顯示
+
+![飛機顯示](docs/images/02-map-aircraft.png)
+
+*Canvas 渲染引擎，60fps 平滑移動；金色圖示，選中後顯示亮金高亮*
+
+### 搜尋功能
+
+![搜尋](docs/images/03-search.png)
+
+*全文搜尋：輸入呼號 (CI101)、ICAO24 地址或機型代碼，即時定位*
+
+### 登入系統
+
+![登入](docs/images/04-auth.png)
+
+*登機證風格登入介面；支援帳號密碼、Google OAuth、Facebook OAuth*
+
+### 頂部導航列
+
+![頂部](docs/images/05-topbar.png)
+
+*AEROSTRAT 標題 + 即時航班計數 + 使用者選單 + 個人航班記錄入口*
+
+---
+
+## 主要功能
+
+### 即時雷達追蹤
+- **60fps 平滑動畫** — Canvas 引擎 + 航位推算 (Dead Reckoning)，資料更新間隙不閃爍
+- **金色圖示系統** — 普通飛機金色 (`#D4AF37`)，選中飛機亮金 (`#FFD700`)
+- **3-Tier 渲染管線** — SVG 精確圖形 > Path2D 嵌入輪廓 > 戰術點陣，自動降級
+- **航跡追蹤** — 顯示歷史軌跡路徑，支援 24 小時歷史回放
+- **altitude 色彩** — ALTITUDE / TACTICAL / MONO 三種配色方案
+
+### 資料融合
+- **多源整合** — OpenSky、ADSB-Fi、adsb.lol 三重冗餘，自動切換
+- **機型資料庫** — Mictronics 全球 21 萬架航機資料，本地離線查詢
+- **航線解析** — VRS 靜態路線庫 + ADSB.fi 即時路線 + AeroDataBox 時刻表
+- **機場資料庫** — 全球機場 ICAO/IATA 代碼 + 座標快查
+
+### 過濾與搜尋
+- **多維度篩選** — 高度、地速、機型代碼、軍事/商業分類
+- **全文搜尋** — 呼號、ICAO24、機型、航空公司
+- **鳥瞰模式** — 只顯示當前視窗範圍內飛機，效能最佳化
+
+### 個人航班記錄（需登入）
+- **航班日誌** — 記錄每次搭乘的航班，支援完整資訊填寫
+- **自動補填** — 點選即時地圖上的飛機，自動帶入呼號、機型、起降機場、時間
+- **橫向登機證** — 全頁表單，登機證風格輸入介面（FROM / TO 大字體 ICAO 代碼）
+- **統計儀表板** — 累計里程、拜訪機場數、常飛機型/航線排行
+- **個人航跡** — 在地圖上顯示個人所有航班路徑
+
+### 系統管理
+- **管理員面板** — 使用者管理、API 配額監控、資料同步狀態
+- **即時監控** — `/monitor` 頁面顯示伺服器負載、記憶體、連線數
+- **WebSocket 引擎** — 二進制 MessagePack 增量編碼，頻寬節省 70%+
+
+---
+
+## 技術架構
+
+```
+數據源
+  OpenSky API ─┐
+  ADSB-Fi     ─┼─→ 資料融合層 (Waterfall Resolution)
+  adsb.lol    ─┘
+       │
+       ↓
+Backend (Node.js 24 + Express 5)
+  ├── server.js          — API Gateway + 會話狀態機
+  ├── socketEngine.js    — WebSocket Binary Delta 推送
+  ├── flightController   — 多層資料融合邏輯
+  ├── authController     — JWT 認證 + bcrypt
+  └── db/
+      ├── aircraftStore  — 21萬架機型快取 (記憶體)
+      ├── routeStore     — 航線 MongoDB Cache
+      ├── vrsDb          — VRS 靜態路線 SQLite
+      └── mictronicsDb   — 機型登錄 SQLite
+       │
+       │ Binary WebSocket (MessagePack)
+       ↓
+Frontend (React 19 + Vite 6)
+  ├── workers/flightWorker.js  — 解碼 + Delta 合併
+  ├── MapView.jsx              — 60fps Canvas 渲染
+  ├── Sidebar.jsx              — 飛機詳情面板
+  ├── MyFlightsPanel.jsx       — 航班日誌（全頁橫向登機證）
+  └── AuthModal.jsx            — 登機證風格登入介面
 ```
 
-### 技術棧 (Tech Stack)
-- **Frontend**: React 19, Vite 6, Leaflet 1.9, Tailwind CSS.
-- **Backend**: Node.js 24, Express 5, Socket.io, MessagePack.
-- **Persistence**: SQLite (better-sqlite3) with WAL mode enabled.
-- **Utilities**: Playwright (E2E Testing), PM2 (Process Mgmt).
+### 技術棧
+| 層 | 技術 |
+|----|------|
+| 前端框架 | React 19, Vite 6 |
+| 地圖 | Leaflet 1.9 |
+| 渲染 | HTML5 Canvas, SVG Path2D |
+| 後端 | Node.js 24, Express 5 |
+| 認證 | JWT (7d TTL), bcrypt, Google/Facebook OAuth |
+| 即時通訊 | WebSocket + MessagePack Binary |
+| 資料庫 | SQLite (better-sqlite3 WAL), In-memory LRU Cache |
+| 測試 | Playwright E2E |
+| 部署 | PM2, Docker, Nginx |
 
 ---
 
-## 🚀 快速開始
+## 目錄結構
 
-### 1. 安裝環境
-確保您的開發環境已安裝 **Node.js 18+**。
+```
+project_aerostrat/
+├── backend/
+│   ├── controllers/
+│   │   ├── authController.js    # 登入、JWT、OAuth
+│   │   └── flightController.js  # 多層資料融合
+│   ├── db/
+│   │   ├── aircraftStore.js     # 21萬架機型記憶體快取
+│   │   ├── routeStore.js        # MongoDB 路線快取
+│   │   ├── vrsDb.js             # VRS SQLite 路線庫
+│   │   └── mictronicsDb.js      # Mictronics 機型資料庫
+│   ├── scripts/                 # 資料同步腳本
+│   ├── workers/                 # 資料解析 Worker
+│   ├── server.js                # 主伺服器
+│   ├── socketEngine.js          # WebSocket 推送引擎
+│   └── .env                     # 環境變數（不納入 git）
+├── client/
+│   ├── src/
+│   │   ├── components/          # React UI 元件
+│   │   ├── utils/               # 飛機圖示、渲染工具
+│   │   ├── services/            # DataManager, IndexedDB
+│   │   └── workers/             # flightWorker.js
+│   └── tests/e2e/               # Playwright 測試
+├── public-react/                # Build 輸出（由 backend 靜態服務）
+├── docs/images/                 # README 截圖
+├── docker-compose.yml
+└── deploy.sh                    # 快速部署腳本
+```
+
+---
+
+## 快速開始
+
+### 環境需求
+- Node.js 20+
+- MongoDB 4.4+ （可用 Docker）
+- PM2 (選用)
+
+### 1. 複製並安裝
 
 ```bash
-# 克隆專案
 git clone https://github.com/liaw-boy/project_flightradar.git
-cd project_aerostrat
+cd project_flightradar
 
-# 安裝所有依賴
-npm install
+# 後端依賴
+cd backend && npm install
+cp .env.example .env   # 填寫必要環境變數
+
+# 前端依賴
+cd ../client && npm install
 ```
 
-### 2. 環境變數配置
-在 `backend/` 下建立 `.env`：
-```env
-PORT=3000
-MONGODB_USE_LOCAL=false
-# 填入您的 OpenSky 帳號金鑰（可選）
-```
+### 2. 啟動開發環境
 
-### 3. 初始化資料與運行
 ```bash
-# 第一步：同步機場與航路基礎數據
-cd backend && node scripts/syncOsintData.js
+# 終端 1 — 後端
+cd backend && node server.js
 
-# 第二步：啟動開發模式
-cd ..
-npm run dev
+# 終端 2 — 前端 (Vite dev server)
+cd client && npm run dev
+# 前端 → http://localhost:3005
+# 後端 → http://localhost:3000
 ```
-啟動後訪問 `http://localhost:3005`。
+
+### 3. Build 並以 PM2 運行
+
+```bash
+cd client && npm run build
+cd ..
+pm2 start backend/ecosystem.config.js
+# 訪問 http://localhost:3000
+```
 
 ---
 
-## 🏗 系統設計細節
+## 環境變數
 
-<details>
-<summary><b>📦 二進制增量編碼 (Double Buffering & Delta Encoding)</b></summary>
-為了極大化節省頻寬，WebSocket 僅推送狀態發生變化的「增量數據」。我們使用 MessagePack 進行二進制封裝，相較於傳統 JSON 格式，流量佔用減少了 70% 以上。
-</details>
+`backend/.env` 必要設定：
 
-<details>
-<summary><b>🚀 零垃圾回收壓力渲染 (Zero-GC Rendering)</b></summary>
-前端 `FlightDataStore` 使用 TypedArrays (Float32Array) 作為環形緩衝區。MapView 元件會快取 Path2D 物件，避免在每秒 60 次的重繪中產生大量內存垃圾 (Garbage Collection)，確保長時間運行的穩定性。
-</details>
+```env
+# 必填
+JWT_SECRET=<長隨機字串，至少 32 字元>
+MONGODB_URI=mongodb://localhost:27017/aerostrat
 
-<details>
-<summary><b>🧬 多維元數據解析 (4-Layer Metadata Resolution)</b></summary>
-每一架飛機的詳細資訊（機型、航空公司、起迄點）依序透過：記憶體索引 → 本地 SQLite → 特定 Fallback API → 官方資料庫進行非同步融合，保證資料的高準確率。
-</details>
+# OAuth（選填，不填則停用對應登入方式）
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+FACEBOOK_APP_ID=
+FACEBOOK_APP_SECRET=
+APP_URL=http://localhost:3000
+
+# API Keys（選填，增加資料來源）
+AERODATABOX_API_KEY=
+
+# 監控頁面密碼
+MONITOR_PASSWORD=<自設密碼>
+
+# CORS（逗號分隔）
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3005
+
+# 其他
+PORT=3000
+LOG_LEVEL=INFO
+NODE_ENV=production
+```
+
+> **注意：** `JWT_SECRET` 未設定時伺服器拒絕啟動。不要使用預設值於生產環境。
 
 ---
 
-## 📊 監控與測試
+## 部署
 
-- **健康檢查**: `http://localhost:3000/api/health`
-- **系統統計**: `http://localhost:3000/api/stats`
-- **自動化測試**: 
-  ```bash
-  cd client && npx playwright test
-  ```
+### 使用 deploy.sh（推薦）
+
+```bash
+# 自動：git pull → npm build → pm2 reload
+./deploy.sh
+```
+
+### 使用 Docker Compose
+
+```bash
+docker-compose up -d
+```
+
+### 手動部署流程
+
+```bash
+# 1. 拉取最新程式碼
+git pull origin main
+
+# 2. 建置前端
+cd client && npm install && npm run build
+
+# 3. 重啟後端
+pm2 reload aerostrat
+```
 
 ---
 
-## 📜 授權協議
+## 測試
 
-本項目基於 **MIT License** 授權。您可以自由使用、修改及分發。
+### 執行 UX 流程測試（本地）
+
+```bash
+cd client
+npx playwright test tests/e2e/ux_flow.spec.js
+```
+
+測試涵蓋：
+1. 首頁無致命 JS 錯誤
+2. 地圖渲染 + 飛機出現（15s 內）
+3. 搜尋欄可輸入
+4. 登入 Modal 開啟
+5. 頂部導航列渲染
+6. My Flights 面板 + 全頁表單
+7. API Ping 健康檢查
+8. 即時飛機資料 API 回應
+9. 新版 `fhr-card` 列表設計（舊 `bp-card` 已移除）
+
+### 執行生產煙霧測試
+
+```bash
+npx playwright test tests/e2e/prod_smoke.spec.js
+```
 
 ---
-> 如果您喜歡這個專案，請給我們一個 ⭐️ 支持！
+
+## 資安說明
+
+已修補的重要安全加固（2026-04）：
+
+| 項目 | 說明 |
+|------|------|
+| JWT Secret | 未設定時啟動即失敗，不允許預設 fallback |
+| CORS | 限制允許的 Origin 白名單，不再開放 `*` |
+| Rate Limiting | 融合端點 40 req/min，查詢端點 60 req/min |
+| Error Response | 生產環境僅回傳通用錯誤訊息，不洩漏內部細節 |
+| JWT TTL | 縮短至 7 天（原 30 天） |
+| Monitor page | 需要 `MONITOR_PASSWORD` 環境變數，未設定拒絕登入 |
+
+---
+
+> 如果您喜歡這個專案，歡迎給一個 Star ⭐

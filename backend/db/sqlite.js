@@ -158,9 +158,52 @@ function walCheckpoint() {
     }
 }
 
+// ── ANALYZE — update query planner statistics (every 6 hours) ───────────────
+// Keeps SQLite's query planner accurate after large inserts/deletes.
+// Much cheaper than VACUUM — no page rewrite, typically <100ms.
+function analyzeDb() {
+    try {
+        db.exec('ANALYZE');
+        console.log('[SQLite] ANALYZE complete');
+    } catch (e) {
+        console.error('[SQLite] ANALYZE error:', e.message);
+    }
+}
+
+// ── VACUUM — reclaim freed pages (weekly, Sunday 04:00 local) ───────────────
+// Only runs if DB has grown significantly fragmented (freelist_count > 10k pages).
+// WAL mode: VACUUM rewrites the entire DB — schedule during low-traffic window.
+function vacuumIfNeeded() {
+    try {
+        const freelistCount = db.pragma('freelist_count', { simple: true });
+        if (freelistCount > 10000) {
+            console.log(`[SQLite] VACUUM starting — ${freelistCount} free pages`);
+            db.exec('VACUUM');
+            console.log('[SQLite] VACUUM complete');
+        }
+    } catch (e) {
+        console.error('[SQLite] VACUUM error:', e.message);
+    }
+}
+
 // Defer startup prune 5s so server starts listening first
 setTimeout(pruneOldTrackPoints, 5000);
 setInterval(pruneOldTrackPoints, 3600 * 1000);
 setInterval(walCheckpoint, 5 * 60 * 1000);
+setInterval(analyzeDb, 6 * 3600 * 1000);
+
+// Weekly VACUUM — Sunday 04:05 local (roughly; node timer drifts, cron in server.js handles precision)
+const msUntilSunday4am = (() => {
+    const now = new Date();
+    const target = new Date(now);
+    target.setHours(4, 5, 0, 0);
+    const daysUntilSun = (7 - now.getDay()) % 7 || 7;
+    target.setDate(target.getDate() + daysUntilSun);
+    return target.getTime() - now.getTime();
+})();
+setTimeout(() => {
+    vacuumIfNeeded();
+    setInterval(vacuumIfNeeded, 7 * 24 * 3600 * 1000);
+}, msUntilSunday4am);
 
 module.exports = db;

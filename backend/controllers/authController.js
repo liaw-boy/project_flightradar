@@ -3,23 +3,31 @@ const bcrypt = require('bcrypt');
 const jwt    = require('jsonwebtoken');
 const db     = require('../db/sqlite');
 
-const JWT_SECRET  = process.env.JWT_SECRET || 'aerostrat-secret-change-in-prod';
 const SALT_ROUNDS = 10;
-const TOKEN_TTL   = '30d';
+const TOKEN_TTL   = '7d';   // reduced from 30d
+
+function getJwtSecret() {
+    const s = process.env.JWT_SECRET;
+    if (!s) {
+        console.error('[FATAL] JWT_SECRET environment variable is not set.');
+        process.exit(1);
+    }
+    return s;
+}
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 function signToken(user) {
     return jwt.sign(
         { id: user.id, username: user.username, is_admin: user.is_admin === 1 },
-        JWT_SECRET,
+        getJwtSecret(),
         { expiresIn: TOKEN_TTL }
     );
 }
 
 function safeUser(user) {
     const { password_hash, ...rest } = user;
-    return rest;
+    return { ...rest, is_admin: rest.is_admin === 1 };
 }
 
 // ── POST /api/auth/register ──────────────────────────────────────────────────
@@ -87,7 +95,7 @@ function authMiddleware(req, res, next) {
     if (!token) return res.status(401).json({ error: 'authentication required' });
 
     try {
-        req.user = jwt.verify(token, JWT_SECRET);
+        req.user = jwt.verify(token, getJwtSecret());
         next();
     } catch {
         res.status(401).json({ error: 'invalid or expired token' });

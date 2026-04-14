@@ -136,6 +136,25 @@
     width: 52px;
 }
 
+.tb-3d-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.tb-3d-label {
+    letter-spacing: 0.04em;
+}
+
+.tb-3d-btn.active {
+    background: rgba(169, 223, 216, 0.15);
+    color: #a9dfd8;
+    border-color: rgba(169, 223, 216, 0.3);
+}
+
 .tb-btn:hover,
 .tb-btn.active {
     background: rgba(34, 211, 238, 0.15);

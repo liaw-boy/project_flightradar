@@ -117,7 +117,7 @@ export default function AuthModal({ onClose }) {
                 cardRef.current.style.setProperty('--tear-clip-h', `${clipH}px`);
             }
             setTearing(true);
-            setTimeout(onClose, 4500);
+            setTimeout(onClose, 2200);
         } catch (err) {
             setError(err.message);
             setLoading(false);

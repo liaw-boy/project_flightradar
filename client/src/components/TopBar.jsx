@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Clock, Activity, Settings, Globe, Search, X, BarChart2, User, LogOut, BookOpen, Route, ShieldCheck } from 'lucide-react';
+import { Clock, Activity, Settings, Globe, Search, X, BarChart2, User, LogOut, BookOpen, Route, ShieldCheck, Plus } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import { authStore } from '../store/authStore';
 import SearchBar from './SearchBar';
@@ -22,6 +22,7 @@ export default function TopBar({
     onToggleStats,
     onOpenAuth,
     onOpenMyFlights,
+    onOpenNewFlight,
     onOpenAdmin,
     authUser,
     showUserRoutes = false,
@@ -158,8 +159,11 @@ export default function TopBar({
                         </button>
                         {showUserMenu && (
                             <div className="settings-popover user-menu-popover">
+                                <button className="user-menu-item" onClick={() => { setShowUserMenu(false); onOpenNewFlight?.(); }}>
+                                    <Plus size={14} /> 新增航班記錄
+                                </button>
                                 <button className="user-menu-item" onClick={() => { setShowUserMenu(false); onOpenMyFlights?.(); }}>
-                                    <BookOpen size={14} /> 我的航班記錄
+                                    <BookOpen size={14} /> 歷史紀錄
                                 </button>
                                 {hasUserRoutes && (
                                     <button
@@ -169,7 +173,7 @@ export default function TopBar({
                                         <Route size={14} /> {showUserRoutes ? '隱藏我的航線' : '顯示我的航線'}
                                     </button>
                                 )}
-                                {currentUser?.is_admin && (
+                                {!!currentUser?.is_admin && (
                                     <>
                                         <div className="user-menu-divider" />
                                         <button className="user-menu-item admin" onClick={() => { setShowUserMenu(false); onOpenAdmin?.(); }}>

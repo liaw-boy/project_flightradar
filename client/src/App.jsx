@@ -65,11 +65,13 @@ export default function App() {
         throttleFactor: 1.0
     });
 
-    const colorScheme = 'TACTICAL';
+    const colorScheme = 'ALTITUDE';
 
     // ── Auth modals ────────────────────────────────────────────
     const [showAuthModal, setShowAuthModal]         = useState(false);
     const [showMyFlights, setShowMyFlights]         = useState(false);
+    const [myFlightsInitialView, setMyFlightsInitialView] = useState('list');
+    const [myFlightsMode, setMyFlightsMode]         = useState('modal');
     const [showAdmin, setShowAdmin]                 = useState(false);
     const [authUser, setAuthUser]                   = useState(authStore.getUser());
     const [userRoutes, setUserRoutes]               = useState(null);
@@ -596,7 +598,9 @@ export default function App() {
                 showStats={showStats}
                 onToggleStats={() => setShowStats(s => !s)}
                 onOpenAuth={() => setShowAuthModal(true)}
-                onOpenMyFlights={() => setShowMyFlights(true)}
+                onOpenMyFlights={() => { setMyFlightsInitialView('list'); setMyFlightsMode('page');  setShowMyFlights(true); }}
+                onOpenNewFlight={() => { setMyFlightsInitialView('form'); setMyFlightsMode('modal'); setShowMyFlights(true); }}
+
                 onOpenAdmin={() => setShowAdmin(true)}
                 authUser={authUser}
                 showUserRoutes={showUserRoutes}
@@ -703,6 +707,8 @@ export default function App() {
 
             {showMyFlights && (
                 <MyFlightsPanel
+                    initialView={myFlightsInitialView}
+                    mode={myFlightsMode}
                     onClose={() => {
                         setShowMyFlights(false);
                         // 關閉時重新拉取路線，確保新增的航班反映在地圖上
@@ -711,13 +717,14 @@ export default function App() {
                         }
                     }}
                     prefillFromPlane={selectedPlane ? {
-                        icao24:       selectedPlane.icao24,
-                        callsign:     selectedPlane.callsign || '',
+                        icao24:        selectedPlane.icao24,
+                        callsign:      selectedPlane.callsign || '',
                         aircraft_type: selectedPlane.type_code || selectedPlane.aircraft_type || '',
-                        registration: selectedPlane.registration || '',
-                        dep_icao:     selectedPlane.origin_country ? '' : '',
+                        registration:  selectedPlane.registration || '',
                         flight_number: selectedPlane.flight_number || selectedPlane.callsign || '',
-                        flight_date:  new Date().toISOString().slice(0, 10),
+                        flight_date:   new Date().toISOString().slice(0, 10),
+                        dep_icao:      selectedRoute?.departureAirport || '',
+                        arr_icao:      selectedRoute?.arrivalAirport || '',
                     } : null}
                 />
             )}

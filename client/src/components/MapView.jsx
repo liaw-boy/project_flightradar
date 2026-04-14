@@ -926,18 +926,14 @@ export default function MapView({
             // This prevents accumulated elapsed time from triggering instant jumps.
             if (rawDt > 2000) {
                 Object.values(currentPlanes).forEach(plane => {
-                    const snapLat = plane._pendingLat ?? plane._interpToLat ?? plane.lat;
-                    const snapLng = plane._pendingLng ?? plane._interpToLng ?? plane.lng;
+                    // After a long pause, snap to last confirmed ADS-B position.
+                    const snapLat = plane._interpToLat ?? plane.lat;
+                    const snapLng = plane._interpToLng ?? plane.lng;
                     plane.renderLat      = snapLat;
                     plane.renderLng      = snapLng;
                     plane._interpFromLat = snapLat;
                     plane._interpFromLng = snapLng;
-                    plane._interpToLat   = snapLat;
-                    plane._interpToLng   = snapLng;
                     plane._interpStartMs = nowDateMs;
-                    plane._pendingLat    = undefined;
-                    plane._pendingLng    = undefined;
-                    plane._pendingDurMs  = undefined;
                 });
             }
 
@@ -972,11 +968,7 @@ export default function MapView({
                 // Phase 2 (t > 1): gentle continuation in the A→B direction while waiting
                 //   for the next API update. Uses measured velocity vector from coordinates,
                 //   not the ADS-B heading field.
-                if (plane.onGround) {
-                    // Ground: always snap to latest known position
-                    plane.renderLat = plane._interpToLat ?? plane.lat;
-                    plane.renderLng = plane._interpToLng ?? plane.lng;
-                } else {
+                {
                     const fromLat = plane._interpFromLat ?? plane.lat;
                     const fromLng = plane._interpFromLng ?? plane.lng;
                     const toLat   = plane._interpToLat   ?? plane.lat;
@@ -985,28 +977,16 @@ export default function MapView({
                     const durMs   = plane._interpDurMs   ?? 10000;
                     const elapsed = nowDateMs - startMs;
 
-                    if (elapsed <= durMs) {
-                        // Lerp between two confirmed positions — no extrapolation
+                    if (elapsed < durMs) {
+                        // Lerp between last known position and new confirmed position.
                         const t = elapsed / durMs;
                         plane.renderLat = fromLat + (toLat - fromLat) * t;
                         plane.renderLng = fromLng + (toLng - fromLng) * t;
-                    } else if (plane._pendingLat !== undefined) {
-                        // Current lerp complete and next position queued — swap immediately
-                        plane._interpFromLat = toLat;
-                        plane._interpFromLng = toLng;
-                        plane._interpToLat   = plane._pendingLat;
-                        plane._interpToLng   = plane._pendingLng;
-                        plane._interpStartMs = nowDateMs;
-                        plane._interpDurMs   = plane._pendingDurMs ?? durMs;
-                        plane._pendingLat    = undefined;
-                        plane._pendingLng    = undefined;
-                        plane._pendingDurMs  = undefined;
-                        // Apply first frame of new lerp
-                        const t2 = Math.min((nowDateMs - plane._interpStartMs) / plane._interpDurMs, 1);
-                        plane.renderLat = plane._interpFromLat + (plane._interpToLat - plane._interpFromLat) * t2;
-                        plane.renderLng = plane._interpFromLng + (plane._interpToLng - plane._interpFromLng) * t2;
                     } else {
-                        // Waiting for next update — hold at last known position
+                        // Lerp complete — hold at the confirmed ADS-B position.
+                        // Dead reckoning / extrapolation removed: it caused the icon to
+                        // overshoot the actual path, then snap backward when the next real
+                        // ADS-B position arrived behind the predicted point.
                         plane.renderLat = toLat;
                         plane.renderLng = toLng;
                     }
@@ -1113,7 +1093,20 @@ export default function MapView({
                                      : isApproach     ? 120
                                      :                  600;
                     if (livePathLat && livePathLng && gapSec < liveExtCap) {
-                        activeSelectedPath = [...basePath, [
+                        // Trim the last basePath point if the icon hasn't arrived there yet.
+                        // If the last stored DB point equals _interpToLat (lerp destination),
+                        // the icon is still mid-lerp → the path would visually overshoot the icon.
+                        // Replace it with renderLat so the trail tip always matches the icon.
+                        const interpToLat = livePlane?._interpToLat;
+                        const interpToLng = livePlane?._interpToLng;
+                        const lastPt = basePath[basePath.length - 1];
+                        const lastIsLerpTarget = lastPt && interpToLat != null &&
+                            Math.abs(lastPt[1] - interpToLat) < 1e-7 &&
+                            Math.abs(lastPt[2] - interpToLng) < 1e-7 &&
+                            Math.abs((livePathLat - interpToLat)) > 1e-7; // icon not yet there
+                        const trimmedBase = lastIsLerpTarget ? basePath.slice(0, -1) : basePath;
+
+                        activeSelectedPath = [...trimmedBase, [
                             nowSec,
                             livePathLat,
                             livePathLng,
@@ -1265,7 +1258,7 @@ export default function MapView({
                     //   curve             → per-segment midpoint quadratic Bézier
 
                     {
-                        const LINE_W = zoom >= 12 ? 2 : 1.5;
+                        const LINE_W = zoom >= 12 ? 3 : zoom >= 9 ? 2.5 : 2;
 
                         ctx.lineWidth  = LINE_W;
                         ctx.lineCap    = 'round';
@@ -1312,12 +1305,15 @@ export default function MapView({
                             // Per-segment: altitude color + time-based opacity fade
                             for (let i = 0; i < n - 1; i++) {
                                 const progress  = n > 2 ? i / (n - 2) : 1; // 0=oldest → 1=newest
-                                const baseAlpha = 0.25 + 0.75 * progress;   // 25% → 100%
+                                const baseAlpha = 0.45 + 0.55 * progress;   // 45% → 100%
                                 const isStale   = pts[i].stale;
-                                const alpha     = isStale ? baseAlpha * 0.4 : baseAlpha;
+                                const alpha     = isStale ? baseAlpha * 0.5 : baseAlpha;
 
-                                const alt   = pts[i].seg[3] ?? 0;
-                                const color = getAltitudeColor(alt, alt <= 0, false, colorSchemeRef.current);
+                                // Track altitude is stored in feet (ADS-B standard).
+                                // getAltitudeColor expects meters — convert.
+                                const altFt = pts[i].seg[3] ?? 0;
+                                const altM  = altFt * 0.3048;
+                                const color = getAltitudeColor(altM, altM <= 0, false, colorSchemeRef.current);
 
                                 ctx.globalAlpha = alpha;
                                 ctx.strokeStyle = color;
@@ -1492,38 +1488,13 @@ export default function MapView({
                              scaleCacheRef.current.delete(firstKey);
                         }
                     }
-                    const altColor = getAltitudeColor(plane.altitude, plane.onGround, plane.isEmergency, colorSchemeRef.current);
-                    const rawHeading = plane.heading || 0;
-                    let angleRad = rawHeading * Math.PI / 180;
+                    // Live aircraft altitude is in feet (ADS-B); convert to meters for color stops.
+                    const altColor = getAltitudeColor((plane.altitude || 0) * 0.3048, plane.onGround, plane.isEmergency, colorSchemeRef.current);
 
-                    // [v15.1] Trajectory-Aligned Heading Synchronization (Hardened)
-                    // Only use path-derived angle when ADS-B heading is unavailable (rawHeading === 0).
-                    // Using pathAngle to OVERRIDE a valid ADS-B heading caused 180° flips when
-                    // the last two track points lagged behind the actual turn direction.
-                    if (isSelected && rawHeading === 0 && activeSelectedPath && activeSelectedPath.length >= 2) {
-                        const lastPt = activeSelectedPath[activeSelectedPath.length - 1];
-                        const prevPt = activeSelectedPath[activeSelectedPath.length - 2];
-
-                        if (lastPt && prevPt) {
-                            // Support both [ts, lat, lng] and {lat, lng} formats
-                            const getVal = (p, idx, key) => (Array.isArray(p) ? p[idx] : p[key]);
-                            const lat0 = getVal(prevPt, 1, 'lat');
-                            const lng0 = getVal(prevPt, 2, 'lng');
-                            const lat1 = getVal(lastPt, 1, 'lat');
-                            const lng1 = getVal(lastPt, 2, 'lng');
-
-                            if (lat0 !== undefined && lat1 !== undefined) {
-                                const dy = lat1 - lat0;
-                                const dx = (lng1 - lng0) * Math.cos(lat1 * Math.PI / 180);
-                                const pathAngle = Math.atan2(dx, dy);
-
-                                // SAFETY: Only apply if pathAngle is a valid number and dx/dy aren't zero
-                                if (Number.isFinite(pathAngle) && (dx !== 0 || dy !== 0)) {
-                                    angleRad = pathAngle;
-                                }
-                            }
-                        }
-                    }
+                    // ADS-B heading from adsb.fi/adsb.lol is accurate and current.
+                    // Movement-vector derivation was designed for MLAT noise and caused
+                    // reversed/incorrect headings on clean ADS-B data — removed.
+                    const angleRad = (plane.heading || 0) * Math.PI / 180;
 
                     // ── 3-Tier Render Pipeline ────────────────────────────────
                     // Tier 1: Safety dot    — only if drawSize ≤ 3 (should never happen with new minimums)
@@ -1541,12 +1512,12 @@ export default function MapView({
                         ctx.arc(ptX, ptY, dotR + 1.2, 0, Math.PI * 2);
                         ctx.fill();
                         // Colored center
-                        ctx.fillStyle = isSelected ? '#00ffff' : altColor;
+                        ctx.fillStyle = isSelected ? '#FFD700' : altColor;
                         ctx.beginPath();
                         ctx.arc(ptX, ptY, dotR, 0, Math.PI * 2);
                         ctx.fill();
                         if (isSelected) {
-                            ctx.strokeStyle = '#00ffff';
+                            ctx.strokeStyle = '#FFD700';
                             ctx.lineWidth = 1.5;
                             ctx.stroke();
                         }
@@ -1586,7 +1557,7 @@ export default function MapView({
                                 ctx.fillStyle = altColor;
                                 ctx.fill(path);
                                 // Pass 3: thin white outline (1px normalized)
-                                ctx.strokeStyle = isSelected ? '#00ffff' : 'rgba(255,255,255,0.9)';
+                                ctx.strokeStyle = isSelected ? '#FFD700' : 'rgba(255,255,255,0.9)';
                                 ctx.lineWidth = isSelected ? Math.max(0.8, 2.0 / canvasScale) : Math.max(0.3, 1.0 / canvasScale);
                                 ctx.stroke(path);
                                 ctx.restore();

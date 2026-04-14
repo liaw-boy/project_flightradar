@@ -559,24 +559,29 @@
 
 /* 卡片底部：用動態量測的 --tear-clip-h 精確對準缺口，瞬間 clip */
 @keyframes cardClipBottom {
-    0%,  24% { clip-path: inset(0 0 0 0 round 12px); }
+    0%,  24% { clip-path: inset(0 0 0 0 round 12px 12px 0 0); }
     26%, 100% { clip-path: inset(0 0 var(--tear-clip-h, 90px) 0 round 12px 12px 0 0); }
 }
 
 /* 卡片本體：等 stub 衝走再往上飛出（相對位移，不含外層 translate/scale） */
 @keyframes cardExit {
-    0%,  45% { transform: translateY(0);    opacity: 1; }
-    100%     { transform: translateY(-12%); opacity: 0; }
+    0%,  30% { transform: translateY(0)    scale(1);    opacity: 1; }
+    100%     { transform: translateY(-22%) scale(0.96); opacity: 0; }
 }
 
 /* ── 套用 ── */
 .auth-tearing {
-    /* 不再負責 cardExit — 讓 auth-right 自己飛，stub 不受牽連 */
     pointer-events: none;
     overflow: visible;      /* stub 往下飛不被容器裁切 */
     scrollbar-width: none;
+    animation: overlayFadeOut 0.5s ease-in 1.8s both;
 }
 .auth-tearing::-webkit-scrollbar { display: none; }
+
+@keyframes overlayFadeOut {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+}
 
 /* 虛線閃光 */
 .auth-tearing .auth-tear .auth-tear-line {
@@ -591,24 +596,38 @@
     z-index: 20;
 }
 
-/* auth-right：clip 底部（移除 stub 區域）＋ 整張往上飛 */
+/* auth-right：clip 底部（移除 stub 區域），固定不移動 */
 .auth-tearing .auth-right {
     --tear-clip-h: 90px; /* JS 動態覆蓋 */
     overflow: visible;
-    animation:
-        cardClipBottom 3s ease-out 0s both,
-        cardExit       4s cubic-bezier(0.4, 0, 1, 1) 0s both;
+    animation: cardClipBottom 3s ease-out 0s both;
 }
 
-/* ── Stub ── 現在是 auth-right 的 sibling，需要自己帶背景和寬度 */
+/* ── Stub ── 與 auth-right 無縫接合 */
 .auth-stub {
-    width: 367px;          /* 與 auth-right 同寬 */
-    background: #f5f2eb;   /* 登機證同色 */
+    pointer-events: all;
+    width: 367px;
+    background: #f5f2eb;
     border-radius: 0 0 12px 12px;
     padding: 8px 20px 10px;
     flex-shrink: 0;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.45);
+    position: relative;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.5);
 }
+
+/* stub 頂部對應撕票線的缺口半圓 — 與 auth-tear::before/after 對齊 */
+.auth-stub::before,
+.auth-stub::after {
+    content: '';
+    position: absolute;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: #080f22;
+    top: -8px;
+    z-index: 5;
+}
+.auth-stub::before { left: -8px; }
+.auth-stub::after  { right: -8px; }
 
 .auth-submit {
     width: 100%;
@@ -729,7 +748,7 @@
     margin-bottom: 0;
 }
 
-/* ── Right area — wrapper, scrollbar shows here (outside card) ── */
+/* ── Right area — wrapper ── */
 .auth-right-area {
     position: absolute;
     left: 50%;
@@ -738,31 +757,25 @@
     transform-origin: center center;
     pointer-events: none;
     z-index: 10;
-    /* scroll lives here so bar appears outside the cream card */
     max-height: calc(100dvh / 1.40 - 20px);
     overflow-y: auto;
     overflow-x: hidden;
     border-radius: 12px;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(196,162,96,0.35) transparent;
+    scrollbar-width: none;
 }
-.auth-right-area::-webkit-scrollbar       { width: 5px; }
-.auth-right-area::-webkit-scrollbar-track { background: transparent; }
-.auth-right-area::-webkit-scrollbar-thumb { background: rgba(196,162,96,0.35); border-radius: 3px; }
+.auth-right-area::-webkit-scrollbar { display: none; }
 
 /* ── Boarding pass card — card-width: 367px ── */
 .auth-right {
     width: 367px;
     background: #f5f2eb;
-    border-radius: 12px;
+    border-radius: 12px 12px 0 0;  /* bottom straight — connects flush with stub */
     display: flex;
     flex-direction: column;
-    overflow: hidden;         /* no internal scrollbar */
+    overflow: hidden;
     position: relative;
     pointer-events: all;
-    box-shadow:
-        0 2px 0 #d4c9b0,
-        0 24px 60px rgba(0,0,0,0.65);
+    box-shadow: 0 24px 60px rgba(0,0,0,0.65);
 }
 
 /* ── Mobile ── */

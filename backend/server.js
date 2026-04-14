@@ -194,7 +194,16 @@ const PORT = config.PORT;
 // ==========================================
 // Middleware
 // ==========================================
-app.use(cors());
+const _allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:3005')
+    .split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors({
+    origin: (origin, cb) => {
+        // Allow same-origin requests (no Origin header) and whitelisted origins
+        if (!origin || _allowedOrigins.includes(origin)) return cb(null, true);
+        cb(new Error(`CORS: origin '${origin}' not allowed`));
+    },
+    credentials: true,
+}));
 app.use(compression()); // [v2.9.0] Gzip
 app.use(logger.httpMiddleware); // [LOG] HTTP request logging (skips high-freq endpoints)
 
@@ -263,16 +272,36 @@ app.use(helmet({
     contentSecurityPolicy: false, // Prevents blocking of inline scripts and external map tiles
     crossOriginEmbedderPolicy: false, // Prevents blocking of external assets
 }));
-// Rate limiter: 200 req/min per IP（選飛機會同時觸發 metadata+route+track 3 個請求）
+// General API rate limiter
 const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 1000,
+    max: 600,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please wait a moment.' },
-    skip: (req) => ['/api/events', '/api/flights/live', '/api/flight-details', '/api/flight/complete-details'].some(p => req.path.startsWith(p)), // High-freq & Fusion exempt
+    skip: (req) => ['/api/events', '/api/flights/live', '/api/flight-details'].some(p => req.path.startsWith(p)),
 });
 app.use('/api', apiLimiter);
+
+// Strict limiter for expensive fusion endpoints (fan out to 5 external APIs)
+const fusionLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 40,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many detail requests, please slow down.' },
+});
+app.use('/api/flight/complete-details', fusionLimiter);
+
+// Strict limiter for lookup endpoints
+const lookupLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many lookup requests.' },
+});
+app.use('/api/lookup', lookupLimiter);
 app.use(express.json());
 
 // ── User Auth ────────────────────────────────────────────────────────────────
@@ -336,6 +365,49 @@ app.put(   '/api/flights/my/:id',   mw, userFlightsCtrl.update);
 app.delete('/api/flights/my/:id',   mw, userFlightsCtrl.remove);
 app.get(   '/api/flights/my/stats', mw, userFlightsCtrl.stats);
 app.get(   '/api/flights/my/map',   mw, userFlightsCtrl.mapData);
+
+// ── Flight lookup helpers (no auth required, uses local VRS DB) ──────────────
+app.get('/api/lookup/callsign/:cs', async (req, res) => {
+    const cs = (req.params.cs || '').toUpperCase().trim();
+    if (!cs) return res.json({ found: false });
+
+    // Layer 1: VRS SQLite (fast, local)
+    const vrsRoute = VrsDb.lookup(cs);
+    const vrsDep = vrsRoute?.from ? VrsDb.lookupAirport(vrsRoute.from) : null;
+    const vrsArr = vrsRoute?.to   ? VrsDb.lookupAirport(vrsRoute.to)   : null;
+
+    // Layer 2: MongoDB Route cache (has departure_time, arrival_time from AeroDataBox)
+    let dbRoute = null;
+    try {
+        dbRoute = await Route.findOne({ callsign: cs, source: { $ne: 'spatial_inference' } })
+            .select('origin_icao destination_icao origin_name destination_name departure_time arrival_time flight_number')
+            .lean();
+    } catch (_) {}
+
+    const dep_icao = dbRoute?.origin_icao      || vrsRoute?.from || null;
+    const arr_icao = dbRoute?.destination_icao || vrsRoute?.to   || null;
+
+    if (!dep_icao && !arr_icao) return res.json({ found: false });
+
+    return res.json({
+        found:     true,
+        dep_icao:  dep_icao,
+        arr_icao:  arr_icao,
+        dep_name:  dbRoute?.origin_name      || vrsDep?.name || null,
+        arr_name:  dbRoute?.destination_name || vrsArr?.name || null,
+        dep_time:  dbRoute?.departure_time   || null,
+        arr_time:  dbRoute?.arrival_time     || null,
+        flight_number: dbRoute?.flight_number || null,
+    });
+});
+
+app.get('/api/lookup/airport/:code', (req, res) => {
+    const code = (req.params.code || '').toUpperCase().trim();
+    if (!code) return res.json({ found: false });
+    const ap = VrsDb.lookupAirport(code);
+    if (!ap) return res.json({ found: false });
+    return res.json({ found: true, icao: ap.icao, iata: ap.iata, name: ap.name, country: ap.country_iso });
+});
 
 // [v9.7] Strategic API Heartbeats
 app.post('/api/viewport', (req, res) => res.json({ status: 'ok', received: true }));
@@ -1045,6 +1117,9 @@ a:hover{opacity:.75}
 .hw-model{font-weight:600;color:var(--t);margin-bottom:3px}
 .hw-detail{color:var(--td);font-size:11px}
 
+/* ── Spark canvas ── */
+.spark-bg{background:rgba(255,255,255,0.03);border-radius:4px}
+
 /* ── Footer ── */
 .page-footer{padding:14px 24px;border-top:1px solid var(--border);font-size:11px;color:var(--td);flex-shrink:0;display:flex;align-items:center;justify-content:space-between;background:var(--bg)}
 
@@ -1181,44 +1256,34 @@ a:hover{opacity:.75}
       <div class="grid-2">
         <div id="hardware" class="card">
           <div class="card-hd">
-            <span class="card-title">Hardware Performance</span>
-            <span class="card-badge">LIVE</span>
+            <span class="card-title">System Resources</span>
+            <span class="card-badge" id="hw-badge">LIVE</span>
           </div>
-          <div class="card-body">
-            <div id="hw-strip" class="hw-strip">
-              <div class="hw-model">Loading CPU info...</div>
+          <div class="card-body" style="padding:14px 16px">
+            <div id="hw-strip" class="hw-strip" style="margin-bottom:14px"></div>
+
+            <!-- CPU sparkline -->
+            <div style="margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+                <span style="font-size:11px;font-weight:600;color:var(--td);letter-spacing:.08em;text-transform:uppercase">CPU</span>
+                <span id="cpu-pct" style="font-size:18px;font-weight:700;color:#a9dfd8">--%</span>
+              </div>
+              <canvas id="cpu-spark" height="40" style="width:100%;display:block;border-radius:4px"></canvas>
+              <div id="cpu-detail" style="font-size:10px;color:var(--td);margin-top:4px">load: —</div>
             </div>
-            <div class="donut-row">
-              <div class="donut-wrap" style="width:80px;height:80px">
-                <svg width="80" height="80" viewBox="0 0 80 80">
-                  <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="8"/>
-                  <circle id="cpu-donut" cx="40" cy="40" r="32" fill="none" stroke="#a9dfd8" stroke-width="8"
-                    stroke-linecap="round"
-                    style="stroke-dasharray:201.1;stroke-dashoffset:201.1;transform:rotate(-90deg);transform-origin:40px 40px;transition:stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)"/>
-                </svg>
-                <div class="donut-center"><span class="donut-pct" id="cpu-pct">--%</span><span class="donut-sub">CPU</span></div>
+
+            <!-- RAM sparkline -->
+            <div style="margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+                <span style="font-size:11px;font-weight:600;color:var(--td);letter-spacing:.08em;text-transform:uppercase">RAM</span>
+                <span id="ram-pct" style="font-size:18px;font-weight:700;color:#fcb859">--%</span>
               </div>
-              <div class="donut-info">
-                <div class="donut-title">System CPU Usage</div>
-                <div class="donut-detail" id="cpu-detail">System load: —</div>
-              </div>
+              <canvas id="ram-spark" height="40" style="width:100%;display:block;border-radius:4px"></canvas>
+              <div id="ram-detail" style="font-size:10px;color:var(--td);margin-top:4px">heap: —</div>
             </div>
-            <div class="donut-row">
-              <div class="donut-wrap" style="width:80px;height:80px">
-                <svg width="80" height="80" viewBox="0 0 80 80">
-                  <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="8"/>
-                  <circle id="ram-donut" cx="40" cy="40" r="32" fill="none" stroke="#fcb859" stroke-width="8"
-                    stroke-linecap="round"
-                    style="stroke-dasharray:201.1;stroke-dashoffset:201.1;transform:rotate(-90deg);transform-origin:40px 40px;transition:stroke-dashoffset 1s cubic-bezier(.4,0,.2,1)"/>
-                </svg>
-                <div class="donut-center"><span class="donut-pct" id="ram-pct">--%</span><span class="donut-sub">RAM</span></div>
-              </div>
-              <div class="donut-info">
-                <div class="donut-title">Process Memory (RSS)</div>
-                <div class="donut-detail" id="ram-detail">Heap used: —</div>
-              </div>
-            </div>
-            <div id="perf-details"></div>
+
+            <!-- Memory breakdown bars -->
+            <div id="mem-bars"></div>
           </div>
         </div>
 
@@ -1234,6 +1299,28 @@ a:hover{opacity:.75}
             </div>
             <div id="storage-body"></div>
           </div>
+        </div>
+      </div>
+
+      <!-- Database Status -->
+      <div id="dbstatus" class="card">
+        <div class="card-hd">
+          <span class="card-title">Database Status</span>
+          <span class="card-badge" id="db-badge">—</span>
+        </div>
+        <div class="card-body">
+          <div class="grid-2" style="gap:12px;margin-bottom:16px">
+            <div>
+              <div class="section-hd" style="font-size:11px;margin-bottom:8px">aerostrat.db（主要）</div>
+              <div id="db-main-body"></div>
+            </div>
+            <div>
+              <div class="section-hd" style="font-size:11px;margin-bottom:8px">routes.db（航線）</div>
+              <div id="db-routes-body"></div>
+            </div>
+          </div>
+          <div class="section-hd" style="font-size:11px;margin-bottom:8px">同步狀態</div>
+          <div id="db-sync-body"></div>
         </div>
       </div>
 
@@ -1312,13 +1399,82 @@ a:hover{opacity:.75}
 </div><!-- /layout -->
 
 <script>
-const DONUT_CIRC = 201.1; // 2 * π * 32
+// ── Sparkline history (60 points = 60 × 5s = 5 min) ──────────────────────────
+const SPARK_MAX  = 60;
+const sparkData  = { cpu: [], ram: [] };
 
-function setDonut(id, pct) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.style.strokeDashoffset = DONUT_CIRC * (1 - Math.min(100, pct) / 100);
+function pushSpark(key, val) {
+  sparkData[key].push(val);
+  if (sparkData[key].length > SPARK_MAX) sparkData[key].shift();
 }
+
+function drawSpark(canvasId, data, color) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W   = canvas.offsetWidth  || 300;
+  const H   = canvas.offsetHeight || 40;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  // background
+  ctx.fillStyle = 'rgba(255,255,255,0.03)';
+  ctx.beginPath();
+  ctx.roundRect(0, 0, W, H, 4);
+  ctx.fill();
+
+  if (data.length < 2) return;
+
+  const step   = W / (SPARK_MAX - 1);
+  const pad    = 4;
+  const usable = H - pad * 2;
+
+  // gradient fill
+  const grad = ctx.createLinearGradient(0, pad, 0, H);
+  grad.addColorStop(0, color + '55');
+  grad.addColorStop(1, color + '00');
+
+  ctx.beginPath();
+  data.forEach((v, i) => {
+    const x = (SPARK_MAX - data.length + i) * step;
+    const y = pad + usable * (1 - v / 100);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  // close fill path
+  const lastX = (SPARK_MAX - data.length + data.length - 1) * step;
+  ctx.lineTo(lastX, H);
+  ctx.lineTo((SPARK_MAX - data.length) * step, H);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // line
+  ctx.beginPath();
+  data.forEach((v, i) => {
+    const x = (SPARK_MAX - data.length + i) * step;
+    const y = pad + usable * (1 - v / 100);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = 1.5;
+  ctx.lineJoin    = 'round';
+  ctx.stroke();
+
+  // latest value dot
+  const lastV = data[data.length - 1];
+  const dotX  = (SPARK_MAX - 1) * step;
+  const dotY  = pad + usable * (1 - lastV / 100);
+  ctx.beginPath();
+  ctx.arc(dotX, dotY, 3, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function setDonut(id, pct) {} // legacy no-op (donuts replaced by sparklines)
 
 function setActive(el) {
   document.querySelectorAll('.sb-nav-item').forEach(i => i.classList.remove('active'));
@@ -1378,25 +1534,49 @@ async function refresh() {
       statCard(formatBytes(stor.dbSize||0), 'DB SIZE', 'c-red', 'SQLite storage');
 
     // ── Hardware ──
-    const cpuPct = Math.min(100, Math.round(sys.cpuUsage || 0));
-    const rss    = perf.process?.memory?.rss || 0;
-    const ramPct = Math.min(100, Math.round((rss / (sys.totalMem || 8589934592)) * 100));
+    const cpuPct  = Math.min(100, Math.round(sys.cpuUsage || 0));
+    const mem     = perf.process?.memory || {};
+    const rss     = mem.rss     || 0;
+    const heap    = mem.heapUsed || 0;
+    const heapTot = mem.heapTotal || 0;
+    const ext     = mem.external || 0;
+    const totalMem = sys.totalMem || 8589934592;
+    const freeMem  = sys.freeMem  || 0;
+    const sysUsed  = totalMem - freeMem;
+    const ramPct  = Math.min(100, Math.round((sysUsed / totalMem) * 100));
 
-    setDonut('cpu-donut', cpuPct);
-    setDonut('ram-donut', ramPct);
+    pushSpark('cpu', cpuPct);
+    pushSpark('ram', ramPct);
+    drawSpark('cpu-spark', sparkData.cpu, '#a9dfd8');
+    drawSpark('ram-spark', sparkData.ram, '#fcb859');
+
     document.getElementById('cpu-pct').textContent = cpuPct + '%';
     document.getElementById('ram-pct').textContent = ramPct + '%';
-    document.getElementById('cpu-detail').textContent = 'System load (1m): ' + (sys.load?.[0] || 0).toFixed(2);
-    document.getElementById('ram-detail').textContent = 'Heap used: ' + formatBytes(perf.process?.memory?.heapUsed || 0);
+    document.getElementById('cpu-detail').textContent =
+      'load avg  ' + (sys.load?.[0]||0).toFixed(2) + '  ' + (sys.load?.[1]||0).toFixed(2) + '  ' + (sys.load?.[2]||0).toFixed(2) +
+      '  ·  ' + (sys.cpuCores||0) + ' cores';
+    document.getElementById('ram-detail').textContent =
+      'sys ' + formatBytes(sysUsed) + ' / ' + formatBytes(totalMem) +
+      '  ·  proc rss ' + formatBytes(rss);
 
     document.getElementById('hw-strip').innerHTML =
-      '<div class="hw-model">' + (sys.cpuModel || 'Generic CPU') + '</div>' +
-      '<div class="hw-detail">' + (sys.cpuCores||0) + ' cores &nbsp;·&nbsp; ' + (sys.arch||'') + ' &nbsp;·&nbsp; ' + (sys.platform||'linux') + '</div>';
+      '<div class="hw-model">' + (sys.cpuModel || 'CPU') + '</div>' +
+      '<div class="hw-detail">' + (sys.arch||'') + ' &nbsp;·&nbsp; ' + (sys.platform||'linux') + '</div>';
 
-    document.getElementById('perf-details').innerHTML =
-      row('Free RAM', formatBytes(sys.freeMem||0), 'ok') +
-      row('Total RAM', formatBytes(sys.totalMem||0), 'dim') +
-      row('RSS Memory', formatBytes(rss), '');
+    document.getElementById('hw-badge').textContent = cpuPct + '% CPU · ' + ramPct + '% RAM';
+
+    // Memory breakdown bars
+    const mkBar = (lbl, used, total, color) => {
+      const pct = Math.min(100, Math.round((used / (total||1)) * 100));
+      return '<div class="bar-row"><div class="bar-hd"><span class="bar-lbl">' + lbl + '</span>' +
+        '<span style="color:var(--tm);font-size:11px">' + formatBytes(used) + ' / ' + formatBytes(total) + ' &nbsp;<b style="color:' + color + '">' + pct + '%</b></span></div>' +
+        '<div class="bar-bg"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div></div>';
+    };
+    document.getElementById('mem-bars').innerHTML =
+      mkBar('Heap Used',   heap,    heapTot,  '#a9dfd8') +
+      mkBar('Heap Total',  heapTot, rss,      '#4ade80') +
+      mkBar('RSS Memory',  rss,     totalMem, '#fcb859') +
+      mkBar('System RAM',  sysUsed, totalMem, '#a855f7');
 
     // ── Disk ──
     const disk   = sys.disk || {};
@@ -1501,6 +1681,48 @@ async function refresh() {
       row('Errors', (stats.errors||0), stats.errors > 0 ? 'err' : 'ok') +
       row('Uptime', Math.round((Date.now() - (stats.startTime||Date.now())) / 60000) + ' min', 'dim');
 
+    // ── DB Status ──
+    try {
+      const dbSt = await fetch('/monitor/api/db-status').then(r => r.json());
+      const m = dbSt.main   || {};
+      const r2 = dbSt.routes || {};
+      const syn = dbSt.sync  || {};
+
+      const fmtRows = n => n == null ? '—' : Number(n).toLocaleString();
+      const fmtMb   = n => n == null ? '—' : n + ' MB';
+
+      // Main DB
+      const mt = m.tables || {};
+      document.getElementById('db-main-body').innerHTML =
+        row('aerostrat.db', formatBytes(m.sizeBytes||0), 'dim') +
+        row('track_points',    fmtRows(mt.track_points?.rows)    + ' · ' + fmtMb(mt.track_points?.sizeMb),    'warn') +
+        row('flight_sessions', fmtRows(mt.flight_sessions?.rows) + ' · ' + fmtMb(mt.flight_sessions?.sizeMb), '') +
+        row('users',           fmtRows(mt.users?.rows), 'dim');
+
+      // Routes DB
+      const rt = r2.tables || {};
+      document.getElementById('db-routes-body').innerHTML =
+        row('routes.db', formatBytes(r2.sizeBytes||0), 'dim') +
+        row('routes',      fmtRows(rt.routes?.rows)      + ' 筆', 'ok') +
+        row('airports',    fmtRows(rt.airports?.rows)    + ' 筆', 'ok') +
+        row('airlines',    fmtRows(rt.airlines?.rows)    + ' 筆', 'ok') +
+        row('model_types', fmtRows(rt.model_types?.rows) + ' 筆', 'ok');
+
+      // Sync status
+      const vrs  = syn.vrs  || {};
+      const mict = syn.mictronics || {};
+      const statusBadge = s => s === 'ok' ? 'ok' : s === 'syncing' ? 'warn' : s === 'error' ? 'err' : 'dim';
+      const fmtDate = iso => iso ? new Date(iso).toLocaleString('zh-TW', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}) : '未知';
+      const mictDate = mict.lastSyncUnix ? new Date(mict.lastSyncUnix * 1000).toLocaleString('zh-TW', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}) : '未知';
+
+      document.getElementById('db-sync-body').innerHTML =
+        row('VRS 航線 (每日)', fmtDate(vrs.lastSync) + ' · ' + (vrs.gitCommit||'—'), statusBadge(vrs.status)) +
+        row('Mictronics (每週)', mictDate, statusBadge(mict.status));
+
+      const totalRows = (mt.track_points?.rows||0) + (mt.flight_sessions?.rows||0);
+      document.getElementById('db-badge').textContent = totalRows.toLocaleString() + ' rows';
+    } catch(_) {}
+
   } catch(e) {
     const dot = document.getElementById('sync-dot');
     dot.className = 'sync-dot err';
@@ -1533,7 +1755,7 @@ const observer = new IntersectionObserver(entries => {
 }, { root: document.querySelector('.scroll'), threshold: 0.4 });
 
 document.addEventListener('DOMContentLoaded', () => {
-  ['kpi','hardware','storage','opensky','sync','synclog','sessions','api'].forEach(id => {
+  ['kpi','hardware','storage','dbstatus','opensky','sync','synclog','sessions','api'].forEach(id => {
     const el = document.getElementById(id);
     if (el) observer.observe(el);
   });
@@ -1624,7 +1846,7 @@ function requireAdminAccess(req, res, next) {
     const token  = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (token) {
         try {
-            const payload = require('jsonwebtoken').verify(token, process.env.JWT_SECRET || 'aerostrat-secret-change-in-prod');
+            const payload = require('jsonwebtoken').verify(token, process.env.JWT_SECRET);
             if (payload.is_admin) return next();
         } catch {}
     }
@@ -1700,6 +1922,71 @@ app.get('/monitor/logout', (req, res) => {
 });
 
 // ── Monitor User Management API (monitor session auth) ────────────
+// ── DB Status API ─────────────────────────────────────────────────────────────
+app.get('/monitor/api/db-status', requireMonitorAuth, (req, res) => {
+    const sqliteDb  = require('./db/sqlite');
+    const routesDb  = require('better-sqlite3');
+    const routesPath = path.join(__dirname, 'data', 'routes.db');
+    const mainPath   = path.join(__dirname, 'data', 'aerostrat.db');
+
+    // ── Main DB (aerostrat.db) ───────────────────────────────────────────────
+    const main = { tables: {}, sizeBytes: 0 };
+    try {
+        main.sizeBytes = fs.existsSync(mainPath) ? fs.statSync(mainPath).size : 0;
+        const tables = ['track_points','flight_sessions','users','user_flights'];
+        tables.forEach(t => {
+            try {
+                main.tables[t] = {
+                    rows:    sqliteDb.prepare(`SELECT COUNT(*) as n FROM ${t}`).get().n,
+                    sizeMb:  Math.round((sqliteDb.prepare(`SELECT SUM(pgsize) as s FROM dbstat WHERE name=?`).get(t)?.s || 0) / 1024 / 1024 * 10) / 10,
+                };
+            } catch (_) { main.tables[t] = { rows: 0, sizeMb: 0 }; }
+        });
+    } catch (_) {}
+
+    // ── Routes DB (routes.db) ────────────────────────────────────────────────
+    const routes = { tables: {}, sizeBytes: 0 };
+    try {
+        routes.sizeBytes = fs.existsSync(routesPath) ? fs.statSync(routesPath).size : 0;
+        if (routes.sizeBytes > 0) {
+            const rdb = new (routesDb)(routesPath, { readonly: true });
+            const rTables = ['routes','airports','airlines','model_types'];
+            rTables.forEach(t => {
+                try {
+                    routes.tables[t] = {
+                        rows:   rdb.prepare(`SELECT COUNT(*) as n FROM ${t}`).get().n,
+                        sizeMb: Math.round((rdb.prepare(`SELECT SUM(pgsize) as s FROM dbstat WHERE name=?`).get(t)?.s || 0) / 1024 / 1024 * 10) / 10,
+                    };
+                } catch (_) { routes.tables[t] = { rows: 0, sizeMb: 0 }; }
+            });
+            rdb.close();
+        }
+    } catch (_) {}
+
+    // ── VRS standing-data git info ────────────────────────────────────────────
+    let vrsGitCommit = null;
+    try {
+        const { execSync } = require('child_process');
+        const sdDir = path.join(__dirname, 'data', 'standing-data');
+        if (fs.existsSync(sdDir)) {
+            vrsGitCommit = execSync('git log -1 --format="%h %ai"', { cwd: sdDir, encoding: 'utf8', stdio: 'pipe' }).trim();
+        }
+    } catch (_) {}
+
+    // ── Mictronics last sync ─────────────────────────────────────────────────
+    let mictLastSync = null;
+    try { mictLastSync = MictronicsDb.lastSyncTime?.(); } catch (_) {}
+
+    res.json({
+        main,
+        routes,
+        sync: {
+            vrs:        { ...dbSyncStatus.vrs,        gitCommit: vrsGitCommit },
+            mictronics: { ...dbSyncStatus.mictronics, lastSyncUnix: mictLastSync },
+        },
+    });
+});
+
 app.get('/monitor/api/users', requireMonitorAuth, (req, res) => {
     const users = db.prepare(
         'SELECT id, username, email, is_admin, avatar_color, created_at FROM users ORDER BY id'
@@ -1722,6 +2009,9 @@ app.put('/monitor/api/users/:id/admin', requireMonitorAuth, (req, res) => {
     db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(newVal, id);
     res.json({ ok: true, is_admin: newVal });
 });
+
+// Public ping — no auth required, used by health checks and tests
+app.get('/api/ping', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 app.get('/api/health', requireAdminAccess, (req, res) => {
     const dbPath = path.join(__dirname, 'data', 'aerostrat.db');
@@ -2336,53 +2626,42 @@ async function ingestTrackPoints(states, timeUnix) {
 // ── v11.0 Three-Tier Polling Engine ───────────────────────────────────────
 // Replaces the old single-loop fetchGlobalPlanes().
 // Three independent setIntervals run concurrently:
-//   fetchGlobalBaseline    — 15s  parallel adsb.fi-snap + adsb.lol
-//   fetchViewportOverlay   — 8s   parallel AL-point + re-api, fallback adsb.fi v3
-//   fetchSpecialCategories — 60s  parallel AL-mil + AL-ladd
+//   fetchGlobalBaseline    — 5s   adsb.lol primary, adsb.fi-snap fallback
+//   fetchViewportOverlay   — 5s   re-api.adsb.lol + al-point, fallback adsb.fi v3
+//   fetchSpecialCategories — 60s  military + LADD
 
 // ── Tier 1: Global Baseline ────────────────────────────────────────────────
+// Primary: adsb.lol (no quota, 5s interval)
+// Fallback: adsb.fi snapshot (if adsb.lol fails)
 let _baselineRunning = false;
-// [v11.1] Interleaved fetch: adsb.fi-snap and adsb.lol alternate every 12.5s
-// combined update rate ~12.5s instead of 25s. Each source still fetched once per 25s.
-let _baselineTurn = 'snap'; // alternates: 'snap' → 'lol' → 'snap' ...
 
 async function fetchGlobalBaseline() {
     if (_baselineRunning) return;
     _baselineRunning = true;
     const t0 = performance.now();
 
-    const thisTurn = _baselineTurn;
-    _baselineTurn = (thisTurn === 'snap') ? 'lol' : 'snap';
-
-    const snapPromise = (thisTurn === 'snap' && !cbOpen('adsb.fi-snap'))
-        ? fetch('http://100.108.160.69:9876', { signal: AbortSignal.timeout(12000) })
-              .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-        : Promise.reject(new Error('skipped'));
-
-    const lolPromise = (thisTurn === 'lol' && !cbOpen('adsb.lol'))
-        ? fetch('https://api.adsb.lol/v2/lat/0/lon/0/dist/99999', {
-              headers: { 'User-Agent': 'AEROSTRAT/11.0' },
-              signal: AbortSignal.timeout(15000) })
-              .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-        : Promise.reject(new Error('skipped'));
-
     try {
-        const [snapR, lolR] = await Promise.allSettled([snapPromise, lolPromise]);
+        // Both sources fire in parallel every cycle — hot standby.
+        // adsb.lol is preferred; adsb.fi data is ready immediately if lol fails,
+        // with zero additional delay (no sequential fallback gap).
+        const [lolR, fiR] = await Promise.allSettled([
+            cbOpen('adsb.lol')
+                ? Promise.reject(new Error('CB open'))
+                : fetch('https://api.adsb.lol/v2/lat/0/lon/0/dist/99999', {
+                      headers: { 'User-Agent': 'AEROSTRAT/12.0' },
+                      signal: AbortSignal.timeout(8000),
+                  }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
 
-        let snapStates = [];
-        let lolStates  = [];
+            cbOpen('adsb.fi-snap')
+                ? Promise.reject(new Error('CB open'))
+                : fetch('https://opendata.adsb.fi/api/v2/snapshot', {
+                      headers: { 'User-Agent': 'AEROSTRAT/12.0' },
+                      signal: AbortSignal.timeout(10000),
+                  }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+        ]);
 
-        if (snapR.status === 'fulfilled') {
-            snapStates = (snapR.value.ac || []).map(p => normalizeAcRecord(p, snapR.value.now))
-                .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
-            cbReset('adsb.fi-snap', snapStates.length, Math.round(performance.now() - t0));
-        } else {
-            const msg = snapR.reason?.message || '';
-            if (msg !== 'skipped') {
-                if (msg.includes('403')) cbTrip('adsb.fi-snap', 60 * 60_000);
-                else if (msg.includes('429')) cbTrip('adsb.fi-snap');
-            }
-        }
+        let lolStates = [];
+        let fiStates  = [];
 
         if (lolR.status === 'fulfilled') {
             lolStates = (lolR.value.ac || []).map(p => normalizeAcRecord(p, lolR.value.now))
@@ -2390,47 +2669,39 @@ async function fetchGlobalBaseline() {
             cbReset('adsb.lol', lolStates.length, Math.round(performance.now() - t0));
         } else {
             const msg = lolR.reason?.message || '';
-            if (msg !== 'skipped') {
-                logger.warn('SYNC', `adsb.lol fetch failed: ${msg}`);
+            if (msg !== 'CB open') {
                 if (msg.includes('429') || msg.includes('503')) cbTrip('adsb.lol');
+                logger.warn('SYNC', `adsb.lol failed: ${msg}`);
             }
         }
 
-        if (snapStates.length === 0 && lolStates.length === 0) {
-            if (thisTurn !== 'snap' || !cbOpen('adsb.fi-snap'))  // only warn if not a deliberate skip
-                logger.warn('SYNC', 'Global baseline: both sources failed — using stale cache');
+        if (fiR.status === 'fulfilled') {
+            fiStates = (fiR.value.ac || []).map(p => normalizeAcRecord(p, fiR.value.now))
+                .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+            cbReset('adsb.fi-snap', fiStates.length, Math.round(performance.now() - t0));
+        } else {
+            const msg = fiR.reason?.message || '';
+            if (msg !== 'CB open') {
+                if (msg.includes('403')) cbTrip('adsb.fi-snap', 60 * 60_000);
+                else if (msg.includes('429')) cbTrip('adsb.fi-snap');
+                logger.warn('SYNC', `adsb.fi-snap failed: ${msg}`);
+            }
+        }
+
+        // Prefer adsb.lol; fall back to adsb.fi instantly (data already fetched)
+        const states = lolStates.length > 0 ? lolStates : fiStates;
+        const source  = lolStates.length > 0 ? 'adsb.lol' : (fiStates.length > 0 ? 'adsb.fi-snap' : '');
+
+        if (states.length === 0) {
+            logger.warn('SYNC', 'Global baseline: all sources failed — using stale cache');
             globalPlanesCache.stale = true;
             return;
         }
 
-        // Use the richer set as the base; merge the other's metadata fields
-        let baseStates, extraStates;
-        if (snapStates.length >= lolStates.length) {
-            [baseStates, extraStates] = [snapStates, lolStates];
-        } else {
-            [baseStates, extraStates] = [lolStates, snapStates];
-        }
-
-        // Build extra map for metadata-only merge (desc, year, typecode)
-        if (extraStates.length > 0) {
-            const extraMap = new Map(extraStates.map(p => [p.icao24, p]));
-            for (const p of baseStates) {
-                const ex = extraMap.get(p.icao24);
-                if (!ex) continue;
-                if (!p.description && ex.description) p.description = ex.description;
-                if (!p.year        && ex.year)        p.year        = ex.year;
-                if (!p.typecode    && ex.typecode)    p.typecode    = ex.typecode;
-            }
-        }
-
-        mergeStates(baseStates, 'upsert');
+        mergeStates(states, 'upsert');
         pruneAndBroadcast();
+        logger.info('SYNC', `✅ Global baseline: ${states.length} planes | source: ${source} | ${Math.round(performance.now()-t0)}ms`);
 
-        const sourceStr = [snapStates.length > 0 && 'adsb.fi-snap', lolStates.length > 0 && 'adsb.lol']
-            .filter(Boolean).join('+');
-        logger.info('SYNC', `✅ Global baseline: ${baseStates.length} planes | sources: ${sourceStr} | ${Math.round(performance.now()-t0)}ms`);
-
-        // Metadata enrichment + TrackPoint ingestion (only on global cycle, not viewport)
         await enrichAndIngest();
 
     } catch (e) {
@@ -2919,8 +3190,8 @@ async function fetchGlobalPlanes() {
 }
 
 // ── [v11.0] Three-Tier Engine Startup ─────────────────────────────────────
-setInterval(fetchGlobalBaseline,    12_500);   // interleaved: snap/lol alternate, each 25s, combined 12.5s
-setInterval(fetchViewportOverlay,    6_000);   // viewport high-frequency (halved for smoother tracking)
+setInterval(fetchGlobalBaseline,    5_000);    // adsb.lol primary (5s), adsb.fi fallback
+setInterval(fetchViewportOverlay,    5_000);   // viewport high-frequency overlay
 setInterval(fetchSpecialCategories, 60_000);   // military + LADD (slow)
 
 // [v7.0] Session timeout reaper — in-memory cleanup every 5 minutes
@@ -3104,7 +3375,7 @@ app.get('/api/flights/live', async (req, res) => {
 
     } catch (err) {
         console.error('❌ [LIVE PUMP ERROR]', err.message);
-        res.status(500).json({ error: 'Live data pump failed completely', details: err.message });
+        res.status(500).json({ error: 'Live data unavailable' });
     }
 });
 
@@ -3151,7 +3422,7 @@ app.get('/api/flight-trace/:hex', async (req, res) => {
 
     } catch (err) {
         console.error(`❌ [TRACE ERROR] ${hex}:`, err.message);
-        res.json({ hex, source: 'error_fallback', trace: [], error: err.message });
+        res.json({ hex, source: 'error_fallback', trace: [], error: 'Internal server error' });
     }
 });
 
@@ -3342,7 +3613,7 @@ app.post('/api/metadata/batch', async function (req, res) {
         res.json({ fetched: fetched, requested: toFetch.length });
     } catch (err) {
         console.error('❌ [BATCH ERROR]', err.message);
-        res.status(500).json({ fetched: 0, error: err.message });
+        res.status(500).json({ fetched: 0, error: 'Internal server error' });
     }
 });
 
@@ -3807,7 +4078,7 @@ app.get('/api/aircraft/:icao24', async (req, res) => {
 
     } catch (err) {
         console.error(`❌ [FUSION ERROR] ${err.message}`);
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 
@@ -4050,7 +4321,7 @@ app.get('/api/route/external', async (req, res) => {
 
     } catch (err) {
         console.error('❌ [EXT-ROUTE] Cache Loop Error:', err);
-        res.json({ callsign, noData: true, error: err.message });
+        res.json({ callsign, noData: true, error: 'Internal server error' });
     }
 });
 
@@ -4299,101 +4570,10 @@ async function fetchTracksInternal(icao24) {
             }
         }
 
-        // ── 5. OpenSky Historical Track Augmentation ────────────────────────
-        // Augment when: (a) no local data, OR (b) clearly missed departure (first
-        // local point is at high cruise altitude ≥ FL100).  The old threshold of
-        // 500 ft was too aggressive — it triggered augmentation for aircraft we
-        // just started tracking mid-climb, pulling in a previous flight's path.
-        const firstLocalAlt = localPoints.length > 0 ? (localPoints[0].altitude ?? 0) : 0;
-        const missedDeparture = localPoints.length > 0 && firstLocalAlt > 10000;
-        if (localPoints.length < 20 || missedDeparture) {
-            try {
-                const osTrack = await fetchOpenSkyHistoricalTrack(icao);
-                if (osTrack && Array.isArray(osTrack.path) && osTrack.path.length > 0) {
-
-                    // Find the start of the CURRENT flight leg within the OpenSky track.
-                    // Walk backward to find: (a) a 3h time gap = different flight, or
-                    // (b) the last ground→airborne transition = most recent takeoff.
-                    const ospath = osTrack.path;
-                    let osFlightStartIdx = 0;
-                    for (let i = ospath.length - 1; i >= 1; i--) {
-                        const curr = ospath[i];
-                        const prev = ospath[i - 1];
-                        // Large time gap = separate flight
-                        if (curr[0] - prev[0] > 3 * 3600) {
-                            osFlightStartIdx = i;
-                            break;
-                        }
-                        // ground → airborne transition = takeoff of current flight
-                        if (!curr[5] && prev[5]) {
-                            osFlightStartIdx = i;
-                            break;
-                        }
-                    }
-
-                    let osFiltered = ospath
-                        .slice(osFlightStartIdx)
-                        .filter(p =>
-                            typeof p[1] === 'number' && p[1] !== 0 &&
-                            typeof p[2] === 'number' && p[2] !== 0
-                        );
-
-                    // ── Reference time for flight-boundary checks ───────────────────
-                    // sessionStartUnix = when OUR SYSTEM first tracked this aircraft,
-                    // which may be mid-flight (e.g. aircraft entered ADS-B range late).
-                    // We use it only for "is this data from a completely different flight?"
-                    // checks, NOT as a hard trim boundary for the OpenSky history path.
-                    // Using it as a hard trim would cut off valid historical route data
-                    // for aircraft that entered our coverage late in their journey.
-                    const refStartUnix = sessionStartUnix
-                        ?? (localPoints.length > 0
-                            ? Math.floor(localPoints[0].timestamp.getTime() / 1000)
-                            : null);
-
-                    // Trim only when the takeoff was NOT found by osFlightStartIdx.
-                    // In that case, use refStartUnix as a conservative fallback boundary
-                    // to avoid including truly old data when no takeoff marker exists.
-                    if (osFlightStartIdx === 0 && refStartUnix) {
-                        osFiltered = osFiltered.filter(p => p[0] >= refStartUnix - 120);
-                    }
-
-                    // ── Session-start validation ─────────────────────────────────
-                    // If the OpenSky track's LAST point still predates our reference time
-                    // by > 5 min, the entire track belongs to a PREVIOUS flight — discard.
-                    if (refStartUnix && osFiltered.length > 0) {
-                        const lastOsTs = osFiltered[osFiltered.length - 1][0];
-                        if (lastOsTs < refStartUnix - 300) {
-                            logger.info('TRACK', `${icao24}: OpenSky track pre-dates session (lastPt=${lastOsTs}, ref=${refStartUnix}), discarding previous-flight data`);
-                            osFiltered = [];
-                        }
-                    }
-
-                    if (osFiltered.length > localPoints.length) {
-                        const osConverted = osFiltered.map(p => ({
-                            timestamp: new Date(p[0] * 1000),
-                            lat: p[1], lng: p[2],
-                            // OpenSky returns altitude in METERS; convert to feet to match live track_points
-                            altitude: typeof p[3] === 'number' ? Math.round(p[3] * 3.28084) : 0,
-                            heading:  typeof p[4] === 'number' ? p[4] : -1,
-                            velocity: 0,
-                            onGround: !!p[5],
-                        }));
-
-                        // Local points override OpenSky for the same second
-                        const mergedMap = new Map();
-                        osConverted.forEach(p => mergedMap.set(Math.round(p.timestamp.getTime() / 1000), p));
-                        localPoints.forEach(p => mergedMap.set(Math.round(p.timestamp.getTime() / 1000), p));
-                        localPoints = Array.from(mergedMap.values()).sort((a, b) => a.timestamp - b.timestamp);
-
-                        logger.info('TRACK', `Historical augment OK: ${icao24} — ${osFiltered.length} OpenSky pts merged → ${localPoints.length} total (osFlightStartIdx=${osFlightStartIdx})`);
-                    }
-                }
-            } catch (osErr) {
-                logger.debug('TRACK', `Historical augment failed for ${icao24}: ${osErr.message}`);
-            }
-        }
-
-        // ── 6. Build path array — deduplicate consecutive identical coordinates ─
+        // ── 5. Build path array — deduplicate consecutive identical coordinates ─
+        // Note: OpenSky historical augmentation has been removed. It mixed MLAT
+        // positions (accuracy ~km) into clean ADS-B tracks from adsb.fi/adsb.lol
+        // (~10m), causing visible path deviations. Local ADS-B data is authoritative.
         const rawPath = localPoints.map(pt => [
             Math.floor(pt.timestamp.getTime() / 1000),
             pt.lat, pt.lng, pt.altitude || 0, pt.heading != null ? pt.heading : -1, pt.velocity || 0, pt.onGround ? 1 : 0
@@ -4457,7 +4637,7 @@ app.get('/api/session/:id/track', async (req, res) => {
             ])
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 
@@ -4493,7 +4673,7 @@ app.get('/api/sessions/:icao24', async (req, res) => {
                 : null
         })));
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 
@@ -4578,7 +4758,7 @@ app.get('/api/metar', async (req, res) => {
         const all = await Metar.find({});
         res.json(all);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 // [API 404 防火牆]
@@ -4725,7 +4905,7 @@ app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
 
     } catch (err) {
         console.error(`❌ [ULIMATE FUSION] Critical Failure for ${hex}:`, err.message);
-        res.status(500).json({ error: 'Fusion endpoint failed', details: err.message });
+        res.status(500).json({ error: 'Data fusion failed' });
     }
 });
 
@@ -4868,20 +5048,45 @@ cron.schedule('*/15 * * * *', () => {
     timezone: "Asia/Taipei"
 });
 
-// ── VRS Routes Database (weekly sync, every Sunday 03:37 Taiwan time) ──
-cron.schedule('37 3 * * 0', () => {
-    console.log('🛫 [VRS] Weekly sync starting...');
-    syncVrsRoutes(msg => console.log(msg))
-        .then(r => console.log(`✅ [VRS] Weekly sync done:`, r))
-        .catch(e => console.error(`❌ [VRS] Weekly sync failed:`, e.message));
+// ── DB sync timestamps (in-memory, for monitor page) ─────────────────────────
+const dbSyncStatus = {
+    vrs:       { lastSync: null, status: 'unknown', rows: {} },
+    mictronics:{ lastSync: null, status: 'unknown', rows: {} },
+};
+
+// ── VRS Routes Database (daily sync, 03:42 Taiwan time) ──
+cron.schedule('42 3 * * *', () => {
+    logger.info('VRS', 'Daily sync starting...');
+    dbSyncStatus.vrs.status = 'syncing';
+    syncVrsRoutes(msg => logger.info('VRS', msg))
+        .then(r => {
+            if (r.success) {
+                VrsDb.reload();
+                dbSyncStatus.vrs.lastSync = new Date().toISOString();
+                dbSyncStatus.vrs.status   = 'ok';
+            } else {
+                dbSyncStatus.vrs.status = 'error';
+            }
+        })
+        .catch(e => {
+            logger.error('VRS', `Daily sync failed: ${e.message}`);
+            dbSyncStatus.vrs.status = 'error';
+        });
 }, { timezone: 'Asia/Taipei' });
 
 // ── Mictronics Aircraft Registry (weekly sync, every Sunday 03:17 Taiwan time) ──
 cron.schedule('17 3 * * 0', () => {
-    console.log('🛫 [Mictronics] Weekly sync starting...');
-    syncMictronics(msg => console.log(msg))
-        .then(r => console.log(`✅ [Mictronics] Weekly sync done:`, r))
-        .catch(e => console.error(`❌ [Mictronics] Weekly sync failed:`, e.message));
+    logger.info('MICT', 'Weekly sync starting...');
+    dbSyncStatus.mictronics.status = 'syncing';
+    syncMictronics(msg => logger.info('MICT', msg))
+        .then(r => {
+            dbSyncStatus.mictronics.lastSync = new Date().toISOString();
+            dbSyncStatus.mictronics.status   = r.success ? 'ok' : 'error';
+        })
+        .catch(e => {
+            logger.error('MICT', `Weekly sync failed: ${e.message}`);
+            dbSyncStatus.mictronics.status = 'error';
+        });
 }, { timezone: 'Asia/Taipei' });
 
 // On startup: sync Mictronics if table is empty

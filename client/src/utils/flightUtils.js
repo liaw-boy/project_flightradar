@@ -255,7 +255,7 @@ const _ALT_STOPS = [
  */
 export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'ALTITUDE') {
     if (isEmergency) return '#ef4444';
-    if (scheme === 'TACTICAL') return '#ffce00';
+    if (scheme === 'TACTICAL') return '#D4AF37';
     if (onGround || altitude === 'GROUND') return '#94a3b8'; // slate — parked / taxiing
 
     const alt = parseFloat(altitude);
@@ -327,11 +327,11 @@ export function createPlaneSVG(heading, altitude, isSelected, onGround, isEmerge
 function _buildPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, category, scheme = 'TACTICAL') {
     const color = getAltitudeColor(altitude, onGround, isEmergency, scheme);
     const size = onGround ? 26 : Math.min(36, 26 + (altitude !== 'N/A' && altitude !== 'GROUND' ? altitude / 1000 : 0));
-    const glowColor = isSelected ? '#f59e0b' : color;
+    const glowColor = isSelected ? '#FFD700' : color;
     const glow = `drop-shadow(0 0 6px ${glowColor})`;
     const planeColor = isSelected ? '#ffffff' : color;
     const strokeWidth = isSelected ? 1.5 : 0.8;
-    const strokeColor = isSelected ? '#f59e0b' : 'rgba(255,255,255,0.4)';
+    const strokeColor = isSelected ? '#FFD700' : 'rgba(255,255,255,0.4)';
 
     const SVG_PATHS = {
         // Standard Jet (Default / Cat 4 large)
