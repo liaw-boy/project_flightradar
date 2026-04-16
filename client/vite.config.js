@@ -16,8 +16,10 @@ export default defineConfig({
             '@luma.gl/webgl',
             '@loaders.gl/core',
             '@loaders.gl/gltf',
+            '@vis.gl/react-maplibre',
+            'maplibre-gl',
         ],
-        exclude: ['maplibre-gl'],
+        exclude: [],
     },
     server: {
         host: '0.0.0.0',

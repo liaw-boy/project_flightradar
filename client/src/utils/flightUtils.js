@@ -255,7 +255,7 @@ const _ALT_STOPS = [
  */
 export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'ALTITUDE') {
     if (isEmergency) return '#ef4444';
-    if (scheme === 'TACTICAL') return '#D4AF37';
+    if (scheme === 'TACTICAL') return '#F0C040';
     if (onGround || altitude === 'GROUND') return '#94a3b8'; // slate — parked / taxiing
 
     const alt = parseFloat(altitude);
@@ -330,8 +330,8 @@ function _buildPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, ca
     const glowColor = isSelected ? '#FFD700' : color;
     const glow = `drop-shadow(0 0 6px ${glowColor})`;
     const planeColor = isSelected ? '#ffffff' : color;
-    const strokeWidth = isSelected ? 1.5 : 0.8;
-    const strokeColor = isSelected ? '#FFD700' : 'rgba(255,255,255,0.4)';
+    const strokeWidth = isSelected ? 1.5 : 1.2;
+    const strokeColor = isSelected ? '#FFD700' : 'rgba(255,255,255,0.85)';
 
     const SVG_PATHS = {
         // Standard Jet (Default / Cat 4 large)
@@ -375,10 +375,11 @@ function _buildPlaneSVG(heading, altitude, isSelected, onGround, isEmergency, ca
     const svg = `
     <svg viewBox="0 0 24 24" width="${size}" height="${size}" style="filter: ${glow}; overflow: visible;">
       <g transform="rotate(${heading} 12 12)">
-         <path fill="${planeColor}" 
-               stroke="${strokeColor}" 
-               stroke-width="${strokeWidth}" 
+         <path fill="${planeColor}"
+               stroke="${strokeColor}"
+               stroke-width="${strokeWidth}"
                stroke-linejoin="round"
+               paint-order="stroke fill"
                d="${selectedPath}" transform="${scaleTransform}" />
       </g>
     </svg>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layers, ChevronDown, ChevronUp, Activity, ExternalLink } from 'lucide-react';
+import { Layers, ChevronDown, ChevronUp } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import './FilterPanel.css';
 
@@ -34,14 +34,6 @@ export const MAP_LAYERS = [
 export default function FilterPanel({ filters, onFilterChange, mapLayer, onMapLayerChange, embedded }) {
     const { t } = useI18n();
     const [isLayersExpanded, setIsLayersExpanded] = useState(false);
-    const openMonitor = () => {
-        // Points to our backend at port 3001
-        const monitorUrl = `${window.location.origin}/monitor?token=dev`;
-        // Open in a new tab next to the current one
-        window.open(monitorUrl, '_blank');
-    };
-
-
     return (
         <div className={`filter-panel ${embedded ? 'embedded' : ''}`}>
             <div className="filter-title">{t('filters')}</div>
@@ -107,14 +99,6 @@ export default function FilterPanel({ filters, onFilterChange, mapLayer, onMapLa
                 </div>
             </div>
 
-            <div className="stat-divider" style={{ margin: '15px 0' }} />
-
-            {/* SYSTEM MONITOR */}
-            <button className="sys-monitor-btn" onClick={openMonitor}>
-                <Activity size={13} style={{ marginRight: '6px', flexShrink: 0 }} />
-                系統監控
-                <ExternalLink size={11} style={{ marginLeft: 'auto', opacity: 0.5 }} />
-            </button>
         </div>
     );
 }

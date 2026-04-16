@@ -258,14 +258,14 @@ export function initAircraftIcons() {
     let count = 0;
     for (const [tc, entry] of Object.entries(AIRCRAFT_CATALOG)) {
         imageCache[tc] = {
-            normal: createCachedImage(entry, '#D4AF37'),
+            normal: createCachedImage(entry, '#F0C040'),
             selected: createCachedImage(entry, '#00ffff')
         };
         count++;
     }
     // Also cache the default
     imageCache['__DEFAULT__'] = {
-        normal: createCachedImage(DEFAULT_ENTRY, '#ffce00'),
+        normal: createCachedImage(DEFAULT_ENTRY, '#F0C040'),
         selected: createCachedImage(DEFAULT_ENTRY, '#00ffff')
     };
     // eslint-disable-next-line no-console
@@ -591,7 +591,7 @@ export function prewarmExactSvg(typecode) {
                 return;
             }
             exactImageCache.set(tc, {
-                normal:   _buildGhImage(text, '#D4AF37', false),
+                normal:   _buildGhImage(text, '#F0C040', false),
                 selected: _buildGhImage(text, '#FFD700', true),
             });
         })

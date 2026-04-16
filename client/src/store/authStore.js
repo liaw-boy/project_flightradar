@@ -55,7 +55,7 @@ async function apiFetch(path, options = {}) {
 export async function apiLogin(username, password) {
     const data = await apiFetch('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ uid: username, password }),
     });
     authStore._set(data.token, data.user);
     return data.user;

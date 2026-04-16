@@ -61,7 +61,8 @@ async function register(req, res) {
 // ── POST /api/auth/login ─────────────────────────────────────────────────────
 
 async function login(req, res) {
-    const { username, password } = req.body || {};
+    const { uid, username: bodyUsername, password } = req.body || {};
+    const username = uid || bodyUsername;
     if (!username || !password)
         return res.status(400).json({ error: 'username and password required' });
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Clock, Activity, Settings, Globe, Search, X, BarChart2, User, LogOut, BookOpen, Route, ShieldCheck, Plus } from 'lucide-react';
+import { Clock, Activity, Settings, Globe, Search, X, BarChart2, User, LogOut, BookOpen, Route, ShieldCheck, Plus, Layers } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import { authStore } from '../store/authStore';
 import SearchBar from './SearchBar';
@@ -28,6 +28,8 @@ export default function TopBar({
     showUserRoutes = false,
     onToggleUserRoutes,
     hasUserRoutes = false,
+    is3D = false,
+    onToggle3D,
 }) {
     const { t, lang, toggleLang } = useI18n();
     const [time, setTime] = useState('--:--:--');
@@ -110,6 +112,14 @@ export default function TopBar({
                 {/* 搜尋圖示（只在 ≤850px 且搜尋欄隱藏時顯示） */}
                 <button className="tb-btn tb-search-icon" onClick={() => setShowMobileSearch(true)} aria-label="Search">
                     <Search size={16} />
+                </button>
+
+                <button
+                    className={`tb-btn ${is3D ? 'active' : ''}`}
+                    onClick={onToggle3D}
+                    title={is3D ? '切換 2D 地圖' : '切換 3D 地圖'}
+                >
+                    <Layers size={16} />
                 </button>
 
                 <button

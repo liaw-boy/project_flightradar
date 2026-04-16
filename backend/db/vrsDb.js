@@ -16,7 +16,8 @@ let db = null;
 let stmtRoute      = null;
 let stmtAirportIcao = null;
 let stmtAirportIata = null;
-let stmtAirline    = null;
+let stmtAirline     = null;
+let stmtAirlineIata = null;
 let stmtModelType  = null;
 
 function init() {
@@ -33,6 +34,7 @@ function init() {
         stmtAirportIcao = db.prepare('SELECT code,name,icao,iata,lat,lng,country_iso FROM airports WHERE icao = ?');
         stmtAirportIata = db.prepare('SELECT code,name,icao,iata,lat,lng,country_iso FROM airports WHERE iata = ?');
         stmtAirline     = db.prepare('SELECT name,icao,iata FROM airlines WHERE icao = ? OR code = ?');
+        stmtAirlineIata = db.prepare('SELECT name,icao,iata FROM airlines WHERE iata = ?');
         stmtModelType   = db.prepare('SELECT manufacturer,model,engine_count,engine_type,wtc,species FROM model_types WHERE icao = ?');
 
         // Check if new tables exist (built by updated syncVrsRoutes.js)
@@ -104,6 +106,14 @@ function lookupAirline(icao) {
     } catch (_) { return null; }
 }
 
+/** Look up airline by IATA code (e.g. 'CI' → { name, icao: 'CAL', iata: 'CI' }) */
+function lookupAirlineByIata(iata) {
+    if (!db || !stmtAirlineIata || !iata) return null;
+    try {
+        return stmtAirlineIata.get(iata.toUpperCase().trim()) || null;
+    } catch (_) { return null; }
+}
+
 /**
  * Look up model type info by ICAO type code.
  * Returns { manufacturer, model, engine_count, engine_type, wtc, species } or null.
@@ -125,4 +135,4 @@ function reload() {
     init();
 }
 
-module.exports = { lookup, lookupAirport, lookupAirline, lookupModelType, reload };
+module.exports = { lookup, lookupAirport, lookupAirline, lookupAirlineByIata, lookupModelType, reload };

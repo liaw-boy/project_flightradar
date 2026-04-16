@@ -5,7 +5,8 @@ import {
 } from 'lucide-react';
 import {
     apiListFlights, apiCreateFlight, apiUpdateFlight,
-    apiDeleteFlight, apiFlightStats, apiLookupCallsign, apiLookupAirport
+    apiDeleteFlight, apiFlightStats, apiLookupCallsign, apiLookupAirport,
+    authStore,
 } from '../store/authStore';
 import './MyFlightsPanel.css';
 
@@ -139,85 +140,92 @@ function StatsDashboard({ stats, onBack }) {
     );
 }
 
-// ── 子元件：航班列表行（登機證卡片）─────────────────────────────────────────
-const BP_MINI = [12,7,16,9,13,18,6,12,15,9,13,7,17,12,9,15,7,13,11,12,16,6,13,12,15,11,8,17,7,12,13,15,11,16,8,12,13,17,9,15,7,12,16,8,13,11,18,6,12,15,9,13,17];
-
+// ── 子元件：航班列表行（登機證卡片 v3）───────────────────────────────────────
 function FlightRow({ flight, onEdit, onDelete }) {
-    const classMap = { '頭等艙': 'FIRST', '商務艙': 'BUSINESS', '豪華經濟艙': 'PREM ECO', '經濟艙': 'ECONOMY' };
-    const classLabel = classMap[flight.seat_class] || flight.seat_class || null;
+    const classMap = {
+        '頭等艙': 'FIRST', '商務艙': 'BUSINESS', '豪華經濟艙': 'PREM ECO', '經濟艙': 'ECONOMY',
+        'first': 'FIRST', 'business': 'BUSINESS', 'premium_economy': 'PREM ECO', 'economy': 'ECONOMY',
+    };
+    const classLabel = classMap[flight.seat_class] || (flight.seat_class ? flight.seat_class.toUpperCase() : null);
+    const hasDetails = flight.aircraft_type || classLabel || flight.seat_number || flight.registration;
 
     return (
         <div className="fhr-card">
-            {/* ── Route block ── */}
+            {/* ── Top bar: brand / flight / date / actions ── */}
+            <div className="fhr-topbar">
+                <div className="fhr-brand">
+                    <Plane size={9} />
+                    AEROSTRAT
+                </div>
+                {flight.flight_number && (
+                    <div className="fhr-fn">{flight.flight_number}</div>
+                )}
+                <div className="fhr-date">{flight.flight_date}</div>
+                <div className="fhr-actions">
+                    <button className="fhr-btn" onClick={() => onEdit(flight)}>
+                        <Pencil size={11} /> EDIT
+                    </button>
+                    <button className="fhr-btn fhr-btn-danger" onClick={() => onDelete(flight.id)}>
+                        <Trash2 size={11} />
+                    </button>
+                </div>
+            </div>
+
+            {/* ── Route ── */}
             <div className="fhr-route">
-                <div className="fhr-iata">{flight.dep_icao || '——'}</div>
+                <div className="fhr-apt-block">
+                    <div className="fhr-iata">{flight.dep_icao || '——'}</div>
+                    {flight.dep_time && <div className="fhr-time">{flight.dep_time}</div>}
+                </div>
                 <div className="fhr-route-mid">
                     <div className="fhr-route-line">
                         <div className="fhr-rdot" />
                         <div className="fhr-rdash" />
-                        <Plane size={13} style={{ transform: 'rotate(90deg)', color: '#c4a260', flexShrink: 0 }} />
+                        <Plane size={16} style={{ transform: 'rotate(90deg)', color: '#c4a260', flexShrink: 0 }} />
                         <div className="fhr-rdash" />
                         <div className="fhr-rdot" />
                     </div>
-                    <div className="fhr-fn">{flight.flight_number || '—'}</div>
                 </div>
-                <div className="fhr-iata fhr-iata-r">{flight.arr_icao || '——'}</div>
+                <div className="fhr-apt-block fhr-apt-r">
+                    <div className="fhr-iata">{flight.arr_icao || '——'}</div>
+                    {flight.arr_time && <div className="fhr-time fhr-time-r">{flight.arr_time}</div>}
+                </div>
             </div>
 
-            {/* ── Detail strip ── */}
-            <div className="fhr-details">
-                <div className="fhr-detail-item">
-                    <div className="fhr-dl">DATE</div>
-                    <div className="fhr-dv">{flight.flight_date}</div>
-                </div>
-                {(flight.dep_time || flight.arr_time) && (
-                    <div className="fhr-detail-item">
-                        <div className="fhr-dl">TIME</div>
-                        <div className="fhr-dv">
-                            {flight.dep_time || '—'}{' '}<span style={{opacity:0.45}}>→</span>{' '}{flight.arr_time || '—'}
+            {/* ── Detail strip (only if there is data) ── */}
+            {hasDetails && (
+                <div className="fhr-details">
+                    {flight.aircraft_type && (
+                        <div className="fhr-detail-item">
+                            <div className="fhr-dl">A/C</div>
+                            <div className="fhr-dv">{flight.aircraft_type}</div>
                         </div>
-                    </div>
-                )}
-                {flight.aircraft_type && (
-                    <div className="fhr-detail-item">
-                        <div className="fhr-dl">A/C</div>
-                        <div className="fhr-dv">{flight.aircraft_type}</div>
-                    </div>
-                )}
-                {flight.seat_number && (
-                    <div className="fhr-detail-item">
-                        <div className="fhr-dl">SEAT</div>
-                        <div className="fhr-dv">{flight.seat_number}</div>
-                    </div>
-                )}
-                {classLabel && (
-                    <div className="fhr-detail-item">
-                        <div className="fhr-dl">CLASS</div>
-                        <div className="fhr-dv">{classLabel}</div>
-                    </div>
-                )}
-                {flight.registration && (
-                    <div className="fhr-detail-item">
-                        <div className="fhr-dl">REG</div>
-                        <div className="fhr-dv">{flight.registration}</div>
-                    </div>
-                )}
-            </div>
+                    )}
+                    {classLabel && (
+                        <div className="fhr-detail-item">
+                            <div className="fhr-dl">CLASS</div>
+                            <div className="fhr-dv">{classLabel}</div>
+                        </div>
+                    )}
+                    {flight.seat_number && (
+                        <div className="fhr-detail-item">
+                            <div className="fhr-dl">SEAT</div>
+                            <div className="fhr-dv fhr-dv-seat">{flight.seat_number}</div>
+                        </div>
+                    )}
+                    {flight.registration && (
+                        <div className="fhr-detail-item">
+                            <div className="fhr-dl">REG</div>
+                            <div className="fhr-dv">{flight.registration}</div>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* ── Notes ── */}
             {flight.notes && (
                 <div className="fhr-notes">{flight.notes}</div>
             )}
-
-            {/* ── Actions ── */}
-            <div className="fhr-actions">
-                <button className="fhr-btn" onClick={() => onEdit(flight)} title="編輯">
-                    <Pencil size={13} /> EDIT
-                </button>
-                <button className="fhr-btn fhr-btn-danger" onClick={() => onDelete(flight.id)} title="刪除">
-                    <Trash2 size={13} />
-                </button>
-            </div>
         </div>
     );
 }
@@ -284,20 +292,21 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
             if (!r.found) return;
             setForm(f => ({
                 ...f,
-                dep_icao: f.dep_icao || r.dep_icao || '',
-                arr_icao: f.arr_icao || r.arr_icao || '',
+                dep_icao: f.dep_icao || r.dep_iata || '',
+                arr_icao: f.arr_icao || r.arr_iata || '',
                 dep_time: f.dep_time || r.dep_time || '',
                 arr_time: f.arr_time || r.arr_time || '',
+                callsign: f.callsign || cs || '',
             }));
             if (r.dep_name) setDepHint(r.dep_name);
             if (r.arr_name) setArrHint(r.arr_name);
         }, 600);
     }
 
-    // ── 機場代碼查詢（輸入滿 4 字）────────────────────────────────────────────
+    // ── 機場代碼查詢（輸入滿 3 碼 IATA 或 4 碼 ICAO）─────────────────────────
     async function handleAirportBlur(field, val) {
         const code = val.toUpperCase().trim();
-        if (code.length !== 4) return;
+        if (code.length < 3 || code.length > 4) return;
         const r = await apiLookupAirport(code);
         if (!r.found) return;
         if (field === 'dep') setDepHint(r.name);
@@ -325,7 +334,7 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
         <>
             <div className="bpf-hcard-apt">
                 <div className="bpf-apt-lbl">FROM</div>
-                <input className="bpf-h-iata" placeholder="RCTP" maxLength={4}
+                <input className="bpf-h-iata" placeholder="TPE" maxLength={4}
                     value={form.dep_icao}
                     onChange={e => { set('dep_icao', e.target.value.toUpperCase()); setDepHint(''); }}
                     onBlur={e => handleAirportBlur('dep', e.target.value)} />
@@ -350,7 +359,7 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
             </div>
             <div className="bpf-hcard-apt bpf-hcard-apt-r">
                 <div className="bpf-apt-lbl bpf-apt-lbl-r">TO</div>
-                <input className="bpf-h-iata bpf-h-iata-r" placeholder="VHHH" maxLength={4}
+                <input className="bpf-h-iata bpf-h-iata-r" placeholder="HKG" maxLength={4}
                     value={form.arr_icao}
                     onChange={e => { set('arr_icao', e.target.value.toUpperCase()); setArrHint(''); }}
                     onBlur={e => handleAirportBlur('arr', e.target.value)} />
@@ -393,10 +402,12 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
         </div>
     );
 
+    const passengerName = authStore.getUser?.()?.username?.toUpperCase() || '—';
+
     const headerBlock = (
         <div className="bpf-header">
             <div className="bpf-logo">
-                <Plane size={15} />
+                <Plane size={18} />
                 <div>
                     <div className="bpf-logo-name">AEROSTRAT</div>
                     <div className="bpf-logo-sub">FLIGHT RECORD</div>
@@ -413,6 +424,19 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
         </div>
     );
 
+    const passengerRow = (
+        <div className="bpf-passenger-row">
+            <div className="bpf-passenger-col">
+                <div className="bpf-passenger-label">PASSENGER NAME</div>
+                <div className="bpf-passenger-name">{passengerName}</div>
+            </div>
+            <div className="bpf-passenger-col bpf-passenger-col-r">
+                <div className="bpf-passenger-label">FLIGHT DATE</div>
+                <div className="bpf-passenger-date">{form.flight_date || '—'}</div>
+            </div>
+        </div>
+    );
+
     // ── 橫向登機證（全頁模式） ─────────────────────────────────────────────────
     return (
         <div className="bpf-hwrapper">
@@ -421,6 +445,7 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
                 {/* ── Main section ── */}
                 <div className="bpf-hcard-main">
                     {headerBlock}
+                    {passengerRow}
                     <div className="bpf-hcard-body">
                         <div className="bpf-hcard-route">{routeSection}</div>
                         <div className="bpf-hcard-vdivider" />
@@ -435,10 +460,25 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
 
                 {/* ── Stub ── */}
                 <div className="bpf-hstub">
+                    <div className="bpf-stub-summary">
+                        <div className="bpf-stub-row">
+                            <div className="bpf-cl">FLIGHT</div>
+                            <div className="bpf-stub-val">{form.flight_number || '—'}</div>
+                        </div>
+                        <div className="bpf-stub-row">
+                            <div className="bpf-cl">SEAT</div>
+                            <div className="bpf-stub-val bpf-stub-seat">{form.seat_number || '—'}</div>
+                        </div>
+                        <div className="bpf-stub-row">
+                            <div className="bpf-cl">CLASS</div>
+                            <div className="bpf-stub-val">{form.seat_class || '—'}</div>
+                        </div>
+                    </div>
+                    <div className="bpf-stub-divider" />
                     <div className="bpf-stub-field">
                         <div className="bpf-cl">REMARKS</div>
                         <textarea className="bpf-notes bpf-notes-h" placeholder="Window seat, delay, turbulence..."
-                            rows={4} value={form.notes} onChange={e => set('notes', e.target.value)} />
+                            rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} />
                     </div>
                     {error && (
                         <div className="bpf-error"><AlertCircle size={11} /> {error}</div>

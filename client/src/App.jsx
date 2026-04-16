@@ -7,6 +7,7 @@ import MobileSheet from './components/MobileSheet';
 import SearchBar from './components/SearchBar';
 import TopBar from './components/TopBar';
 import MapView from './components/MapView';
+import MapView3D from './components/MapView3D';
 import PlaneList from './components/PlaneList';
 import TimePlayer from './components/TimePlayer';
 import StatsPanel from './components/StatsPanel';
@@ -88,6 +89,20 @@ export default function App() {
             setShowUserRoutes(false);
         }
     }, [authUser]);
+
+    // 3D Map toggle — capture 2D viewport at switch time for seamless transition
+    const [is3D, setIs3D] = useState(false);
+    const [initView3D, setInitView3D] = useState(null);
+    const handleToggle3D = useCallback(() => {
+        setIs3D(v => {
+            if (!v && mapInstanceRef.current) {
+                // Capture current 2D viewport
+                const c = mapInstanceRef.current.getCenter();
+                setInitView3D({ lng: c.lng, lat: c.lat, zoom: mapInstanceRef.current.getZoom() });
+            }
+            return !v;
+        });
+    }, []);
 
     // [v2.9.0] Map tile layer
     const [mapLayer, setMapLayer] = useState(() =>
@@ -559,29 +574,44 @@ export default function App() {
         <div className="app">
             <LoadingScreen visible={loading} />
 
-            <MapView
-                planesDict={planesDict}
-                selectedIcao24={selectedIcao24}
-                trackPoints={trackPoints}
-                flightHistoryRef={flightHistoryRef}
-                filters={filters}
-                selectedRoute={selectedRoute}
-                onSelectPlane={handleSelectPlane}
-                onDeselectPlane={handleDeselectPlane}
-                onMapReady={handleMapReady}
-                onMapMove={handleMapMove}
-                onUsageUpdate={setUsageStats}
-                colorScheme={colorScheme}
-                mapLayer={mapLayer}
-                trackMode={trackMode}
-                playbackTime={playbackTime}
-                syncViewport={syncViewport}
-                t={t}
-                translateMetar={translateMetar}
-                depCoords={depCoords}
-                userRoutes={userRoutes}
-                showUserRoutes={showUserRoutes}
-            />
+            {is3D ? (
+                <MapView3D
+                    planesDict={planesDict}
+                    selectedIcao24={selectedIcao24}
+                    onSelectPlane={handleSelectPlane}
+                    trackPoints={trackPoints}
+                    colorScheme={colorScheme}
+                    syncViewport={syncViewport}
+                    initialLng={initView3D?.lng}
+                    initialLat={initView3D?.lat}
+                    initialZoom={initView3D?.zoom}
+                    mapLayer={mapLayer}
+                />
+            ) : (
+                <MapView
+                    planesDict={planesDict}
+                    selectedIcao24={selectedIcao24}
+                    trackPoints={trackPoints}
+                    flightHistoryRef={flightHistoryRef}
+                    filters={filters}
+                    selectedRoute={selectedRoute}
+                    onSelectPlane={handleSelectPlane}
+                    onDeselectPlane={handleDeselectPlane}
+                    onMapReady={handleMapReady}
+                    onMapMove={handleMapMove}
+                    onUsageUpdate={setUsageStats}
+                    colorScheme={colorScheme}
+                    mapLayer={mapLayer}
+                    trackMode={trackMode}
+                    playbackTime={playbackTime}
+                    syncViewport={syncViewport}
+                    t={t}
+                    translateMetar={translateMetar}
+                    depCoords={depCoords}
+                    userRoutes={userRoutes}
+                    showUserRoutes={showUserRoutes}
+                />
+            )}
 
             <TopBar
                 planeCount={planeCount}
@@ -606,6 +636,8 @@ export default function App() {
                 showUserRoutes={showUserRoutes}
                 onToggleUserRoutes={() => setShowUserRoutes(v => !v)}
                 hasUserRoutes={!!(userRoutes && userRoutes.length > 0)}
+                is3D={is3D}
+                onToggle3D={handleToggle3D}
             />
 
             {/* Right Status Column */}

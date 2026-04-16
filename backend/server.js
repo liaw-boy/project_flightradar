@@ -371,34 +371,67 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
     const cs = (req.params.cs || '').toUpperCase().trim();
     if (!cs) return res.json({ found: false });
 
+    // helper: ICAO → IATA (fallback to original code)
+    const toIata = (code) => {
+        if (!code) return null;
+        if (code.length === 3) return code; // already IATA
+        return VrsDb.lookupAirport(code)?.iata || code;
+    };
+
+    // helper: convert IATA airline prefix to ICAO (e.g. CI101 → CAL101)
+    const toIcaoCallsign = (callsign) => {
+        const m = callsign.match(/^([A-Z]{2})(\d.*)$/);
+        if (!m) return null;
+        const airline = VrsDb.lookupAirlineByIata(m[1]);
+        if (!airline?.icao) return null;
+        return airline.icao + m[2];
+    };
+
+    // If user passed IATA airline prefix (e.g. CI101), also try the ICAO form (CAL101)
+    const csIcao = toIcaoCallsign(cs);
+
     // Layer 1: VRS SQLite (fast, local)
-    const vrsRoute = VrsDb.lookup(cs);
+    const vrsRoute = VrsDb.lookup(cs) || (csIcao ? VrsDb.lookup(csIcao) : null);
     const vrsDep = vrsRoute?.from ? VrsDb.lookupAirport(vrsRoute.from) : null;
     const vrsArr = vrsRoute?.to   ? VrsDb.lookupAirport(vrsRoute.to)   : null;
 
-    // Layer 2: MongoDB Route cache (has departure_time, arrival_time from AeroDataBox)
+    // Layer 2: Route cache (try IATA callsign first, then ICAO form)
     let dbRoute = null;
     try {
-        dbRoute = await Route.findOne({ callsign: cs, source: { $ne: 'spatial_inference' } })
-            .select('origin_icao destination_icao origin_name destination_name departure_time arrival_time flight_number')
-            .lean();
+        dbRoute = await Route.findOne({ callsign: cs }) ||
+                  (csIcao ? await Route.findOne({ callsign: csIcao }) : null);
     } catch (_) {}
 
-    const dep_icao = dbRoute?.origin_icao      || vrsRoute?.from || null;
-    const arr_icao = dbRoute?.destination_icao || vrsRoute?.to   || null;
+    const raw_dep = dbRoute?.origin_icao || dbRoute?.departureAirport || vrsRoute?.from || null;
+    const raw_arr = dbRoute?.destination_icao || dbRoute?.arrivalAirport || vrsRoute?.to || null;
 
-    if (!dep_icao && !arr_icao) return res.json({ found: false });
+    if (raw_dep || raw_arr) {
+        return res.json({
+            found:     true,
+            dep_iata:  toIata(raw_dep),
+            arr_iata:  toIata(raw_arr),
+            dep_name:  dbRoute?.origin_name      || vrsDep?.name || null,
+            arr_name:  dbRoute?.destination_name || vrsArr?.name || null,
+            dep_time:  dbRoute?.departure_time   || null,
+            arr_time:  dbRoute?.arrival_time     || null,
+        });
+    }
 
-    return res.json({
-        found:     true,
-        dep_icao:  dep_icao,
-        arr_icao:  arr_icao,
-        dep_name:  dbRoute?.origin_name      || vrsDep?.name || null,
-        arr_name:  dbRoute?.destination_name || vrsArr?.name || null,
-        dep_time:  dbRoute?.departure_time   || null,
-        arr_time:  dbRoute?.arrival_time     || null,
-        flight_number: dbRoute?.flight_number || null,
-    });
+    // Layer 3: AeroDataBox live lookup
+    const adData = await fetchRouteData(cs);
+    if (adData && (adData.origin_iata || adData.destination_iata)) {
+        return res.json({
+            found:    true,
+            dep_iata: adData.origin_iata      !== 'N/A' ? adData.origin_iata      : null,
+            arr_iata: adData.destination_iata !== '---' ? adData.destination_iata : null,
+            dep_name: adData.origin_name      || null,
+            arr_name: adData.destination_name || null,
+            dep_time: adData.departure_time   || null,
+            arr_time: adData.arrival_time     || null,
+        });
+    }
+
+    return res.json({ found: false });
 });
 
 app.get('/api/lookup/airport/:code', (req, res) => {
@@ -5042,6 +5075,7 @@ cron.schedule('0 3 * * *', () => {
 });
 
 // 每 15 分鐘抓取一次 TDX 進出港資料 (Real-time Schedules)
+crawlFlightSchedules(); // 啟動時立即執行一次，填充 route cache
 cron.schedule('*/15 * * * *', () => {
     crawlFlightSchedules();
 }, {
