@@ -27,7 +27,8 @@ function parseUrlParams() {
     const params = new URLSearchParams(window.location.search);
     return {
         icao:  params.get('icao'),
-        panel: params.get('panel'),   // 'admin' | 'my-flights' | 'auth'
+        panel: params.get('panel'),   // 'admin' | 'my-flights' | 'new-flight' | 'auth'
+        stats: params.get('stats') === '1',
         lat:   params.get('lat')  ? parseFloat(params.get('lat'))    : null,
         lng:   params.get('lng')  ? parseFloat(params.get('lng'))    : null,
         zoom:  params.get('zoom') ? parseInt(params.get('zoom'), 10) : null,
@@ -38,6 +39,14 @@ function setUrlPanel(panel) {
     const params = new URLSearchParams(window.location.search);
     if (panel) params.set('panel', panel);
     else params.delete('panel');
+    const qs = params.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+}
+
+function setUrlStats(on) {
+    const params = new URLSearchParams(window.location.search);
+    if (on) params.set('stats', '1');
+    else params.delete('stats');
     const qs = params.toString();
     window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
 }
@@ -291,12 +300,14 @@ export default function App() {
         return () => clearTimeout(timer);
     }, []);
 
-    // 從 URL ?panel= 自動開啟對應面板
+    // 從 URL ?panel= / ?stats= 自動開啟對應面板
     useEffect(() => {
-        const { panel } = parseUrlParams();
+        const { panel, stats } = parseUrlParams();
         if (panel === 'admin') setShowAdmin(true);
         else if (panel === 'my-flights') { setMyFlightsInitialView('list'); setMyFlightsMode('page'); setShowMyFlights(true); }
+        else if (panel === 'new-flight') { setMyFlightsInitialView('form'); setMyFlightsMode('modal'); setShowMyFlights(true); }
         else if (panel === 'auth') setShowAuthModal(true);
+        if (stats) setShowStats(true);
     }, []);
 
     // 地圖就緒
@@ -642,10 +653,10 @@ export default function App() {
                 mapLayer={mapLayer}
                 onMapLayerChange={handleMapLayerChange}
                 showStats={showStats}
-                onToggleStats={() => setShowStats(s => !s)}
+                onToggleStats={() => setShowStats(s => { setUrlStats(!s); return !s; })}
                 onOpenAuth={() => { setShowAuthModal(true); setUrlPanel('auth'); }}
                 onOpenMyFlights={() => { setMyFlightsInitialView('list'); setMyFlightsMode('page');  setShowMyFlights(true); setUrlPanel('my-flights'); }}
-                onOpenNewFlight={() => { setMyFlightsInitialView('form'); setMyFlightsMode('modal'); setShowMyFlights(true); setUrlPanel('my-flights'); }}
+                onOpenNewFlight={() => { setMyFlightsInitialView('form'); setMyFlightsMode('modal'); setShowMyFlights(true); setUrlPanel('new-flight'); }}
 
                 onOpenAdmin={() => { setShowAdmin(true); setUrlPanel('admin'); }}
                 authUser={authUser}
