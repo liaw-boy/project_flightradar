@@ -503,6 +503,7 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
 // mode: 'modal' (預設，overlay 彈窗) | 'page' (全頁，取代主畫面)
 export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView = 'list', mode = 'modal' }) {
     const [view, setView]         = useState(initialView);   // 'list' | 'form' | 'stats'
+    const [formFromList, setFormFromList] = useState(initialView !== 'form'); // true = navigated from list
     const [flights, setFlights]   = useState([]);
     const [total, setTotal]       = useState(0);
     const [page, setPage]         = useState(1);
@@ -588,7 +589,10 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
                             initial={editTarget}
                             prefill={!editTarget && prefillFromPlane ? prefillFromPlane : undefined}
                             onSave={handleSave}
-                            onCancel={() => { setView('list'); setEditTarget(null); }}
+                            onCancel={() => {
+                                if (formFromList) { setView('list'); setEditTarget(null); }
+                                else { onClose(); }
+                            }}
                         />
                     </div>
                 </div>
@@ -605,7 +609,7 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
 
             {/* 智慧帶入提示 */}
             {view === 'list' && prefillFromPlane && (
-                <div className="mfp-prefill-hint" onClick={() => { setEditTarget(null); setView('form'); }}>
+                <div className="mfp-prefill-hint" onClick={() => { setEditTarget(null); setFormFromList(true); setView('form'); }}>
                     <CheckCircle size={13} />
                     點此記錄當前選取的飛機 <strong>{prefillFromPlane.callsign || prefillFromPlane.icao24}</strong>
                 </div>
@@ -622,14 +626,14 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
                         <div className="mfp-empty">
                             <Plane size={28} style={{ opacity: 0.4 }} />
                             <p>NO FLIGHT RECORDS FOUND</p>
-                            <button className="mfp-btn primary" onClick={() => setView('form')}>▶ LOG FIRST FLIGHT</button>
+                            <button className="mfp-btn primary" onClick={() => { setFormFromList(true); setView('form'); }}>▶ LOG FIRST FLIGHT</button>
                         </div>
                     )}
                     {flights.map(f => (
                         <FlightRow
                             key={f.id}
                             flight={f}
-                            onEdit={(fl) => { setEditTarget(fl); setView('form'); }}
+                            onEdit={(fl) => { setEditTarget(fl); setFormFromList(true); setView('form'); }}
                             onDelete={handleDelete}
                         />
                     ))}
@@ -663,7 +667,7 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
                     </div>
                     <div className="mfp-page-actions">
                         {view === 'list' && (
-                            <button className="mfp-btn primary small" onClick={() => { setEditTarget(null); setView('form'); }}>
+                            <button className="mfp-btn primary small" onClick={() => { setEditTarget(null); setFormFromList(true); setView('form'); }}>
                                 <Plus size={11} /> LOG FLIGHT
                             </button>
                         )}
@@ -700,7 +704,7 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
                     </div>
                     <div className="mfp-header-actions">
                         {view === 'list' && (
-                            <button className="mfp-btn primary small" onClick={() => { setEditTarget(null); setView('form'); }}>
+                            <button className="mfp-btn primary small" onClick={() => { setEditTarget(null); setFormFromList(true); setView('form'); }}>
                                 <Plus size={11} /> LOG FLIGHT
                             </button>
                         )}

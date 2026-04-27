@@ -1,32 +1,170 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Share+Tech+Mono&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Share+Tech+Mono&family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Leaflet map default gray → dark to match theme */
+.leaflet-container { background: var(--bg, #050a14) !important; }
+:root[data-theme="light"] .leaflet-container { background: #dce8f0 !important; }
+
+/* ============================================================
+   AEROSTRAT Dual Theme System v3.0
+   Dark (Aero-Tactical) = default
+   Light (Clean SaaS)   = :root[data-theme="light"]
+   ============================================================ */
 
 :root {
-    /* Aero-Tactical Design System v2.6.0 */
-    --color-bg-base: #020617;
-    --color-glass-panel: rgba(15, 23, 42, 0.75);
-    --color-glass-border: rgba(148, 163, 184, 0.2);
-    --color-accent-cyan: #22d3ee;
-    --color-accent-blue: #3b82f6;
-    --color-accent-orange: #f59e0b;
-    --color-text-primary: #f8fafc;
-    --color-text-secondary: #94a3b8;
-    --color-text-dim: #64748b;
-    --font-main: 'Outfit', sans-serif;
-    --font-mono: 'Share Tech Mono', monospace;
-    --blur-intensity: 12px;
-    --shadow-premium: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+    /* === DARK THEME — Aero-Tactical (default) === */
 
-    /* ── Responsive Layout Tokens ─────────────────────────────
-       clamp(min, fluid, max) scales panels between 1280px
-       laptops and 4K monitors without hard breakpoints.
-    ────────────────────────────────────────────────────────── */
-    --topbar-h:   60px;
-    --panel-gap:  clamp(12px, 1vw, 20px);
-    --hud-w:      clamp(220px, 16vw, 280px);
-    --sidebar-w:  clamp(320px, 22vw, 440px);
-    --carousel-h: clamp(160px, 13vw, 220px);
+    /* Backgrounds */
+    --bg:              #020617;
+    --surface:         rgba(15, 23, 42, 0.85);
+    --surface-solid:   #0f172a;
+    --surface-raised:  rgba(15, 23, 42, 0.96);
+    --surface-hover:   rgba(255, 255, 255, 0.05);
+    --surface-active:  rgba(34, 211, 238, 0.1);
+
+    /* Borders */
+    --border:          rgba(148, 163, 184, 0.15);
+    --border-strong:   rgba(148, 163, 184, 0.25);
+
+    /* Accent */
+    --accent:          #22d3ee;
+    --accent-2:        #3b82f6;
+    --accent-dim:      rgba(34, 211, 238, 0.1);
+    --accent-hover:    rgba(34, 211, 238, 0.18);
+    --accent-glow:     0 0 12px rgba(34, 211, 238, 0.35);
+    --accent-warning:  #f59e0b;
+    --accent-danger:   #ef4444;
+    --accent-success:  #10b981;
+
+    /* Text */
+    --text:            #f8fafc;
+    --text-2:          #94a3b8;
+    --text-3:          #64748b;
+    --text-accent:     #22d3ee;
+
+    /* Inputs */
+    --input-bg:        rgba(0, 0, 0, 0.35);
+    --input-border:    rgba(148, 163, 184, 0.2);
+    --input-focus:     #22d3ee;
+    --input-shadow:    0 0 0 3px rgba(34, 211, 238, 0.2);
+
+    /* Topbar */
+    --topbar-bg:       rgba(10, 15, 30, 0.88);
+    --topbar-border:   rgba(148, 163, 184, 0.1);
+    --topbar-shadow:   0 1px 0 rgba(148,163,184,0.08);
+
+    /* Shadows */
+    --shadow:          0 10px 25px rgba(0, 0, 0, 0.5), 0 4px 10px rgba(0, 0, 0, 0.4);
+    --shadow-sm:       0 4px 12px rgba(0, 0, 0, 0.35);
+    --shadow-panel:    0 8px 32px rgba(0, 0, 0, 0.5);
+
+    /* Misc */
+    --blur:            blur(12px);
+    --radius:          12px;
+    --radius-sm:       8px;
+    --radius-full:     9999px;
+
+    /* Fonts */
+    --font-main:       'Outfit', -apple-system, sans-serif;
+    --font-mono:       'Share Tech Mono', 'JetBrains Mono', monospace;
+
+    /* Legacy aliases (keep for backward compat) */
+    --color-bg-base:         var(--bg);
+    --color-glass-panel:     var(--surface);
+    --color-glass-border:    var(--border);
+    --color-accent-cyan:     var(--accent);
+    --color-accent-blue:     var(--accent-2);
+    --color-accent-orange:   var(--accent-warning);
+    --color-text-primary:    var(--text);
+    --color-text-secondary:  var(--text-2);
+    --color-text-dim:        var(--text-3);
+    --color-surface:         var(--surface-solid);
+    --color-border:          var(--border);
+    --blur-intensity:         12px;
+    --shadow-premium:        var(--shadow);
+
+    /* Layout */
+    --topbar-h:    60px;
+    --panel-gap:   clamp(10px, 1vw, 16px);
+    --hud-w:       clamp(220px, 16vw, 280px);
+    --sidebar-w:   clamp(320px, 22vw, 440px);
+    --carousel-h:  clamp(160px, 13vw, 220px);
 }
 
+/* ============================================================
+   LIGHT THEME overrides
+   ============================================================ */
+:root[data-theme="light"] {
+    /* Backgrounds — slightly muted, not stark white */
+    --bg:              #e8edf3;
+    --surface:         rgba(245, 247, 250, 0.94);
+    --surface-solid:   #f5f7fa;
+    --surface-raised:  #f5f7fa;
+    --surface-hover:   #edf0f5;
+    --surface-active:  rgba(0, 102, 255, 0.07);
+
+    /* Borders */
+    --border:          #d1d9e4;
+    --border-strong:   #b8c4d4;
+
+    /* Accent */
+    --accent:          #0066ff;
+    --accent-2:        #0ea5e9;
+    --accent-dim:      rgba(0, 102, 255, 0.08);
+    --accent-hover:    rgba(0, 102, 255, 0.12);
+    --accent-glow:     none;
+    --accent-warning:  #f59e0b;
+    --accent-danger:   #ef4444;
+    --accent-success:  #10b981;
+
+    /* Text */
+    --text:            #0f172a;
+    --text-2:          #374151;
+    --text-3:          #4b5563;
+    --text-accent:     #0066ff;
+
+    /* Inputs */
+    --input-bg:        #f1f5f9;
+    --input-border:    #e2e8f0;
+    --input-focus:     #0066ff;
+    --input-shadow:    0 0 0 3px rgba(0, 102, 255, 0.12);
+
+    /* Topbar */
+    --topbar-bg:       #ffffff;
+    --topbar-border:   #e2e8f0;
+    --topbar-shadow:   0 1px 0 #e2e8f0, 0 2px 8px rgba(0,0,0,0.04);
+
+    /* Shadows */
+    --shadow:          0 2px 8px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0,0,0,0.04);
+    --shadow-sm:       0 1px 4px rgba(0, 0, 0, 0.06);
+    --shadow-panel:    0 4px 24px rgba(0, 0, 0, 0.1);
+
+    /* Misc */
+    --blur:            blur(8px);
+
+    /* Fonts */
+    --font-main:       'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono:       'Share Tech Mono', 'JetBrains Mono', monospace;
+
+    /* Legacy aliases */
+    --color-bg-base:         var(--bg);
+    --color-glass-panel:     var(--surface);
+    --color-glass-border:    var(--border);
+    --color-accent-cyan:     var(--accent);
+    --color-accent-blue:     var(--accent-2);
+    --color-text-primary:    var(--text);
+    --color-text-secondary:  var(--text-2);
+    --color-text-dim:        var(--text-3);
+    --color-surface:         var(--surface-solid);
+    --color-border:          var(--border);
+    --blur-intensity:         8px;
+    --shadow-premium:        var(--shadow);
+
+    --topbar-h: 56px;
+}
+
+/* ============================================================
+   Base Reset
+   ============================================================ */
 *,
 *::before,
 *::after {
@@ -40,76 +178,48 @@ body,
     padding: 0;
     width: 100%;
     height: 100%;
-    background-color: var(--color-bg-base);
+    background-color: var(--bg);
     font-family: var(--font-main);
-    color: var(--color-text-primary);
+    color: var(--text);
     user-select: none;
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
 
-/* ==========================================
-   Touch & Mobile Enhancements
-   ========================================== */
+/* ============================================================
+   Touch & Mobile
+   ============================================================ */
 @media (hover: none) and (pointer: coarse) {
-
-    /* 觸控裝置上增大點擊區域 */
-    .plane-icon {
-        min-width: 32px;
-        min-height: 32px;
-    }
-
-    .sb-close {
-        min-width: 44px;
-        min-height: 44px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .filter-option {
-        min-height: 36px;
-    }
+    .plane-icon { min-width: 32px; min-height: 32px; }
+    .sb-close   { min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+    .filter-option { min-height: 36px; }
 }
 
-/* ==========================================
-   Safe Area (iPhone notch / dynamic island)
-   ========================================== */
+/* ============================================================
+   Safe Area (iPhone notch)
+   ============================================================ */
 @supports (padding: env(safe-area-inset-top)) {
-    /* TopBar 左側 notch 保護 */
     .top-bar {
-        padding-left: calc(24px + env(safe-area-inset-left));
+        padding-left:  calc(24px + env(safe-area-inset-left));
         padding-right: calc(24px + env(safe-area-inset-right));
     }
-
-    /* Dashboard 右側 */
     .dashboard {
         padding-right: calc(20px + env(safe-area-inset-right));
     }
-
-    /* Sidebar 底部（底部抽屜模式）*/
     .sidebar .sb-content {
         padding-bottom: calc(20px + env(safe-area-inset-bottom));
     }
-
-    /* FilterPanel */
     .filter-panel {
-        padding-left: calc(15px + env(safe-area-inset-left));
+        padding-left:   calc(15px + env(safe-area-inset-left));
         padding-bottom: calc(15px + env(safe-area-inset-bottom));
     }
-
-    /* Anomaly Panel */
     .anomaly-panel {
         right: calc(24px + env(safe-area-inset-right));
     }
-
-    /* Settings Popover */
     .settings-popover {
         right: calc(0px + env(safe-area-inset-right));
     }
-
-    /* 底部浮動的 Dashboard（手機/平板模式）*/
     @media (max-width: 960px) {
         .dashboard {
             bottom: calc(16px + env(safe-area-inset-bottom));

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Clock, Activity, Settings, Globe, Search, X, BarChart2, User, LogOut, BookOpen, Route, ShieldCheck, Plus, Layers } from 'lucide-react';
+import { Clock, Activity, Settings, Globe, Search, X, BarChart2, User, LogOut, BookOpen, Route, ShieldCheck, Plus, Sun, Moon } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import { authStore } from '../store/authStore';
 import SearchBar from './SearchBar';
 import FilterPanel from './FilterPanel';
+import AeroIcon from './AeroIcon';
 import './TopBar.css';
 
 export default function TopBar({
@@ -28,8 +29,8 @@ export default function TopBar({
     showUserRoutes = false,
     onToggleUserRoutes,
     hasUserRoutes = false,
-    is3D = false,
-    onToggle3D,
+    theme,
+    onToggleTheme,
 }) {
     const { t, lang, toggleLang } = useI18n();
     const [time, setTime] = useState('--:--:--');
@@ -74,7 +75,7 @@ export default function TopBar({
             {/* Left: Branding & Core Stats */}
             <div className="top-bar-left">
                 <div className="brand-logo">
-                    <img src="/favicon.svg" alt="Logo" className="brand-logo-img" style={{ width: '24px', height: '24px' }} />
+                    <AeroIcon size={28} bg={false} />
                     <h2>AEROSTRAT RADAR</h2>
                 </div>
 
@@ -115,19 +116,11 @@ export default function TopBar({
                 </button>
 
                 <button
-                    className={`tb-btn ${is3D ? 'active' : ''}`}
-                    onClick={onToggle3D}
-                    title={is3D ? '切換 2D 地圖' : '切換 3D 地圖'}
+                    className="tb-btn tb-icon-btn"
+                    onClick={onToggleTheme}
+                    title={theme === 'light' ? '切換深色模式' : '切換淺色模式'}
                 >
-                    <Layers size={16} />
-                </button>
-
-                <button
-                    className={`tb-btn ${showStats ? 'active' : ''}`}
-                    onClick={onToggleStats}
-                    title="Live Stats"
-                >
-                    <BarChart2 size={16} />
+                    {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
                 </button>
 
                 <button className="tb-btn tb-lang-btn" onClick={toggleLang}>

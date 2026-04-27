@@ -1,12 +1,11 @@
 .filter-panel {
-    background: var(--color-glass-panel);
-    border: 1px solid var(--color-glass-border);
+    background: var(--surface-solid);
+    border: 1px solid var(--border);
     border-radius: 12px;
     padding: 16px;
-    color: var(--color-text-primary);
-    backdrop-filter: blur(var(--blur-intensity));
+    color: var(--text);
     min-width: 180px;
-    box-shadow: var(--shadow-premium);
+    box-shadow: var(--shadow-sm);
     transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
@@ -14,21 +13,19 @@
     background: transparent;
     border: none;
     box-shadow: none;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
     padding: 12px;
 }
 
 .filter-title {
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 700;
-    color: var(--color-accent-cyan);
+    color: var(--accent);
     margin-bottom: 12px;
-    letter-spacing: 2px;
+    letter-spacing: 1px;
     text-transform: uppercase;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 .filter-option {
@@ -36,33 +33,33 @@
     align-items: center;
     margin-bottom: 10px;
     font-size: 13px;
-    color: var(--color-text-secondary);
+    color: var(--text-2);
     cursor: pointer;
     gap: 10px;
-    transition: color 0.2s ease;
+    transition: color 0.15s ease;
 }
 
 .filter-option:hover {
-    color: var(--color-text-primary);
+    color: var(--text);
 }
 
 .filter-option input[type="checkbox"] {
     cursor: pointer;
-    accent-color: var(--color-accent-cyan);
-    width: 16px;
-    height: 16px;
+    accent-color: var(--accent);
+    width: 15px;
+    height: 15px;
 }
 
 .theme-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
-    margin-top: 10px;
+    gap: 6px;
+    margin-top: 8px;
 }
 
 .theme-swatch {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 6px;
     display: flex;
@@ -70,30 +67,29 @@
     align-items: center;
     gap: 4px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
 }
 
 .theme-swatch:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.2);
+    background: var(--surface-active);
+    border-color: var(--border-strong);
 }
 
 .theme-swatch.active {
-    background: rgba(34, 211, 238, 0.15);
-    border-color: var(--color-accent-cyan);
-    box-shadow: 0 0 10px rgba(34, 211, 238, 0.2);
+    background: var(--accent-dim);
+    border-color: var(--accent);
 }
 
 .swatch-color {
     width: 100%;
-    height: 6px;
+    height: 5px;
     border-radius: 3px;
 }
 
 .swatch-name {
     font-size: 9px;
     font-weight: 600;
-    color: var(--color-text-secondary);
+    color: var(--text-2);
     text-align: center;
     white-space: nowrap;
     overflow: hidden;
@@ -102,22 +98,22 @@
 }
 
 .theme-swatch.active .swatch-name {
-    color: var(--color-accent-cyan);
+    color: var(--accent);
 }
 
 .collapsible-header {
     justify-content: space-between;
-    transition: color 0.2s ease;
+    transition: color 0.15s ease;
 }
 
 .collapsible-header:hover {
-    color: var(--color-text-primary) !important;
+    color: var(--text) !important;
 }
 
 .toggle-icon {
     font-size: 8px;
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    opacity: 0.6;
+    opacity: 0.5;
 }
 
 .toggle-icon.open {
@@ -129,129 +125,131 @@
     max-height: 0;
     overflow: hidden;
     opacity: 0;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     pointer-events: none;
 }
 
 .theme-section.expanded {
-    max-height: 200px;
+    max-height: 220px;
     opacity: 1;
     margin-top: 5px;
     pointer-events: auto;
 }
 
-/* [v3.1] Custom Styling for native select dropdown (Fleet Focus) */
 .theme-select {
     width: 100%;
-    margin-bottom: 15px;
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: var(--color-text-primary);
-    padding: 8px 12px;
+    margin-bottom: 12px;
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 12px;
     border-radius: 8px;
     font-size: 13px;
     font-family: inherit;
     outline: none;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
     appearance: none;
     -webkit-appearance: none;
-    -moz-appearance: none;
-    /* Custom cyan arrow SVG */
-    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2322d3ee' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230066ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
     background-repeat: no-repeat;
-    background-position: right 12px center;
-    background-size: 14px;
+    background-position: right 10px center;
+    background-size: 13px;
 }
 
 .theme-select:hover {
-    border-color: rgba(34, 211, 238, 0.5);
-    background: rgba(15, 23, 42, 0.9);
+    border-color: var(--accent);
+    background-color: var(--surface-solid);
 }
 
 .theme-select:focus {
-    border-color: var(--color-accent-cyan);
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.2);
+    border-color: var(--input-focus);
+    box-shadow: var(--input-shadow);
+    background-color: var(--surface-solid);
 }
 
-/* Styling options inside native select is partially limited, but we set BG/color for those browsers that support it */
 .theme-select option {
-    background-color: #0f172a;
-    color: #f1f5f9;
-    padding: 8px;
-    font-size: 14px;
+    background-color: var(--surface-solid);
+    color: var(--text);
+    padding: 6px;
+    font-size: 13px;
 }
 
-/* ===== SYSTEM MONITOR BUTTON ===== */
+/* System Monitor Button */
 .sys-monitor-btn {
     display: flex;
     align-items: center;
     width: 100%;
-    padding: 8px 10px;
-    font-size: 12px;
+    padding: 7px 10px;
+    font-size: 11px;
     font-weight: 600;
     font-family: inherit;
-    letter-spacing: 0.08em;
-    color: var(--color-accent-cyan);
-    background: rgba(34, 211, 238, 0.07);
-    border: 1px solid rgba(34, 211, 238, 0.2);
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid var(--accent-hover);
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
     text-transform: uppercase;
 }
 
 .sys-monitor-btn:hover {
-    background: rgba(34, 211, 238, 0.14);
-    border-color: rgba(34, 211, 238, 0.4);
-    box-shadow: 0 0 10px rgba(34, 211, 238, 0.1);
+    background: var(--accent-hover);
+    border-color: var(--accent);
 }
 
-/* ===== RWD ===== */
-/* 獨立浮動時（不在 settings-popover 內）於手機隱藏
-   但在 settings-popover 內（embedded 模式）保持顯示 */
+/* RWD */
 @media (max-width: 768px) {
     .filter-panel:not(.embedded) {
         display: none;
     }
-    /* embedded 模式（在 settings 彈窗內）：全寬顯示，加大間距 */
     .filter-panel.embedded {
         min-width: unset;
         width: 100%;
     }
     .filter-option {
-        min-height: 40px; /* 觸控目標放大 */
+        min-height: 40px;
         font-size: 14px;
     }
 }
 
-/* ===== [v2.9.0] Map Layer Grid ===== */
+/* Map Layer Grid */
 .layer-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 6px;
+    gap: 5px;
     margin-top: 8px;
 }
 
 .layer-btn {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 6px 4px;
-    font-size: 10px;
-    color: var(--color-text-secondary);
+    font-size: 11px;
+    color: var(--text-2);
     text-align: center;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.15s;
+    font-family: var(--font-main);
 }
 
 .layer-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--surface-active);
+    border-color: var(--border-strong);
+    color: var(--text);
 }
 
 .layer-btn.active {
-    background: rgba(34, 211, 238, 0.15);
-    border-color: var(--color-accent-cyan);
-    color: var(--color-accent-cyan);
-    box-shadow: 0 0 8px rgba(34, 211, 238, 0.2);
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+/* Stat divider */
+.stat-divider {
+    height: 1px;
+    background: var(--border);
 }

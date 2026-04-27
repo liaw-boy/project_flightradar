@@ -112,6 +112,14 @@ CREATE INDEX IF NOT EXISTS idx_uf_user_id   ON user_flights(user_id);
 CREATE INDEX IF NOT EXISTS idx_uf_date      ON user_flights(flight_date);
 `);
 
+// ── Monitor Sessions (persistent across restarts) ─────────────────────────
+db.exec(`
+CREATE TABLE IF NOT EXISTS monitor_sessions (
+    token      TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
+`);
+
 // ── Batched TTL cleanup (24 h) — non-blocking, yields between chunks ─────
 const PRUNE_BATCH = 5000;            // ~120ms DELETE blocks — short enough for healthy event loop
 const PRUNE_PAUSE_MS = 500;          // 500ms pause — ample time for HTTP I/O between batches

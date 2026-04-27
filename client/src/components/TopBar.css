@@ -5,36 +5,35 @@
     width: 100vw;
     height: var(--topbar-h);
     z-index: 2000;
-    background: rgba(10, 15, 30, 0.85);
-    border-bottom: 1px solid var(--color-glass-border);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: var(--topbar-bg);
+    border-bottom: 1px solid var(--topbar-border);
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 24px;
     box-sizing: border-box;
     color: var(--color-text-primary);
+    box-shadow: var(--topbar-shadow);
 }
 
 .top-bar-left {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 16px;
 }
 
 .top-bar-center {
     flex: 1;
     display: flex;
     justify-content: center;
-    max-width: 400px;
+    max-width: 380px;
     position: relative;
 }
 
 .top-bar-right {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
 }
 
 .brand-logo {
@@ -45,95 +44,85 @@
 
 .brand-logo h2 {
     margin: 0;
-    font-size: 19px;
-    font-weight: 900;
-    letter-spacing: 1.5px;
-    background: linear-gradient(135deg, var(--color-accent-blue), var(--color-accent-cyan));
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: var(--text);
 }
 
 .brand-subtitle {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-family: var(--font-mono);
+    gap: 6px;
 }
 
 .brand-monitor-text {
     font-size: 10px;
-    font-weight: 600;
-    color: var(--color-text-dim);
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
+    font-weight: 500;
+    color: var(--text-3);
+    letter-spacing: 0.3px;
 }
 
 .brand-version {
     font-size: 10px;
     font-family: var(--font-mono);
-    color: var(--color-accent-cyan);
-    background: rgba(34, 211, 238, 0.1);
+    color: var(--text-accent);
+    background: var(--accent-dim);
     padding: 1px 5px;
     border-radius: 4px;
-    border: 1px solid rgba(34, 211, 238, 0.2);
+    border: 1px solid var(--accent-hover);
 }
-
 
 .top-stat-pill {
     display: flex;
     align-items: center;
-    gap: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    padding: 6px 12px;
+    gap: 6px;
+    background: var(--surface-hover);
+    padding: 5px 10px;
     border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    font-family: var(--font-mono);
+    border: 1px solid var(--border);
 }
 
 .ts-label {
-    font-size: 11px;
-    /* Added 1px */
-    color: var(--color-text-dim);
+    font-size: 10px;
+    color: var(--text-3);
     text-transform: uppercase;
-    font-weight: 700;
-    letter-spacing: 0.5px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
 }
 
 .ts-value {
-    font-size: 15px;
-    /* Added 2px */
+    font-size: 14px;
     font-weight: 700;
-    color: var(--color-accent-cyan);
+    color: var(--accent);
 }
 
 .tb-btn {
     display: flex;
     align-items: center;
-    gap: 6px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: var(--color-text-primary);
-    padding: 8px 16px;
+    gap: 5px;
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 14px;
     border-radius: 8px;
     font-family: var(--font-main);
-    font-size: 14px;
-    /* Added 1px */
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.15s;
 }
 
 .tb-lang-btn,
 .tb-icon-btn {
-    width: 44px;
+    width: 38px;
     justify-content: center;
     padding-left: 0;
     padding-right: 0;
 }
 
 .tb-lang-btn {
-    width: 52px;
+    width: 48px;
 }
 
 .tb-3d-btn {
@@ -142,27 +131,30 @@
     gap: 4px;
     padding: 0 10px;
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 600;
 }
 
 .tb-3d-label {
-    letter-spacing: 0.04em;
+    letter-spacing: 0.03em;
 }
 
 .tb-3d-btn.active {
-    background: rgba(169, 223, 216, 0.15);
-    color: #a9dfd8;
-    border-color: rgba(169, 223, 216, 0.3);
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--accent-hover);
 }
 
-.tb-btn:hover,
+.tb-btn:hover {
+    background: var(--surface-active);
+    border-color: var(--border-strong);
+    color: var(--text);
+}
+
 .tb-btn.active {
-    background: rgba(34, 211, 238, 0.15);
-    border-color: var(--color-accent-cyan);
-    color: var(--color-accent-cyan);
-    box-shadow: 0 0 12px rgba(34, 211, 238, 0.2);
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
 }
-
 
 .settings-dropdown-wrapper {
     position: relative;
@@ -170,24 +162,21 @@
 
 .settings-popover {
     position: absolute;
-    top: calc(100% + 12px);
+    top: calc(100% + 10px);
     right: 0;
     width: min(320px, calc(100vw - 24px));
     max-height: calc(100dvh - 80px);
     overflow-y: auto;
-    background: rgba(15, 23, 42, 0.95);
-    border: 1px solid var(--color-glass-border);
+    background: var(--surface-solid);
+    border: 1px solid var(--border);
     border-radius: 12px;
-    box-shadow: var(--shadow-premium);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+    box-shadow: var(--shadow-panel);
     z-index: 2001;
     animation: popoverFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    /* 防止右側溢出 */
     transform-origin: top right;
 }
 
-/* ── User menu ── */
+/* User menu */
 .tb-user-btn {
     gap: 6px;
     max-width: 140px;
@@ -203,20 +192,20 @@
 
 .tb-login-btn {
     gap: 6px;
-    color: var(--color-accent-cyan);
-    border-color: rgba(34, 211, 238, 0.3);
-    background: rgba(34, 211, 238, 0.06);
+    color: var(--accent);
+    border-color: var(--accent-hover);
+    background: var(--accent-dim);
+    font-weight: 600;
 }
 
 .tb-login-btn:hover {
-    background: rgba(34, 211, 238, 0.15);
-    border-color: var(--color-accent-cyan);
-    box-shadow: 0 0 12px rgba(34, 211, 238, 0.2);
+    background: var(--accent-hover);
+    border-color: var(--accent);
 }
 
 .user-menu-popover {
     width: 180px;
-    padding: 8px;
+    padding: 6px;
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -227,53 +216,52 @@
     align-items: center;
     gap: 8px;
     width: 100%;
-    padding: 9px 12px;
+    padding: 8px 12px;
     background: none;
     border: none;
-    border-radius: 8px;
-    color: var(--color-text-primary);
+    border-radius: 6px;
+    color: var(--text);
     font-family: var(--font-main);
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
     text-align: left;
-    transition: background 0.15s;
+    transition: background 0.12s;
 }
 
 .user-menu-item:hover {
-    background: rgba(255,255,255,0.07);
+    background: var(--surface-active);
 }
 
 .user-menu-item.danger {
-    color: #f87171;
+    color: var(--accent-danger);
 }
 
 .user-menu-item.danger:hover {
-    background: rgba(239,68,68,0.12);
+    background: var(--accent-dim);
 }
 
 .user-menu-item.admin {
-    color: #a9dfd8;
+    color: var(--accent);
 }
 
 .user-menu-item.admin:hover {
-    background: rgba(169,223,216,0.12);
+    background: var(--accent-dim);
 }
 
 .user-menu-divider {
     height: 1px;
-    background: var(--color-glass-border);
+    background: var(--border);
     margin: 4px 0;
 }
 
-/* 超小螢幕：popover 左右撐滿，fixed 定位避免被裁切 */
 @media (max-width: 480px) {
     .settings-dropdown-wrapper {
         position: static;
     }
     .settings-popover {
         position: fixed;
-        top: 68px;
+        top: 64px;
         right: 12px;
         left: 12px;
         width: auto;
@@ -284,16 +272,15 @@
 @keyframes popoverFadeIn {
     from {
         opacity: 0;
-        transform: translateY(-10px);
+        transform: translateY(-8px);
     }
-
     to {
         opacity: 1;
         transform: translateY(0);
     }
 }
 
-/* Adjust search bar styling for compact top bar mode */
+/* Search bar in top bar */
 .top-bar-center .search-container {
     position: relative;
     width: 100%;
@@ -305,36 +292,35 @@
 
 .top-bar-center .search-box {
     margin: 0;
-    padding: 8px 16px;
+    padding: 7px 16px;
     font-size: 13px;
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--input-bg);
+    border-color: var(--border);
 }
 
 .top-bar-center .search-box:focus {
     width: 100%;
-    background: rgba(15, 23, 42, 0.95);
+    background: var(--surface-solid);
+    border-color: var(--accent);
 }
 
 .status-indicator.stat-err .ts-value {
-    color: #ef4444;
+    color: var(--accent-danger);
 }
 
 .status-indicator.stat-warn .ts-value {
-    color: #f59e0b;
+    color: var(--accent-warning);
 }
 
 .status-indicator.stat-ok .ts-value {
-    color: #10b981;
+    color: var(--accent-success);
 }
 
-/* ===== Responsive Design: Mobile & Tablet ===== */
-
-/* 搜尋圖示：>850px 隱藏（搜尋欄直接顯示），≤850px 顯示 */
+/* Responsive */
 .tb-search-icon {
     display: none;
 }
 
-/* 平板（850px）：隱藏搜尋欄，改用圖示按鈕 */
 @media (max-width: 850px) {
     .top-bar-center {
         display: none;
@@ -344,7 +330,6 @@
     }
 }
 
-/* Mobile Search Overlay — 展開時覆蓋 TopBar */
 .mobile-search-overlay {
     display: none;
 }
@@ -370,73 +355,50 @@
     }
 }
 
-/* 中等螢幕（768px）：隱藏時鐘節省空間 */
 @media (max-width: 768px) {
     .top-bar {
         padding: 0 16px;
     }
     .top-bar-left {
-        gap: 10px;
+        gap: 8px;
     }
-    /* 隱藏時鐘 pill，保留飛機數與狀態 */
     .top-stat-pill:first-of-type {
         display: none;
     }
 }
 
-/* 飛機計數副標（air/gnd） */
 .ts-sub {
-    font-size: 11px;
+    font-size: 10px;
     opacity: 0.6;
     font-weight: 500;
-    margin-left: 4px;
+    margin-left: 3px;
 }
 
 @media (max-width: 600px) {
     .top-bar {
         padding: 0 12px;
     }
-
     .brand-logo h2 {
         font-size: 15px;
-        letter-spacing: 0.5px;
     }
-
-    /* 手機隱藏 RADAR 文字，只留 AEROSTRAT */
-    .brand-logo h2::after {
-        content: '';
-    }
-
     .brand-version {
         display: none;
     }
-
     .ts-label {
         display: none;
     }
-
-    /* 手機上 air/gnd 副標也隱藏，只顯示總數 */
     .ts-sub {
         display: none;
     }
-
     .tb-btn span {
         display: none;
     }
-
     .tb-btn {
-        padding: 8px;
-        min-width: 36px;
+        padding: 7px;
+        min-width: 34px;
     }
-
     .top-stat-pill {
-        padding: 4px 8px;
-        gap: 4px;
-    }
-
-    /* 語言按鈕縮短 */
-    .tb-btn:first-of-type {
-        font-size: 11px;
-        padding: 6px 8px;
+        padding: 4px 7px;
+        gap: 3px;
     }
 }

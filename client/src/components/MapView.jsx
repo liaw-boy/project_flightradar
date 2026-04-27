@@ -261,6 +261,7 @@ export default function MapView({
     const trackPointsRef = useRef(trackPoints);   // [v3.1] ref for animation loop
     const onUsageUpdateRef = useRef(onUsageUpdate);
     const colorSchemeRef = useRef(colorScheme);
+    const mapLayerRef = useRef(mapLayer);    // [v3.0] for canvas loop theme-aware coloring
     const filtersRef = useRef(filters);
 
     // [Project AERO-SYNC] Zero-GC Projection Pre-allocation
@@ -289,6 +290,7 @@ export default function MapView({
     useEffect(() => { trackPointsRef.current = trackPoints; }, [trackPoints]);
     useEffect(() => { onUsageUpdateRef.current = onUsageUpdate; }, [onUsageUpdate]);
     useEffect(() => { colorSchemeRef.current = colorScheme; }, [colorScheme]);
+    useEffect(() => { mapLayerRef.current = mapLayer; }, [mapLayer]);
     useEffect(() => { filtersRef.current = filters; }, [filters]);
 
     const [airports, setAirports] = useState([]);
@@ -397,7 +399,7 @@ export default function MapView({
         // 加入右下角的縮放按鈕
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        tileLayerRef.current = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        tileLayerRef.current = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
             maxZoom: 19,
             attribution: '',
         }).addTo(map);
@@ -709,12 +711,13 @@ export default function MapView({
         const map = mapRef.current;
         if (!map) return;
         const TILE_URLS = {
+            light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
             dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
             satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             street: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
             terrain: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
         };
-        const url = TILE_URLS[mapLayer] || TILE_URLS.dark;
+        const url = TILE_URLS[mapLayer] || TILE_URLS.light;
         if (tileLayerRef.current) {
             tileLayerRef.current.setUrl(url);
         }
@@ -866,11 +869,35 @@ export default function MapView({
         const lng = plane.renderLng || plane.lng;
         const targetLatLng = L.latLng(lat, lng);
 
-        // Only pan on selection if the plane is NOT currently visible in the viewport.
-        // If it's already on screen, keep the user's current view and zoom level.
+        // If we have a long track path (trans-oceanic), fit bounds to show full route
+        const pts = trackPointsRef.current;
+        if (pts && pts.length > 10) {
+            const lats = pts.map(p => p[1]).filter(Boolean);
+            const lngs = pts.map(p => p[2]).filter(Boolean);
+            if (lats.length && lngs.length) {
+                const latSpan = Math.max(...lats) - Math.min(...lats);
+                const lngSpan = Math.max(...lngs) - Math.min(...lngs);
+                if (latSpan > 10 || lngSpan > 30) {
+                    // Long-haul: unwrap lngs and fitBounds
+                    const unwrapped = [lngs[0]];
+                    for (let i = 1; i < lngs.length; i++) {
+                        let d = lngs[i] - unwrapped[i - 1];
+                        if (d > 180) d -= 360;
+                        if (d < -180) d += 360;
+                        unwrapped.push(unwrapped[i - 1] + d);
+                    }
+                    const bounds = L.latLngBounds(
+                        lats.map((la, i) => [la, unwrapped[i]])
+                    );
+                    map.fitBounds(bounds, { padding: [60, 60], maxZoom: 6, animate: true, duration: 0.8 });
+                    return;
+                }
+            }
+        }
+
+        // Short flight or no track: only pan if plane is off-screen
         if (map.getBounds().contains(targetLatLng)) return;
 
-        // Plane is off-screen — bring it into view without changing zoom level.
         const isMobile = window.innerWidth <= 768;
         if (isMobile) {
             const cardH = 110;
@@ -1313,7 +1340,9 @@ export default function MapView({
                                 // getAltitudeColor expects meters — convert.
                                 const altFt = pts[i].seg[3] ?? 0;
                                 const altM  = altFt * 0.3048;
-                                const color = getAltitudeColor(altM, altM <= 0, false, colorSchemeRef.current);
+                                // Track path: light map forces ALTITUDE gradient; dark map respects user scheme
+                                const trailScheme = mapLayerRef.current === 'light' ? 'ALTITUDE' : colorSchemeRef.current;
+                                const color = getAltitudeColor(altM, altM <= 0, false, trailScheme);
 
                                 ctx.globalAlpha = alpha;
                                 ctx.strokeStyle = color;
@@ -1489,7 +1518,8 @@ export default function MapView({
                         }
                     }
                     // Live aircraft altitude is in feet (ADS-B); convert to meters for color stops.
-                    const altColor = getAltitudeColor((plane.altitude || 0) * 0.3048, plane.onGround, plane.isEmergency, colorSchemeRef.current);
+                    const _planeScheme = mapLayerRef.current === 'light' ? 'ALTITUDE_LIGHT' : colorSchemeRef.current;
+                    const altColor = getAltitudeColor((plane.altitude || 0) * 0.3048, plane.onGround, plane.isEmergency, _planeScheme);
 
                     // ADS-B heading from adsb.fi/adsb.lol is accurate and current.
                     // Movement-vector derivation was designed for MLAT noise and caused
@@ -1512,18 +1542,20 @@ export default function MapView({
                         ctx.arc(ptX, ptY, dotR + 1.2, 0, Math.PI * 2);
                         ctx.fill();
                         // Colored center
-                        ctx.fillStyle = isSelected ? '#FFD700' : altColor;
+                        const _selColor = (isSelected && mapLayerRef.current !== 'light') ? '#FFD700' : altColor;
+                        ctx.fillStyle = _selColor;
                         ctx.beginPath();
                         ctx.arc(ptX, ptY, dotR, 0, Math.PI * 2);
                         ctx.fill();
                         if (isSelected) {
-                            ctx.strokeStyle = '#FFD700';
+                            ctx.strokeStyle = mapLayerRef.current === 'light' ? altColor : '#FFD700';
                             ctx.lineWidth = 1.5;
                             ctx.stroke();
                         }
                         ctx.restore();
                     } else {
-                        const dynImg = getDynamicImage(activeTypecode, isSelected);
+                        // Skip pre-warmed SVG in light mode (Tier 2 has baked-in colors)
+                        const dynImg = mapLayerRef.current !== 'light' ? getDynamicImage(activeTypecode, isSelected) : null;
                         if (dynImg && dynImg.complete) {
                             // ── Tier 2: 1:1 Exact SVG (pre-warmed, has built-in white outline)
                             ctx.save();
@@ -1549,15 +1581,17 @@ export default function MapView({
                                 ctx.scale(canvasScale, canvasScale);
                                 ctx.translate(-(vb[0] + vbW / 2), -(vb[1] + vbH / 2));
                                 ctx.lineJoin = 'round';
-                                // Pass 1: dark shadow outline (2px normalized — reduced from 3.5)
-                                ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+                                // Pass 1: shadow outline
+                                const isLightMap = mapLayerRef.current === 'light';
+                                ctx.strokeStyle = isLightMap ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.7)';
                                 ctx.lineWidth = Math.max(0.8, 2.0 / canvasScale);
                                 ctx.stroke(path);
                                 // Pass 2: colored fill
                                 ctx.fillStyle = altColor;
                                 ctx.fill(path);
-                                // Pass 3: thin white outline (1px normalized)
-                                ctx.strokeStyle = isSelected ? '#FFD700' : 'rgba(255,255,255,0.9)';
+                                // Pass 3: thin contrast outline — white in light mode, yellow in dark
+                                const selectedStroke = isLightMap ? altColor : '#FFD700';
+                                ctx.strokeStyle = isSelected ? selectedStroke : (isLightMap ? altColor : 'rgba(150,160,175,0.8)');
                                 ctx.lineWidth = isSelected ? Math.max(0.8, 2.0 / canvasScale) : Math.max(0.3, 1.0 / canvasScale);
                                 ctx.stroke(path);
                                 ctx.restore();
@@ -1601,18 +1635,18 @@ export default function MapView({
                         const textWidth = measureCached(ctx, labelText, _labelFont);
                         ctx.font = _labelFont;
 
-                        const logoWidth = hasLogo ? 40 : 0;
-                        const logoHeight = 14;
+                        const logoHeight = 20;
+                        const logoWidth = hasLogo ? Math.round(logoImg.naturalWidth / logoImg.naturalHeight * logoHeight) : 0;
                         const paddingX = 10;
                         const gap = hasLogo ? 8 : 0;
 
                         const bubbleWidth = paddingX + logoWidth + gap + textWidth + paddingX;
-                        const bubbleHeight = 28;
+                        const bubbleHeight = 32;
                         const radius = 6;
                         const boxX = Math.round(drawSize / 2) + 6;
                         const boxY = -bubbleHeight / 2;
                         const tailWidth = 8;
-                        const tailHeight = 10;
+                        const tailHeight = 12;
 
                         // ── Label Collision Check ──
                         // Selected/Emergency always claim+draw; normal labels skip on overlap
@@ -1628,12 +1662,15 @@ export default function MapView({
                             ctx.globalAlpha = labelAlpha;
 
                             // Shadow
-                            ctx.shadowColor = isSelected ? 'rgba(34, 211, 238, 0.6)' : 'rgba(0, 0, 0, 0.6)';
+                            const isLight = mapLayerRef.current === 'light';
+                            ctx.shadowColor = isSelected ? 'rgba(34, 211, 238, 0.5)' : (isLight ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.6)');
                             ctx.shadowBlur = isSelected ? 10 : 5;
                             ctx.shadowOffsetY = 2;
 
                             // Background panel
-                            ctx.fillStyle = isSelected ? 'rgba(15, 23, 42, 0.95)' : 'rgba(30, 41, 59, 0.9)';
+                            ctx.fillStyle = isSelected
+                                ? (isLight ? 'rgba(255,255,255,0.97)' : 'rgba(15, 23, 42, 0.95)')
+                                : (isLight ? 'rgba(255,255,255,0.92)' : 'rgba(30, 41, 59, 0.9)');
                             ctx.beginPath();
                             ctx.moveTo(boxX + radius, boxY);
                             ctx.lineTo(boxX + bubbleWidth - radius, boxY);
@@ -1655,7 +1692,7 @@ export default function MapView({
 
                             // Border
                             ctx.lineWidth = 1.5;
-                            ctx.strokeStyle = isSelected ? '#22d3ee' : (plane.isEmergency ? '#ef4444' : 'rgba(148, 163, 184, 0.4)');
+                            ctx.strokeStyle = isSelected ? '#22d3ee' : (plane.isEmergency ? '#ef4444' : (isLight ? 'rgba(100,116,139,0.5)' : 'rgba(148, 163, 184, 0.4)'));
                             ctx.stroke();
 
                             ctx.shadowBlur = 0;
@@ -1665,7 +1702,7 @@ export default function MapView({
                             let currentX = boxX + paddingX;
 
                             if (hasLogo) {
-                                const logoBgMargin = 3;
+                                const logoBgMargin = 2;
                                 ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
                                 ctx.beginPath();
                                 if (ctx.roundRect) {
@@ -1675,6 +1712,8 @@ export default function MapView({
                                 }
                                 ctx.fill();
 
+                                ctx.imageSmoothingEnabled = true;
+                                ctx.imageSmoothingQuality = 'high';
                                 ctx.drawImage(logoImg, currentX, boxY + (bubbleHeight - logoHeight) / 2, logoWidth, logoHeight);
                                 currentX += logoWidth + gap / 2;
 
@@ -1689,7 +1728,9 @@ export default function MapView({
                             }
 
                             // Callsign text
-                            ctx.fillStyle = isSelected ? '#ffffff' : (plane.isEmergency ? '#fca5a5' : '#e2e8f0');
+                            ctx.fillStyle = isSelected
+                                ? (isLight ? '#0f172a' : '#ffffff')
+                                : (plane.isEmergency ? '#fca5a5' : (isLight ? '#1e293b' : '#e2e8f0'));
                             ctx.textBaseline = 'middle';
                             ctx.fillText(labelText, currentX, 1);
 

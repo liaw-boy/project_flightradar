@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { X, User, Lock, Mail, AlertCircle } from 'lucide-react';
 import { apiLogin, apiRegister, authStore } from '../store/authStore';
+import AeroIcon from './AeroIcon';
 import './AuthModal.css';
 
 /* ─── A380 (A388) top-view — extracted from project SVG database ─── */
@@ -77,6 +78,8 @@ export default function AuthModal({ onClose }) {
     const cardRef   = useRef(null);  // .auth-right
     const stubRef   = useRef(null);  // .auth-stub
     const tearRef   = useRef(null);  // .auth-tear
+    const modalRef  = useRef(null);  // .auth-overlay — for focus trap
+    const prevFocusRef = useRef(null);
 
     // Check which OAuth providers are configured
     useEffect(() => {
@@ -88,8 +91,38 @@ export default function AuthModal({ onClose }) {
 
     useEffect(() => { inputRef.current?.focus(); }, [mode]);
 
+    // Capture previously focused element synchronously (before autofocus moves it)
+    useLayoutEffect(() => {
+        prevFocusRef.current = document.activeElement;
+        return () => {
+            const prev = prevFocusRef.current;
+            // Blur current focus first to prevent typing into background
+            if (document.activeElement && document.activeElement !== document.body) {
+                document.activeElement.blur();
+            }
+            if (prev && typeof prev.focus === 'function' && document.contains(prev)) {
+                setTimeout(() => prev.focus?.(), 0);
+            }
+        };
+    }, []);
+
+    // Escape + Tab focus trap
     useEffect(() => {
-        const h = (e) => { if (e.key === 'Escape') onClose(); };
+        const h = (e) => {
+            if (e.key === 'Escape') { onClose(); return; }
+            if (e.key !== 'Tab' || !modalRef.current) return;
+            const focusables = modalRef.current.querySelectorAll(
+                'button:not([disabled]), input:not([disabled]), a[href], select, textarea, [tabindex]:not([tabindex="-1"])'
+            );
+            if (!focusables.length) return;
+            const first = focusables[0];
+            const last  = focusables[focusables.length - 1];
+            if (e.shiftKey && document.activeElement === first) {
+                e.preventDefault(); last.focus();
+            } else if (!e.shiftKey && document.activeElement === last) {
+                e.preventDefault(); first.focus();
+            }
+        };
         window.addEventListener('keydown', h);
         return () => window.removeEventListener('keydown', h);
     }, [onClose]);
@@ -131,7 +164,7 @@ export default function AuthModal({ onClose }) {
     const hasOAuth = oauthConfig.google || oauthConfig.facebook;
 
     return (
-        <div className="auth-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+        <div ref={modalRef} className="auth-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
             <div className="auth-modal">
 
                 {/* ══ LEFT — Plane Scene ══ */}
@@ -231,7 +264,7 @@ export default function AuthModal({ onClose }) {
                     {/* Airline header */}
                     <div className="auth-bp-header">
                         <div className="auth-bp-logo">
-                            <div className="auth-bp-icon">✈</div>
+                            <AeroIcon size={28} />
                             <div>
                                 <div className="auth-bp-name">AEROSTRAT</div>
                                 <div className="auth-bp-sub">Aviation Intelligence</div>

@@ -7,7 +7,6 @@ import MobileSheet from './components/MobileSheet';
 import SearchBar from './components/SearchBar';
 import TopBar from './components/TopBar';
 import MapView from './components/MapView';
-import MapView3D from './components/MapView3D';
 import PlaneList from './components/PlaneList';
 import TimePlayer from './components/TimePlayer';
 import StatsPanel from './components/StatsPanel';
@@ -66,7 +65,6 @@ export default function App() {
         throttleFactor: 1.0
     });
 
-    const colorScheme = 'ALTITUDE';
 
     // ── Auth modals ────────────────────────────────────────────
     const [showAuthModal, setShowAuthModal]         = useState(false);
@@ -90,28 +88,44 @@ export default function App() {
         }
     }, [authUser]);
 
-    // 3D Map toggle — capture 2D viewport at switch time for seamless transition
-    const [is3D, setIs3D] = useState(false);
-    const [initView3D, setInitView3D] = useState(null);
-    const handleToggle3D = useCallback(() => {
-        setIs3D(v => {
-            if (!v && mapInstanceRef.current) {
-                // Capture current 2D viewport
-                const c = mapInstanceRef.current.getCenter();
-                setInitView3D({ lng: c.lng, lat: c.lat, zoom: mapInstanceRef.current.getZoom() });
-            }
-            return !v;
+    // [v3.0] Theme system (dark = default, light = optional)
+    const [theme, setTheme] = useState(() => {
+        return localStorage.getItem('radar_theme') || 'dark';
+    });
+    useEffect(() => {
+        const root = document.documentElement;
+        if (theme === 'light') {
+            root.setAttribute('data-theme', 'light');
+        } else {
+            root.removeAttribute('data-theme');
+        }
+        localStorage.setItem('radar_theme', theme);
+    }, [theme]);
+    const handleToggleTheme = useCallback(() => {
+        setTheme(prev => {
+            const next = prev === 'dark' ? 'light' : 'dark';
+            // Auto-switch map tile to match theme
+            const tileMap = { dark: 'dark', light: 'light' };
+            const newTile = tileMap[next] || next;
+            setMapLayer(newTile);
+            localStorage.setItem('radar_map_layer', newTile);
+            return next;
         });
     }, []);
 
     // [v2.9.0] Map tile layer
-    const [mapLayer, setMapLayer] = useState(() =>
-        localStorage.getItem('radar_map_layer') || 'dark'
-    );
+    const [mapLayer, setMapLayer] = useState(() => {
+        const stored = localStorage.getItem('radar_map_layer');
+        if (stored) return stored;
+        return localStorage.getItem('radar_theme') === 'light' ? 'light' : 'dark';
+    });
     const handleMapLayerChange = useCallback((layerId) => {
         setMapLayer(layerId);
         localStorage.setItem('radar_map_layer', layerId);
     }, []);
+
+    // Computed after mapLayer is declared
+    const colorScheme = mapLayer === 'light' ? 'ALTITUDE_LIGHT' : 'ALTITUDE';
 
     // [v4.2.0] Anomaly alerts from server SSE
     const [anomalyAlerts, setAnomalyAlerts] = useState([]);
@@ -574,44 +588,29 @@ export default function App() {
         <div className="app">
             <LoadingScreen visible={loading} />
 
-            {is3D ? (
-                <MapView3D
-                    planesDict={planesDict}
-                    selectedIcao24={selectedIcao24}
-                    onSelectPlane={handleSelectPlane}
-                    trackPoints={trackPoints}
-                    colorScheme={colorScheme}
-                    syncViewport={syncViewport}
-                    initialLng={initView3D?.lng}
-                    initialLat={initView3D?.lat}
-                    initialZoom={initView3D?.zoom}
-                    mapLayer={mapLayer}
-                />
-            ) : (
-                <MapView
-                    planesDict={planesDict}
-                    selectedIcao24={selectedIcao24}
-                    trackPoints={trackPoints}
-                    flightHistoryRef={flightHistoryRef}
-                    filters={filters}
-                    selectedRoute={selectedRoute}
-                    onSelectPlane={handleSelectPlane}
-                    onDeselectPlane={handleDeselectPlane}
-                    onMapReady={handleMapReady}
-                    onMapMove={handleMapMove}
-                    onUsageUpdate={setUsageStats}
-                    colorScheme={colorScheme}
-                    mapLayer={mapLayer}
-                    trackMode={trackMode}
-                    playbackTime={playbackTime}
-                    syncViewport={syncViewport}
-                    t={t}
-                    translateMetar={translateMetar}
-                    depCoords={depCoords}
-                    userRoutes={userRoutes}
-                    showUserRoutes={showUserRoutes}
-                />
-            )}
+            <MapView
+                planesDict={planesDict}
+                selectedIcao24={selectedIcao24}
+                trackPoints={trackPoints}
+                flightHistoryRef={flightHistoryRef}
+                filters={filters}
+                selectedRoute={selectedRoute}
+                onSelectPlane={handleSelectPlane}
+                onDeselectPlane={handleDeselectPlane}
+                onMapReady={handleMapReady}
+                onMapMove={handleMapMove}
+                onUsageUpdate={setUsageStats}
+                colorScheme={colorScheme}
+                mapLayer={mapLayer}
+                trackMode={trackMode}
+                playbackTime={playbackTime}
+                syncViewport={syncViewport}
+                t={t}
+                translateMetar={translateMetar}
+                depCoords={depCoords}
+                userRoutes={userRoutes}
+                showUserRoutes={showUserRoutes}
+            />
 
             <TopBar
                 planeCount={planeCount}
@@ -636,8 +635,8 @@ export default function App() {
                 showUserRoutes={showUserRoutes}
                 onToggleUserRoutes={() => setShowUserRoutes(v => !v)}
                 hasUserRoutes={!!(userRoutes && userRoutes.length > 0)}
-                is3D={is3D}
-                onToggle3D={handleToggle3D}
+                theme={theme}
+                onToggleTheme={handleToggleTheme}
             />
 
             {/* Right Status Column */}
@@ -652,6 +651,16 @@ export default function App() {
                     onSelectPlane={handleSelectPlane}
                     selectedIcao24={selectedIcao24}
                     filters={filters}
+                    showStats={showStats}
+                    onTabChange={setShowStats}
+                    statsContent={
+                        <StatsPanel
+                            planesDict={planesDict}
+                            anomalyCount={anomalyAlerts.length}
+                            usageStats={usageStats}
+                            embedded
+                        />
+                    }
                 />
             </div>
 
@@ -712,14 +721,6 @@ export default function App() {
                 </>
             )}
 
-            {showStats && (
-                <StatsPanel
-                    planesDict={planesDict}
-                    anomalyCount={anomalyAlerts.length}
-                    usageStats={usageStats}
-                    onClose={() => setShowStats(false)}
-                />
-            )}
 
             {/* Dev Panel — Ctrl+D to toggle */}
             {showDevPanel && (

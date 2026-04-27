@@ -546,7 +546,7 @@ function _buildGhImage(svgText, color, isSelected = false) {
     // adsb.fi style: white outline with drop-shadow for visibility on dark maps.
     const stripped = svgText
         .replace(/\s(?:fill|stroke|stroke-width|paint-order)="(?!none)[^"]*"/gi, '');
-    const strokeColor = isSelected ? '#FFD700' : 'rgba(255,255,255,0.92)';
+    const strokeColor = isSelected ? '#FFD700' : 'rgba(150,160,175,0.85)';
     const styled = stripped.replace(
         '</svg>',
         `<style>

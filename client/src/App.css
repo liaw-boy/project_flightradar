@@ -12,6 +12,11 @@
     height: 100%;
 }
 
+/* Light mode: slightly reduce map tile brightness so it's not too stark */
+:root[data-theme="light"] .leaflet-tile-pane {
+    filter: brightness(0.92) saturate(0.85);
+}
+
 .right-hud {
     position: absolute;
     top: calc(var(--topbar-h) + var(--panel-gap));
@@ -35,12 +40,21 @@
     transform: none !important;
     margin: 0 !important;
     max-height: none !important;
-    /* Let flexbox handle limits */
 }
 
 /* Leaflet overrides */
 .leaflet-control-attribution {
     display: none !important;
+}
+
+.leaflet-control-zoom a {
+    background: var(--surface-solid) !important;
+    color: var(--text) !important;
+    border-color: var(--border) !important;
+}
+
+.leaflet-control-zoom a:hover {
+    background: var(--surface-hover) !important;
 }
 
 /* Plane Icons & Glows */
@@ -62,8 +76,8 @@
 }
 
 .ground-glow {
-    opacity: 0.6;
-    filter: saturate(0.5) brightness(0.8);
+    opacity: 0.7;
+    filter: saturate(0.6) brightness(0.85);
 }
 
 @keyframes emergency-pulse {
@@ -78,84 +92,78 @@
     }
 }
 
-/* Tactical HUD Labels (v2.6.6 Redesign) */
+/* Flight Labels — Clean SaaS Style */
 .tactical-label {
     display: flex;
     align-items: center;
-    gap: 8px;
-    background: rgba(15, 23, 42, 0.96) !important;
-    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    gap: 6px;
+    background: var(--surface-solid) !important;
+    border: 1px solid var(--border) !important;
     border-left: 3px solid var(--color-accent-cyan) !important;
     border-radius: 6px !important;
-    padding: 4px 10px !important;
-    color: var(--color-text-primary) !important;
+    padding: 3px 8px !important;
+    color: var(--text) !important;
     font-family: var(--font-main);
-    font-weight: 700;
-    font-size: 13px !important;
-    letter-spacing: 0.5px;
-    backdrop-filter: blur(12px);
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), inset 0 0 10px rgba(255, 255, 255, 0.05);
+    font-weight: 600;
+    font-size: 12px !important;
+    letter-spacing: 0.2px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1) !important;
     pointer-events: none;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
     position: relative;
     overflow: hidden;
 }
 
-.tactical-label span {
-    color: var(--color-text-primary);
-    /* Reset span color for better readability with white background logo */
-}
-
-/* No before pseudo-element needed as we use border-left */
 .tactical-label::before {
     display: none;
 }
 
+.tactical-label span {
+    color: var(--text);
+}
+
 .airline-logo {
-    height: 22px !important;
+    height: 18px !important;
     width: auto !important;
     display: inline-block;
     vertical-align: middle;
-    border-radius: 4px;
-    background: #ffffff;
-    /* Solid white for maximum contrast */
-    padding: 4px 8px;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
-    filter: contrast(1.15) brightness(1.05);
+    border-radius: 3px;
+    background: var(--surface-hover);
+    padding: 2px 5px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 
-/* FR24 風格永久標籤 */
+/* FR24-style permanent labels */
 .fr24-label {
     position: absolute;
     left: calc(50% + 12px);
     top: 50%;
     transform: translateY(-60%);
     white-space: nowrap;
-    background: rgba(20, 24, 35, 0.85);
-    color: #e2e8f0;
-    font-family: 'Inter', 'Roboto', sans-serif;
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--font-main);
     font-size: 10px;
     font-weight: 600;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.2px;
     padding: 2px 5px;
-    border-radius: 3px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
     pointer-events: none;
     backdrop-filter: blur(4px);
     line-height: 1.3;
     z-index: 10;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
-/* FR24 選中飛機：白色氣泡 + 箭頭 */
 .fr24-label--selected {
-    background: #ffffff;
-    color: #1a1a2e;
-    font-size: 12px;
+    background: var(--accent);
+    color: #ffffff;
+    font-size: 11px;
     font-weight: 700;
-    padding: 4px 8px;
-    border-radius: 4px;
+    padding: 3px 8px;
+    border-radius: 5px;
     border: none;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 2px 8px var(--accent-dim);
     display: flex;
     align-items: center;
     gap: 5px;
@@ -164,7 +172,6 @@
     transform: none;
 }
 
-/* 選中標籤的尖角箭頭（指向飛機） */
 .fr24-label--selected::before {
     content: '';
     position: absolute;
@@ -175,20 +182,18 @@
     height: 0;
     border-top: 5px solid transparent;
     border-bottom: 5px solid transparent;
-    border-right: 6px solid #ffffff;
+    border-right: 6px solid var(--accent);
 }
 
-/* 選中標籤內的小 logo */
 .airline-logo-sm {
-    height: 16px !important;
+    height: 14px !important;
     width: auto !important;
     border-radius: 2px;
-    background: #fff;
-    padding: 2px 4px;
-    filter: contrast(1.1);
+    background: rgba(255,255,255,0.2);
+    padding: 1px 3px;
 }
 
-/* Pure CSS Hover Tooltip */
+/* CSS Hover Tooltip */
 .css-tooltip {
     position: absolute;
     left: 50%;
@@ -218,28 +223,26 @@
 }
 
 .airport-label {
-    background: rgba(15, 23, 42, 0.9) !important;
-    border: 1px solid rgba(34, 211, 238, 0.3) !important;
-    border-radius: 6px !important;
-    color: var(--color-accent-cyan) !important;
+    background: var(--surface) !important;
+    border: 1px solid rgba(0, 102, 255, 0.2) !important;
+    border-radius: 5px !important;
+    color: var(--text-accent) !important;
     font-family: var(--font-main);
     font-weight: 600;
     font-size: 10px !important;
-    padding: 4px 8px !important;
-    backdrop-filter: blur(8px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    padding: 3px 7px !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
-/* Airport Tactical Popup (v2.6.3 Overhaul) */
+/* Airport Popup */
 .airport-popup .leaflet-popup-content-wrapper {
-    background: var(--color-glass-panel) !important;
-    border: 1px solid var(--color-glass-border);
-    border-radius: 16px;
-    box-shadow: var(--shadow-premium);
-    color: var(--color-text-primary);
+    background: var(--surface-solid) !important;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    color: var(--text);
     font-family: var(--font-main);
     padding: 0;
-    backdrop-filter: blur(20px);
 }
 
 .airport-popup .leaflet-popup-content {
@@ -248,73 +251,73 @@
 }
 
 .airport-popup .leaflet-popup-tip {
-    background: var(--color-glass-panel) !important;
-    border: 1px solid var(--color-glass-border);
+    background: var(--surface-solid) !important;
+    border: 1px solid var(--border);
 }
 
 .ap-card {
-    padding: 20px;
+    padding: 18px;
 }
 
 .ap-loading {
-    padding: 30px;
+    padding: 28px;
     text-align: center;
-    color: var(--color-accent-cyan);
+    color: var(--accent);
     font-size: 14px;
 }
 
 .ap-name {
-    font-size: 18px;
-    font-weight: 800;
-    color: var(--color-text-primary);
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text);
     margin-bottom: 2px;
-    letter-spacing: -0.5px;
+    letter-spacing: -0.3px;
 }
 
 .ap-icao {
-    font-size: 12px;
-    color: var(--color-text-dim);
-    margin-bottom: 16px;
+    font-size: 11px;
+    color: var(--text-2);
+    margin-bottom: 14px;
     font-family: var(--font-mono);
 }
 
 .ap-fltcat {
     display: inline-block;
-    padding: 4px 12px;
-    border-radius: 8px;
+    padding: 3px 10px;
+    border-radius: 6px;
     font-size: 11px;
-    font-weight: 700;
-    margin-bottom: 20px;
+    font-weight: 600;
+    margin-bottom: 16px;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.8px;
 }
 
 .ap-vfr {
-    background: rgba(34, 211, 238, 0.15);
-    color: var(--color-accent-cyan);
-    border: 1px solid rgba(34, 211, 238, 0.3);
+    background: rgba(0, 102, 255, 0.08);
+    color: #0066ff;
+    border: 1px solid rgba(0, 102, 255, 0.2);
 }
 
 .ap-mvfr {
-    background: rgba(59, 130, 246, 0.15);
-    color: #60a5fa;
-    border: 1px solid rgba(59, 130, 246, 0.3);
+    background: rgba(14, 165, 233, 0.08);
+    color: #0ea5e9;
+    border: 1px solid rgba(14, 165, 233, 0.2);
 }
 
 .ap-ifr {
-    background: rgba(239, 68, 68, 0.1);
+    background: rgba(239, 68, 68, 0.08);
     color: #ef4444;
-    border: 1px solid rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.15);
 }
 
 .ap-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px 20px;
-    margin-bottom: 20px;
-    padding: 16px;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 12px;
+    gap: 10px 16px;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: var(--surface-hover);
+    border-radius: 8px;
 }
 
 .ap-item {
@@ -325,39 +328,38 @@
 
 .ap-item span:first-child {
     font-size: 10px;
-    color: var(--color-text-dim);
+    color: var(--text-3);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.4px;
 }
 
 .ap-val {
-    color: var(--color-text-primary);
-    font-weight: 700;
-    font-size: 14px;
+    color: var(--text);
+    font-weight: 600;
+    font-size: 13px;
     font-family: var(--font-mono);
 }
 
 .ap-metar {
     font-size: 11px;
-    color: var(--color-text-dim);
-    border-top: 1px solid var(--color-glass-border);
-    padding-top: 12px;
+    color: var(--text-2);
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
     line-height: 1.6;
     font-style: italic;
 }
 
-/* ===== [v3.0] Anomaly Alert Panel ===== */
+/* Anomaly Alert Panel */
 .anomaly-panel {
     position: absolute;
-    top: 80px;
-    right: 24px;
+    top: 72px;
+    right: 20px;
     z-index: 1100;
     width: 300px;
-    background: rgba(10, 10, 20, 0.96);
-    border: 1px solid rgba(239, 68, 68, 0.4);
+    background: var(--surface-solid);
+    border: 1px solid #fecaca;
     border-radius: 12px;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 0 30px rgba(239, 68, 68, 0.2), 0 8px 32px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 4px 20px rgba(239, 68, 68, 0.15), 0 2px 8px rgba(0, 0, 0, 0.08);
     animation: anomalySlide 0.3s ease;
     overflow: hidden;
 }
@@ -379,18 +381,18 @@
     justify-content: space-between;
     align-items: center;
     padding: 10px 14px;
-    background: rgba(239, 68, 68, 0.12);
-    border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+    background: #fef2f2;
+    border-bottom: 1px solid #fecaca;
     font-size: 12px;
     font-weight: 700;
     color: #ef4444;
-    letter-spacing: 1px;
+    letter-spacing: 0.5px;
 }
 
 .anomaly-close {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--text-3);
     cursor: pointer;
     font-size: 14px;
     padding: 0 4px;
@@ -398,7 +400,7 @@
 }
 
 .anomaly-close:hover {
-    color: #fff;
+    color: var(--text);
 }
 
 .anomaly-item {
@@ -406,7 +408,7 @@
     flex-direction: column;
     gap: 2px;
     padding: 10px 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid var(--border);
     cursor: pointer;
     transition: background 0.15s;
 }
@@ -416,7 +418,7 @@
 }
 
 .anomaly-item:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-hover);
 }
 
 .anomaly-critical {
@@ -428,20 +430,20 @@
 }
 
 .anomaly-callsign {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-weight: 700;
     font-size: 12px;
-    color: #fff;
-    letter-spacing: 0.5px;
+    color: var(--text);
+    letter-spacing: 0.3px;
 }
 
 .anomaly-msg {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.65);
+    color: var(--text-2);
     line-height: 1.4;
 }
 
-/* ===== [v3.0] Track Mode Button (Sidebar header) ===== */
+/* Track Mode Button */
 .sb-header-actions {
     display: flex;
     align-items: center;
@@ -449,28 +451,29 @@
 }
 
 .track-btn {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    color: var(--color-text-dim);
+    color: var(--text-2);
     cursor: pointer;
-    font-size: 16px;
+    font-size: 15px;
     padding: 4px 6px;
     transition: all 0.2s;
     line-height: 1;
 }
 
 .track-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--border);
+    color: var(--text);
 }
 
 .track-btn.active {
-    background: rgba(245, 158, 11, 0.2);
+    background: rgba(245, 158, 11, 0.1);
     border-color: #f59e0b;
-    box-shadow: 0 0 12px rgba(245, 158, 11, 0.3);
+    color: #f59e0b;
 }
 
-/* ===== [v2.9.0] Flight Progress Bar ===== */
+/* Flight Progress Bar */
 .flight-progress {
     margin: 10px 0 4px;
 }
@@ -483,17 +486,17 @@
 }
 
 .fp-pct {
-    color: var(--color-accent-cyan);
+    color: var(--accent);
     font-weight: 700;
 }
 
 .fp-eta {
-    color: var(--color-text-dim);
+    color: var(--text-3);
 }
 
 .fp-bar {
-    height: 5px;
-    background: rgba(255, 255, 255, 0.1);
+    height: 4px;
+    background: var(--border);
     border-radius: 3px;
     overflow: hidden;
     position: relative;
@@ -501,7 +504,7 @@
 
 .fp-fill {
     height: 100%;
-    background: linear-gradient(90deg, #22d3ee, #10b981);
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
     border-radius: 3px;
     position: relative;
     transition: width 1s ease;
@@ -515,20 +518,17 @@
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 0 6px #22d3ee;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent-dim);
 }
 
-/* ===== Responsive Design: Right HUD ===== */
-
-/* 960px 以下隱藏 HUD（側邊欄 + HUD 同時顯示太擠） */
+/* Responsive Design: Right HUD */
 @media (max-width: 960px) {
     .right-hud {
         display: none !important;
     }
 }
 
-/* 橫向手機（高度小、寬度夠）：縮小 HUD，仍顯示 */
 @media (max-height: 500px) and (orientation: landscape) and (min-width: 700px) {
     .right-hud {
         display: flex !important;
@@ -540,7 +540,7 @@
     }
 }
 
-/* ===== Responsive Design: Anomaly Panel ===== */
+/* Responsive Design: Anomaly Panel */
 @media (max-width: 960px) {
     .anomaly-panel {
         right: 16px;
@@ -549,7 +549,6 @@
 }
 
 @media (max-width: 600px) {
-    /* 手機上拉到頂部橫幅，左右撐滿 */
     .anomaly-panel {
         right: 12px;
         left: 12px;

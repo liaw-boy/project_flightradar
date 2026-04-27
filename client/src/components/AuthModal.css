@@ -9,7 +9,14 @@
     z-index: 9000;
     display: flex;
     align-items: stretch;
-    background: #040814;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+/* Light-mode override: lighter scrim so boarding-pass card still feels bright */
+[data-theme="light"] .auth-overlay {
+    background: rgba(15, 23, 42, 0.35);
 }
 
 /* ── Modal — full screen container ── */
@@ -33,7 +40,7 @@
 .auth-left {
     flex: 1;
     flex-shrink: 0;
-    background: #080f22;
+    background: transparent;
     position: relative;
     overflow: hidden;
 }
@@ -44,8 +51,8 @@
     position: absolute;
     inset: 0;
     background-image:
-        linear-gradient(rgba(196,162,96,0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(196,162,96,0.04) 1px, transparent 1px);
+        linear-gradient(var(--accent-dim) 1px, transparent 1px),
+        linear-gradient(90deg, var(--accent-dim) 1px, transparent 1px);
     background-size: 32px 32px;
     pointer-events: none;
 }
@@ -56,7 +63,7 @@
     position: absolute;
     bottom: 0; left: 0; right: 0;
     height: 45%;
-    background: linear-gradient(to top, rgba(196,162,96,0.06) 0%, transparent 100%);
+    background: linear-gradient(to top, var(--accent-dim) 0%, transparent 100%);
     pointer-events: none;
 }
 
@@ -97,7 +104,7 @@
 .auth-ring {
     position: absolute;
     border-radius: 50%;
-    border: 1px solid rgba(196, 162, 96, 0.12);
+    border: 1px solid var(--border);
     top: 50%; left: 50%;
     transform: translate(-50%, -50%);
 }
@@ -114,14 +121,14 @@
     position: absolute;
     top: 0; left: -600px; right: -600px;
     height: 1px;
-    background: linear-gradient(to right, transparent, rgba(196,162,96,0.1), transparent);
+    background: linear-gradient(to right, transparent, var(--accent-dim), transparent);
 }
 
 .auth-ch-v {
     position: absolute;
     left: 0; top: -400px; bottom: -400px;
     width: 1px;
-    background: linear-gradient(to bottom, transparent, rgba(196,162,96,0.1), transparent);
+    background: linear-gradient(to bottom, transparent, var(--accent-dim), transparent);
 }
 
 /* A380 SVG — base 265px (× scene scale 1.4 = 371px visual) */
@@ -134,19 +141,19 @@
     overflow: visible;
     z-index: 2;
     filter:
-        drop-shadow(0 0 20px rgba(196, 162, 96, 0.5))
-        drop-shadow(0 0 6px rgba(255, 255, 255, 0.25));
+        drop-shadow(0 0 20px var(--accent-hover))
+        drop-shadow(0 0 6px var(--surface-solid));
 }
 
 .plane-body {
     fill: none;
-    stroke: rgba(220, 235, 255, 0.85);
+    stroke: var(--border-strong);
     stroke-width: 0.35px;
 }
 
 .plane-accent {
     fill: none;
-    stroke: rgba(196, 162, 96, 0.5);
+    stroke: var(--accent-hover);
     stroke-width: 0.22px;
 }
 
@@ -168,12 +175,12 @@
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 3px;
-    color: rgba(196,162,96,0.6);
+    color: var(--accent-dim);
     text-transform: uppercase;
 }
 .auth-left-tag:first-child {
     font-size: 13px;
-    color: rgba(196,162,96,0.75);
+    color: var(--accent-hover);
     letter-spacing: 4px;
 }
 
@@ -187,7 +194,7 @@
     content: '';
     position: absolute;
     width: 18px; height: 18px;
-    background: #080f22;
+    background: transparent;
     border-radius: 50%;
     z-index: 5;
 }
@@ -197,7 +204,8 @@
 
 /* Airline header */
 .auth-bp-header {
-    background: #1a2744;
+    background: var(--surface-solid);
+    border-top: 3px solid var(--accent);
     padding: 11px 20px 10px;
     display: flex;
     align-items: center;
@@ -211,7 +219,7 @@
     content: '';
     position: absolute;
     inset: 0;
-    background: repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(255,255,255,0.02) 10px, rgba(255,255,255,0.02) 20px);
+    background: repeating-linear-gradient(-45deg, transparent, transparent 10px, var(--accent-dim) 10px, var(--accent-dim) 20px);
 }
 
 .auth-bp-logo {
@@ -225,7 +233,7 @@
 
 .auth-bp-icon {
     width: 34px; height: 34px;
-    background: linear-gradient(135deg, #c4a260, #e8c878);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
     border-radius: 7px;
     display: flex;
     align-items: center;
@@ -235,14 +243,14 @@
 }
 
 .auth-bp-name {
-    color: #fff;
+    color: var(--text);
     font-size: 12px;
     font-weight: 800;
     letter-spacing: 2.5px;
 }
 
 .auth-bp-sub {
-    color: rgba(196,162,96,0.65);
+    color: var(--accent-dim);
     font-size: 8px;
     letter-spacing: 1.5px;
     text-transform: uppercase;
@@ -258,14 +266,14 @@
 }
 
 .auth-bp-class-label {
-    color: rgba(255,255,255,0.38);
+    color: var(--text-3);
     font-size: 7px;
     letter-spacing: 1.5px;
     text-transform: uppercase;
 }
 
 .auth-bp-class-val {
-    color: #c4a260;
+    color: var(--accent);
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 1px;
@@ -274,9 +282,9 @@
 .auth-close {
     position: relative;
     z-index: 1;
-    background: rgba(255,255,255,0.07);
-    border: 1px solid rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.35);
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-3);
     width: 26px; height: 26px;
     border-radius: 6px;
     cursor: pointer;
@@ -286,9 +294,9 @@
 }
 
 .auth-close:hover {
-    background: rgba(239,68,68,0.18);
-    border-color: rgba(239,68,68,0.4);
-    color: #f87171;
+    background: rgba(239,68,68,0.08);
+    border-color: rgba(239,68,68,0.3);
+    color: #ef4444;
 }
 
 /* Route section */
@@ -304,7 +312,7 @@
     font-size: 28px;
     font-weight: 900;
     letter-spacing: -1px;
-    color: #1a2744;
+    color: var(--text);
     line-height: 1;
 }
 
@@ -313,7 +321,7 @@
     font-weight: 700;
     letter-spacing: 1px;
     text-transform: uppercase;
-    color: #8896aa;
+    color: var(--text-2);
     margin-top: 2px;
 }
 
@@ -336,14 +344,14 @@
 .auth-bp-dot {
     width: 5px; height: 5px;
     border-radius: 50%;
-    border: 1.5px solid #1a2744;
+    border: 1.5px solid var(--text);
     flex-shrink: 0;
 }
 
 .auth-bp-dash {
     flex: 1;
     height: 1.5px;
-    background: repeating-linear-gradient(to right, #1a2744 0, #1a2744 3px, transparent 3px, transparent 7px);
+    background: repeating-linear-gradient(to right, var(--border-strong) 0, var(--border-strong) 3px, transparent 3px, transparent 7px);
 }
 
 .auth-bp-plane {
@@ -356,7 +364,7 @@
     font-size: 8px;
     font-weight: 700;
     letter-spacing: 1.5px;
-    color: #8896aa;
+    color: var(--text-2);
     text-transform: uppercase;
 }
 
@@ -365,20 +373,20 @@
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
     padding: 12px 20px 0;
-    border-top: 1px dashed rgba(26,39,68,0.15);
+    border-top: 1px dashed var(--border);
     margin-top: 12px;
     flex-shrink: 0;
 }
 
 .auth-bp-cell { padding-right: 10px; }
-.auth-bp-cl { font-size: 7px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #8896aa; }
-.auth-bp-cv { font-size: 11px; font-weight: 700; color: #1a2744; margin-top: 2px; letter-spacing: 0.3px; }
+.auth-bp-cl { font-size: 7px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-2); }
+.auth-bp-cv { font-size: 11px; font-weight: 700; color: var(--text); margin-top: 2px; letter-spacing: 0.3px; }
 
 /* Tabs */
 .auth-tabs {
     display: flex;
     margin: 8px 20px 0;
-    background: rgba(26,39,68,0.07);
+    background: var(--input-bg);
     border-radius: 7px;
     padding: 3px;
     gap: 2px;
@@ -394,20 +402,20 @@
     font-family: var(--font-main);
     font-size: 12px;
     font-weight: 600;
-    color: #8896aa;
+    color: var(--text-2);
     cursor: pointer;
     transition: all 0.2s;
 }
 
 .auth-tab.active {
-    background: #1a2744;
-    color: #fff;
-    box-shadow: 0 1px 4px rgba(26,39,68,0.28);
+    background: var(--surface-solid);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
 }
 
 .auth-tab:hover:not(.active) {
-    background: rgba(26,39,68,0.08);
-    color: #1a2744;
+    background: transparent;
+    color: var(--text);
 }
 
 /* Form */
@@ -421,7 +429,7 @@
 .auth-fg {
     margin-bottom: 10px;
     padding-bottom: 7px;
-    border-bottom: 1px dashed rgba(26,39,68,0.12);
+    border-bottom: 1px dashed var(--border);
 }
 
 .auth-fl {
@@ -429,7 +437,7 @@
     font-weight: 700;
     letter-spacing: 2px;
     text-transform: uppercase;
-    color: #8896aa;
+    color: var(--text-2);
     margin-bottom: 5px;
     display: flex;
     align-items: center;
@@ -438,10 +446,10 @@
 
 .auth-opt {
     font-size: 6px;
-    background: rgba(26,39,68,0.08);
+    background: var(--input-bg);
     padding: 1px 5px;
     border-radius: 3px;
-    color: #aab0bb;
+    color: var(--text-3);
 }
 
 .auth-fi {
@@ -453,30 +461,30 @@
 .auth-ficon {
     position: absolute;
     left: 10px;
-    color: #8896aa;
+    color: var(--text-2);
     pointer-events: none;
 }
 
 .auth-fi input {
     width: 100%;
     padding: 9px 10px 9px 32px;
-    background: rgba(26,39,68,0.05);
-    border: 1.5px solid rgba(26,39,68,0.12);
+    background: var(--input-bg);
+    border: 1.5px solid var(--input-border);
     border-radius: 6px;
     font-family: var(--font-main);
     font-size: 13px;
     font-weight: 500;
-    color: #1a2744;
+    color: var(--text);
     outline: none;
     transition: all 0.2s;
 }
 
-.auth-fi input::placeholder { color: rgba(136,150,170,0.5); }
+.auth-fi input::placeholder { color: var(--text-3); }
 
 .auth-fi input:focus {
-    border-color: #1a2744;
-    background: rgba(26,39,68,0.07);
-    box-shadow: 0 0 0 3px rgba(26,39,68,0.06);
+    border-color: var(--input-focus);
+    background: var(--surface-solid);
+    box-shadow: var(--input-shadow);
 }
 
 /* Error */
@@ -484,11 +492,11 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    color: #c0392b;
+    color: #ef4444;
     font-size: 11px;
     padding: 7px 10px;
-    background: rgba(192,57,43,0.07);
-    border: 1px solid rgba(192,57,43,0.18);
+    background: rgba(239,68,68,0.06);
+    border: 1px solid rgba(239,68,68,0.2);
     border-radius: 5px;
     margin-top: 6px;
 }
@@ -511,20 +519,20 @@
     transform: translateY(-50%);
 }
 
-/* outer "punch" matches modal bg — both sides same dark panel */
+/* outer "punch" matches overlay bg */
 .auth-tear::before {
     left: -8px;
-    background: #080f22;
+    background: transparent;
 }
 .auth-tear::after {
     right: -8px;
-    background: #080f22;
+    background: transparent;
 }
 
 .auth-tear-line {
     flex: 1;
     margin: 0 12px;
-    border-top: 2px dashed rgba(26,39,68,0.4);
+    border-top: 2px dashed var(--border);
 }
 
 /* ── Tear animations ───────────────────────────────────────── */
@@ -532,7 +540,7 @@
 /*
  * 撕票物理感：
  * 1. 無搖晃，直接拉緊一瞬間斷開
- * 2. 虛線在斷開瞬間閃金色
+ * 2. 虛線在斷開瞬間閃藍色
  * 3. stub 往下衝出（帶輕微旋轉）
  * 4. 卡片底部背景同步被 clip 掉
  */
@@ -548,13 +556,13 @@
     100% { transform: translateY(160px) rotate(9deg);   opacity: 0; }
 }
 
-/* 虛線：在斷開瞬間閃金色 */
+/* 虛線：在斷開瞬間閃藍色 */
 @keyframes tearLineRip {
-    0%   { border-top-color: rgba(26,39,68,0.4); border-top-width: 2px; }
-    16%  { border-top-color: rgba(26,39,68,0.4); border-top-width: 2px; }
-    22%  { border-top-color: rgba(196,162,96,1);  border-top-width: 3px; } /* 撕裂閃光 */
-    30%  { border-top-color: rgba(26,39,68,0.0);  border-top-width: 2px; }
-    100% { border-top-color: rgba(26,39,68,0.0); }
+    0%   { border-top-color: var(--border); border-top-width: 2px; }
+    16%  { border-top-color: var(--border); border-top-width: 2px; }
+    22%  { border-top-color: var(--accent);  border-top-width: 3px; } /* 撕裂閃光 */
+    30%  { border-top-color: transparent;  border-top-width: 2px; }
+    100% { border-top-color: transparent; }
 }
 
 /* 卡片底部：用動態量測的 --tear-clip-h 精確對準缺口，瞬間 clip */
@@ -607,12 +615,12 @@
 .auth-stub {
     pointer-events: all;
     width: 367px;
-    background: #f5f2eb;
+    background: var(--input-bg);
     border-radius: 0 0 12px 12px;
     padding: 8px 20px 10px;
     flex-shrink: 0;
     position: relative;
-    box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+    box-shadow: var(--shadow);
 }
 
 /* stub 頂部對應撕票線的缺口半圓 — 與 auth-tear::before/after 對齊 */
@@ -622,7 +630,7 @@
     position: absolute;
     width: 16px; height: 16px;
     border-radius: 50%;
-    background: #080f22;
+    background: transparent;
     top: -8px;
     z-index: 5;
 }
@@ -632,10 +640,10 @@
 .auth-submit {
     width: 100%;
     padding: 11px;
-    background: #1a2744;
+    background: var(--accent);
     border: none;
     border-radius: 7px;
-    color: #fff;
+    color: var(--surface-solid);
     font-family: var(--font-main);
     font-size: 12px;
     font-weight: 700;
@@ -643,12 +651,12 @@
     text-transform: uppercase;
     cursor: pointer;
     transition: all 0.22s;
-    box-shadow: 0 2px 8px rgba(26,39,68,0.25);
+    box-shadow: var(--shadow-sm);
 }
 
 .auth-submit:hover {
-    background: #243660;
-    box-shadow: 0 4px 16px rgba(26,39,68,0.35);
+    background: var(--accent-2);
+    box-shadow: var(--shadow);
     transform: translateY(-1px);
 }
 
@@ -668,7 +676,7 @@
 
 .auth-barcode span {
     display: block;
-    background: #1a2744;
+    background: var(--text);
     border-radius: 1px;
     width: 2px;
     flex-shrink: 0;
@@ -689,9 +697,9 @@
     gap: 10px;
     padding: 8px 14px;
     border-radius: 8px;
-    border: 1.5px solid rgba(26,39,68,0.15);
-    background: #fff;
-    color: #1a2744;
+    border: 1.5px solid var(--border);
+    background: var(--surface-solid);
+    color: var(--text);
     font-family: var(--font-main);
     font-size: 13px;
     font-weight: 600;
@@ -701,9 +709,9 @@
 }
 
 .auth-social-btn:hover {
-    border-color: rgba(26,39,68,0.3);
-    background: #f8f9fb;
-    box-shadow: 0 2px 8px rgba(26,39,68,0.1);
+    border-color: var(--border-strong);
+    background: transparent;
+    box-shadow: var(--shadow-sm);
     transform: translateY(-1px);
 }
 
@@ -731,13 +739,13 @@
 .auth-divider-line {
     flex: 1;
     height: 1px;
-    background: rgba(26,39,68,0.12);
+    background: var(--border);
 }
 
 .auth-divider span {
     font-size: 10px;
     font-weight: 600;
-    color: #aab0bb;
+    color: var(--text-3);
     letter-spacing: 1px;
     text-transform: uppercase;
 }
@@ -768,14 +776,14 @@
 /* ── Boarding pass card — card-width: 367px ── */
 .auth-right {
     width: 367px;
-    background: #f5f2eb;
+    background: var(--surface-solid);
     border-radius: 12px 12px 0 0;  /* bottom straight — connects flush with stub */
     display: flex;
     flex-direction: column;
     overflow: hidden;
     position: relative;
     pointer-events: all;
-    box-shadow: 0 24px 60px rgba(0,0,0,0.65);
+    box-shadow: var(--shadow);
 }
 
 /* ── Mobile ── */

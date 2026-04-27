@@ -9,7 +9,7 @@ function topN(map, n = 5) {
         .slice(0, n);
 }
 
-export default function StatsPanel({ planesDict, anomalyCount, usageStats, onClose }) {
+export default function StatsPanel({ planesDict, anomalyCount, usageStats, onClose, embedded = false }) {
     const { t } = useI18n();
     const [tab, setTab] = useState('overview');
 
@@ -103,15 +103,72 @@ export default function StatsPanel({ planesDict, anomalyCount, usageStats, onClo
         { id: 'engine',   label: t('statsEngine') },
     ];
 
+    if (embedded) {
+        return (
+            <div className="stats-panel stats-panel-embedded">
+                {/* Overview */}
+                <div className="stats-body">
+                    <div className="stats-grid">
+                        <StatBox label={t('statsTotal')}     value={stats.total}         icon={<Plane size={12} />} />
+                        <StatBox label={t('statsAirborne')}  value={stats.airCount}      color="#22d3ee" />
+                        <StatBox label={t('statsGround')}    value={stats.groundCount}   color="#94a3b8" />
+                        <StatBox label={t('statsEmergency')} value={stats.emergencyCount}
+                            color={stats.emergencyCount > 0 ? '#ef4444' : undefined}
+                            icon={stats.emergencyCount > 0 ? <AlertTriangle size={12} /> : null} />
+                    </div>
+                    <div className="stats-divider" />
+                    <div className="stats-row">
+                        <span className="stats-label">{t('statsAvgAlt')}</span>
+                        <span className="stats-value">{stats.avgAlt > 0 ? stats.avgAlt.toLocaleString() + ' ft' : '—'}</span>
+                    </div>
+                    <div className="stats-row">
+                        <span className="stats-label">{t('statsFastest')}</span>
+                        <span className="stats-value stats-value-mono">
+                            {stats.fastestCallsign
+                                ? <>{stats.fastestCallsign} <span style={{ color: 'var(--color-text-dim)' }}>{stats.maxSpeed} kts</span></>
+                                : '—'}
+                        </span>
+                    </div>
+                </div>
+
+                {/* Airlines */}
+                {stats.topAirlines.length > 0 && (
+                    <>
+                        <div className="stats-section-hd">{t('statsAirlines')}</div>
+                        <div className="stats-body stats-body-compact">
+                            {stats.topAirlines.map(([code, count]) => (
+                                <BarRow key={code} label={code} count={count} max={stats.topAirlines[0][1]} />
+                            ))}
+                        </div>
+                    </>
+                )}
+
+                {/* Aircraft types */}
+                {stats.topTypes.length > 0 && (
+                    <>
+                        <div className="stats-section-hd">{t('statsAircraft')}</div>
+                        <div className="stats-body stats-body-compact">
+                            {stats.topTypes.map(([type, count]) => (
+                                <BarRow key={type} label={type} count={count} max={stats.topTypes[0][1]} />
+                            ))}
+                        </div>
+                    </>
+                )}
+            </div>
+        );
+    }
+
     return (
         <div className="stats-panel">
-            <div className="stats-header">
-                <div className="stats-title">
-                    <BarChart2 size={14} />
-                    <span>{t('liveStats')}</span>
+            {!embedded && (
+                <div className="stats-header">
+                    <div className="stats-title">
+                        <BarChart2 size={14} />
+                        <span>{t('liveStats')}</span>
+                    </div>
+                    <button className="stats-close" onClick={onClose}><X size={14} /></button>
                 </div>
-                <button className="stats-close" onClick={onClose}><X size={14} /></button>
-            </div>
+            )}
 
             <div className="stats-tabs">
                 {TABS.map(tb => (

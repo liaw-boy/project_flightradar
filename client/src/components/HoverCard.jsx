@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Plane } from 'lucide-react';
 import { dataManager } from '../services/dataManager';
+import { flightDetailsCache } from '../services/flightDetailsCache';
+import { ICAO_TO_IATA } from '../utils/flightUtils';
 import './HoverCard.css';
 
 /**
@@ -24,12 +27,17 @@ export default function HoverCard({ plane, pos }) {
         setArrInfo(null);
 
         const callsignParam = plane.callsign ? plane.callsign.trim() : 'UNKNOWN';
+        const cachedFusion = flightDetailsCache.get(plane.icao24);
 
         Promise.all([
             dataManager.getPhotos(plane.icao24, plane.registration),
             dataManager.getRoute(plane.icao24, plane.callsign),
-            fetch(`/api/flight/complete-details/${plane.icao24}/${callsignParam}`)
-                .then(r => r.ok ? r.json() : null).catch(() => null)
+            cachedFusion
+                ? Promise.resolve(cachedFusion)
+                : fetch(`/api/flight/complete-details/${plane.icao24}/${callsignParam}`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(d => { if (d) flightDetailsCache.set(plane.icao24, d); return d; })
+                    .catch(() => null)
         ]).then(([photos, routeData, fusionData]) => {
             if (photos && photos.length > 0) setPhoto(photos[0]);
             else setPhoto(null);
@@ -76,10 +84,14 @@ export default function HoverCard({ plane, pos }) {
     const depName = route?.depCity || depInfo?.city || depInfo?.name || '';
     const arrName = route?.arrCity || arrInfo?.city || arrInfo?.name || '';
 
+    const CARD_W = 240;
+    const MARGIN = 8;
+    const clampedX = Math.max(CARD_W / 2 + MARGIN, Math.min(pos.x, (window.innerWidth || 1440) - CARD_W / 2 - MARGIN));
+    const above = pos.y > 280;
     const style = {
-        left: pos.x,
-        top: pos.y - 10,
-        transform: 'translate(-50%, -100%)'
+        left: clampedX,
+        top: above ? pos.y - 10 : pos.y + 20,
+        transform: above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)'
     };
 
     return (
@@ -97,7 +109,17 @@ export default function HoverCard({ plane, pos }) {
 
             <div className="hover-card-content">
                 <div className="hover-card-header">
-                    <span className="hover-callsign">{plane.callsign || 'N/A'}</span>
+                    {(() => {
+                        const icao = plane.callsign || '';
+                        const prefix = icao.replace(/\d.*$/, '').toUpperCase();
+                        const iataP = ICAO_TO_IATA[prefix];
+                        const num = icao.replace(/^[A-Z]+/, '');
+                        const iata = iataP ? `${iataP}${num}` : null;
+                        return <>
+                            <span className="hover-callsign">{iata || icao || 'N/A'}</span>
+                            {iata && <span className="hover-icao-badge">{icao}</span>}
+                        </>;
+                    })()}
                     <span className="hover-typecode">{plane.typecode || 'UNK'}</span>
                 </div>
 
@@ -109,9 +131,7 @@ export default function HoverCard({ plane, pos }) {
                                 {depName && <span className="hover-city">{depName}</span>}
                             </div>
                             <div className="hover-route-center">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: 'rotate(90deg)', color: '#94a3b8' }}>
-                                    <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21 4 19 4s-2 1-3.5 2.5L7 8 .8 6.2c-.6-.2-.8.5-.4.9l5.9 5.9-2.6 2.1c-.4.3-.4.9 0 1.2l2 2c.3.4.9.4 1.2 0l2.1-2.6 5.9 5.9c.4.4 1.1.2.9-.4z"/>
-                                </svg>
+                                <Plane size={18} color="#00ff88" strokeWidth={1.5} />
                             </div>
                             <div className="hover-route-node hover-route-node-right">
                                 <span className="hover-iata">{arrDisplay}</span>
@@ -122,7 +142,7 @@ export default function HoverCard({ plane, pos }) {
                 )}
 
                 <div className="hover-stats">
-                    <span>{Math.round((plane.altitude || 0) * 3.28084).toLocaleString()} ft</span>
+                    <span>{plane.onGround ? 'GND' : `${Math.round((plane.altitude || 0) * 3.28084).toLocaleString()} ft`}</span>
                     <span className="stats-divider">&bull;</span>
                     <span>{Math.round((plane.velocity || 0) * 1.94384)} kts</span>
                 </div>

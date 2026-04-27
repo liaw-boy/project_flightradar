@@ -250,12 +250,25 @@ const _ALT_STOPS = [
 /**
  * Returns the adsb.fi altitude gradient color for a given altitude (metres).
  *
- * scheme = 'TACTICAL'  → uniform #ffce00 (legacy tactical yellow, no altitude info)
- * scheme = 'ALTITUDE'  → smooth HSL gradient (default, matches adsb.fi)
+ * scheme = 'TACTICAL'       → uniform #ffce00 (legacy tactical yellow)
+ * scheme = 'ALTITUDE'       → smooth HSL gradient (default, matches adsb.fi)
+ * scheme = 'ALTITUDE_LIGHT' → dark grey gradient for light map backgrounds
  */
 export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'ALTITUDE') {
     if (isEmergency) return '#ef4444';
     if (scheme === 'TACTICAL') return '#F0C040';
+
+    // Light map mode — dark grey tones so planes are visible on light backgrounds
+    if (scheme === 'ALTITUDE_LIGHT') {
+        if (onGround || altitude === 'GROUND') return '#6b7280'; // ground: medium grey
+        const alt = parseFloat(altitude);
+        if (isNaN(alt) || alt <= 0) return '#6b7280';
+        // Map altitude to dark grey range: low=#374151, high=#111827
+        const pct = Math.min(1, alt / 12000);
+        const l = Math.round(40 - pct * 22); // 40% → 18% lightness
+        return `hsl(220,15%,${l}%)`;
+    }
+
     if (onGround || altitude === 'GROUND') return '#94a3b8'; // slate — parked / taxiing
 
     const alt = parseFloat(altitude);
@@ -627,15 +640,25 @@ export function formatVerticalRate(vRate) {
 }
 
 /**
- * [OPT 3.1] 取得航空公司 Logo URL
- * 使用已合併的 ICAO_TO_IATA 单一來源
+ * [OPT 3.2] 取得航空公司 Logo URL
+ * 自托管於 /airline-logos/{ICAO}.png (Jxck-S/airline-logos, ~1629 airlines)
+ * 缺檔時 server 回 204，<img onerror> 可 fallback 到 avs.io IATA
  */
 export function getAirlineLogoUrl(callsign) {
     if (!callsign || callsign === 'UNKNOWN') return '';
-    const prefix = callsign.substring(0, 3);
-    const iata = ICAO_TO_IATA[prefix];
-    if (!iata) return '';
-    return `https://pics.avs.io/200/80/${iata}.png`;
+    const icao = callsign.substring(0, 3).toUpperCase();
+    if (!/^[A-Z]{3}$/.test(icao)) return '';
+    return `/airline-logos/${icao}.png`;
+}
+
+/**
+ * 取得航空公司 Banner URL (橫幅, 寬高 ~600×50, ~3852 airlines)
+ */
+export function getAirlineBannerUrl(callsign) {
+    if (!callsign || callsign === 'UNKNOWN') return '';
+    const icao = callsign.substring(0, 3).toUpperCase();
+    if (!/^[A-Z]{3}$/.test(icao)) return '';
+    return `/airline-banners/${icao}.png`;
 }
 /**
  * [Project AERO-SYNC] 絕無分配的純數學投影 (Global Space)

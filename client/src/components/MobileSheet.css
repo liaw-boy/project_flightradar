@@ -3,7 +3,7 @@
     .msheet { display: none; }
 }
 
-/* ── Base ── */
+/* Base */
 .msheet {
     position: fixed;
     bottom: 0;
@@ -11,31 +11,29 @@
     right: 0;
     padding-bottom: env(safe-area-inset-bottom, 0px);
     z-index: 2000;
-    background: rgba(8, 13, 26, 0.97);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    background: var(--surface-solid);
+    border-top: 1px solid var(--border);
     border-radius: 20px 20px 0 0;
-    box-shadow: 0 -6px 32px rgba(0, 0, 0, 0.55);
+    box-shadow: var(--shadow-panel);
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    color: #fff;
-    font-family: 'Inter', -apple-system, sans-serif;
+    color: var(--text);
+    font-family: var(--font-main);
     touch-action: none;
     will-change: transform, height;
 }
 
 /* Slide-up entry */
 .msheet {
-    animation: msheetIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: msheetIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 @keyframes msheetIn {
     from { transform: translateY(100%); }
     to   { transform: translateY(0); }
 }
 
-/* ── Drag handle ── */
+/* Drag handle */
 .msheet__handle {
     flex-shrink: 0;
     display: flex;
@@ -48,15 +46,15 @@
     width: 36px;
     height: 4px;
     border-radius: 2px;
-    background: rgba(255, 255, 255, 0.18);
+    background: var(--border);
 }
 
-/* ── Photo (mid only) ── */
+/* Photo (mid only) */
 .msheet__photo {
     flex-shrink: 0;
     width: 100%;
-    height: 180px;
-    background: #0b111f;
+    height: 160px;
+    background: var(--input-bg);
     position: relative;
     overflow: hidden;
 }
@@ -64,7 +62,7 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
-    background: #0b111f;
+    background: var(--input-bg);
     display: block;
 }
 .msheet__photo-empty {
@@ -73,26 +71,25 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 52px;
-    opacity: 0.1;
+    font-size: 48px;
+    opacity: 0.15;
 }
-/* Fade photo into info bar */
 .msheet__photo::after {
     content: '';
     position: absolute;
     bottom: 0; left: 0; right: 0;
-    height: 28px;
-    background: linear-gradient(transparent, rgba(8, 13, 26, 0.97));
+    height: 24px;
+    background: linear-gradient(transparent, var(--surface-solid));
     pointer-events: none;
 }
 
-/* ── Info bar ── */
+/* Info bar */
 .msheet__bar {
     flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 14px 12px;
+    padding: 10px 14px 14px;
 }
 
 .msheet__left {
@@ -106,18 +103,17 @@
 .msheet__callsign {
     font-size: 19px;
     font-weight: 800;
-    color: #22d3ee;
-    letter-spacing: 0.4px;
+    color: var(--accent);
+    letter-spacing: 0.3px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.1;
 }
 
-/* In peek mode, show type below callsign */
 .msheet__type-peek {
     font-size: 11px;
-    color: rgba(255,255,255,0.38);
+    color: var(--text-3);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -127,36 +123,36 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 5px;
     margin-top: 1px;
 }
 
 .msheet__route {
     font-size: 12px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.72);
-    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-2);
+    font-family: var(--font-mono);
     white-space: nowrap;
 }
 
 .msheet__arrow {
-    color: rgba(255, 255, 255, 0.25);
+    color: var(--border-strong);
 }
 
 /* Altitude / speed pills */
 .msheet__stat {
     font-size: 11px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.5);
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-2);
+    background: var(--input-bg);
+    border: 1px solid var(--border);
     border-radius: 5px;
     padding: 1px 6px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     white-space: nowrap;
 }
 
-/* ── Close button ── */
+/* Close button */
 .msheet__close {
     display: flex;
     align-items: center;
@@ -164,14 +160,14 @@
     flex-shrink: 0;
     width: 34px;
     height: 34px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: var(--input-bg);
+    border: 1px solid var(--border);
     border-radius: 50%;
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--text-2);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     transition: background 0.15s;
 }
 .msheet__close:active {
-    background: rgba(255, 255, 255, 0.15);
+    background: var(--border);
 }

@@ -3,8 +3,14 @@ import { Layers, ChevronDown, ChevronUp } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import './FilterPanel.css';
 
-// [v2.9.0] Map tile layer definitions
+// [v3.0] Map tile layer definitions
 export const MAP_LAYERS = [
+    {
+        id: 'light',
+        label: 'Light',
+        url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+        attribution: '© OpenStreetMap contributors, © CartoDB',
+    },
     {
         id: 'dark',
         label: 'Dark',
@@ -26,8 +32,8 @@ export const MAP_LAYERS = [
     {
         id: 'terrain',
         label: 'Terrain',
-        url: 'https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}{r}.jpg',
-        attribution: 'Map tiles by Stamen Design, © OpenStreetMap contributors',
+        url: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
+        attribution: '© OpenTopoMap contributors',
     },
 ];
 
@@ -89,7 +95,7 @@ export default function FilterPanel({ filters, onFilterChange, mapLayer, onMapLa
                     {MAP_LAYERS.map((l) => (
                         <div
                             key={l.id}
-                            className={`layer-btn ${(mapLayer || 'dark') === l.id ? 'active' : ''}`}
+                            className={`layer-btn ${(mapLayer || 'light') === l.id ? 'active' : ''}`}
                             onClick={() => onMapLayerChange(l.id)}
                             title={l.label}
                         >

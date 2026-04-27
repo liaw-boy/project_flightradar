@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { useI18n } from '../hooks/useI18n';
-import { List, ChevronDown, ChevronUp } from 'lucide-react';
+import { List, BarChart2, ChevronDown, ChevronUp } from 'lucide-react';
 import './PlaneList.css';
 
-export default function PlaneList({ planesDict, bounds, onSelectPlane, selectedIcao24, filters }) {
+export default function PlaneList({ planesDict, bounds, onSelectPlane, selectedIcao24, filters, showStats, onTabChange, statsContent }) {
     const { t } = useI18n();
     const [isOpen, setIsOpen] = useState(true);
     const [sortBy, setSortBy] = useState('altitude');
@@ -62,45 +62,64 @@ export default function PlaneList({ planesDict, bounds, onSelectPlane, selectedI
     };
 
     return (
-        <div className={`plane-list-panel ${isOpen ? 'open' : ''}`}>
-            <div className="plane-list-toggle" onClick={() => setIsOpen(!isOpen)}>
-                {isOpen ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
-                <List size={16} style={{ marginLeft: '8px', marginRight: '6px' }} />
-                {t('planeList') || 'AIRCRAFT LIST'}
+        <div className={`plane-list-panel ${isOpen ? 'open' : ''} ${showStats ? 'stats-mode' : ''}`}>
+            <div className="plane-list-toggle">
+                <div className="plt-tabs">
+                    <button
+                        className={`plt-tab ${!showStats ? 'active' : ''}`}
+                        onClick={() => { setIsOpen(true); onTabChange?.(false); }}
+                    >
+                        <List size={13} />
+                        {t('planeList') || 'AIRCRAFT LIST'}
+                    </button>
+                    <button
+                        className={`plt-tab ${showStats ? 'active' : ''}`}
+                        onClick={() => { setIsOpen(true); onTabChange?.(true); }}
+                    >
+                        <BarChart2 size={13} />
+                        LIVE STATS
+                    </button>
+                </div>
+                <div className="plt-collapse" onClick={() => setIsOpen(!isOpen)}>
+                    {isOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                </div>
             </div>
 
             <div className="plane-list-content">
-                <div className="plane-list-header">
-                    <div className="col-callsign" onClick={() => handleSort('callsign')}>{t('callsign') || 'CALLSIGN'}{getSortIndicator('callsign')}</div>
-                    <div className="col-alt" onClick={() => handleSort('altitude')}>{t('altitude') || 'ALT'}{getSortIndicator('altitude')}</div>
-                    <div className="col-spd" onClick={() => handleSort('velocity')}>{t('speed') || 'SPD'}{getSortIndicator('velocity')}</div>
-                </div>
-
-                <div className="plane-list-body">
-                    {visiblePlanes.map(p => (
-                        <div
-                            key={p.icao24}
-                            className={`plane-list-row ${selectedIcao24 === p.icao24 ? 'selected' : ''} ${p.isEmergency ? 'emergency' : ''}`}
-                            onClick={() => onSelectPlane(p.icao24, p)}
-                        >
-                            <div className="col-callsign">
-                                {p.isEmergency && <span className="emg-dot"></span>}
-                                {p.callsign || p.icao24}
-                            </div>
-                            <div className="col-alt">
-                                {p.onGround ? 'GND' : `${Math.round(p.altitude)}m`}
-                            </div>
-                            <div className="col-spd">
-                                {(p.velocity == null || (!p.onGround && p.velocity < 0.5))
-                                    ? '---'
-                                    : `${Math.round(p.velocity * 3.6)}km/h`}
-                            </div>
+                {showStats ? statsContent : (
+                    <>
+                        <div className="plane-list-header">
+                            <div className="col-callsign" onClick={() => handleSort('callsign')}>{t('callsign') || 'CALLSIGN'}{getSortIndicator('callsign')}</div>
+                            <div className="col-alt" onClick={() => handleSort('altitude')}>{t('altitude') || 'ALT'}{getSortIndicator('altitude')}</div>
+                            <div className="col-spd" onClick={() => handleSort('velocity')}>{t('speed') || 'SPD'}{getSortIndicator('velocity')}</div>
                         </div>
-                    ))}
-                    {visiblePlanes.length === 0 && (
-                        <div className="plane-list-empty">{t('noPlanesInView') || 'No aircraft in current view'}</div>
-                    )}
-                </div>
+                        <div className="plane-list-body">
+                            {visiblePlanes.map(p => (
+                                <div
+                                    key={p.icao24}
+                                    className={`plane-list-row ${selectedIcao24 === p.icao24 ? 'selected' : ''} ${p.isEmergency ? 'emergency' : ''}`}
+                                    onClick={() => onSelectPlane(p.icao24, p)}
+                                >
+                                    <div className="col-callsign">
+                                        {p.isEmergency && <span className="emg-dot"></span>}
+                                        {p.callsign || p.icao24}
+                                    </div>
+                                    <div className="col-alt">
+                                        {p.onGround ? 'GND' : `${Math.round(p.altitude)}m`}
+                                    </div>
+                                    <div className="col-spd">
+                                        {(p.velocity == null || (!p.onGround && p.velocity < 0.5))
+                                            ? '---'
+                                            : `${Math.round(p.velocity * 3.6)}km/h`}
+                                    </div>
+                                </div>
+                            ))}
+                            {visiblePlanes.length === 0 && (
+                                <div className="plane-list-empty">{t('noPlanesInView') || 'No aircraft in current view'}</div>
+                            )}
+                        </div>
+                    </>
+                )}
             </div>
         </div>
     );

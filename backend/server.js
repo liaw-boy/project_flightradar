@@ -217,7 +217,9 @@ if (fs.existsSync(publicReactPath)) {
     app.use(express.static(publicReactPath, { maxAge: 0, etag: false }));
     // Express 5 wildcard syntax: serve index.html for all non-API routes (SPA fallback)
     app.get('/{*path}', (req, res, next) => {
-        if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/monitor')) return next();
+        const p = req.path;
+        if (p.startsWith('/api') || p.startsWith('/ws') || p.startsWith('/monitor')
+            || p.startsWith('/airline-logos') || p.startsWith('/airline-banners')) return next();
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.sendFile(path.join(publicReactPath, 'index.html'));
     });
@@ -265,6 +267,21 @@ app.get('/api/svg/:typecode', (req, res) => {
         res.status(204).end(); // no content, still 2xx
     }
 });
+
+// Airline logos/banners (Jxck-S/airline-logos, ICAO-named PNGs)
+app.use('/airline-logos', express.static(path.join(__dirname, 'public/airline-logos'), {
+    maxAge: '30d',
+    fallthrough: true,
+    setHeaders: (res) => { res.setHeader('Access-Control-Allow-Origin', '*'); }
+}));
+app.use('/airline-banners', express.static(path.join(__dirname, 'public/airline-banners'), {
+    maxAge: '30d',
+    fallthrough: true,
+    setHeaders: (res) => { res.setHeader('Access-Control-Allow-Origin', '*'); }
+}));
+// 204 fallback for missing ICAO PNG (suppress 404 log spam)
+app.get('/airline-logos/*splat', (req, res) => res.status(204).end());
+app.get('/airline-banners/*splat', (req, res) => res.status(204).end());
 
 
 // [v3.0] Security Headers
@@ -1845,10 +1862,17 @@ async function toggleAdmin(id) {
 </body>
 </html>`;
 }
-// ── Monitor Auth (session-based, no extra deps) ────────────────
+// ── Monitor Auth (session-based, persisted to SQLite) ──────────
 const crypto = require('crypto');
-const monitorSessions = new Map(); // token → expiry timestamp
 const MONITOR_SESSION_TTL = 8 * 60 * 60 * 1000; // 8 hours
+
+const _msInsert = db.prepare('INSERT OR REPLACE INTO monitor_sessions (token, expires_at) VALUES (?, ?)');
+const _msGet    = db.prepare('SELECT expires_at FROM monitor_sessions WHERE token = ?');
+const _msDel    = db.prepare('DELETE FROM monitor_sessions WHERE token = ?');
+const _msClean  = db.prepare('DELETE FROM monitor_sessions WHERE expires_at < ?');
+
+// Prune expired monitor sessions on startup
+_msClean.run(Date.now());
 
 function getMonitorToken(req) {
     const cookie = req.headers.cookie || '';
@@ -1859,9 +1883,9 @@ function getMonitorToken(req) {
 function isMonitorAuthed(req) {
     const token = getMonitorToken(req);
     if (!token) return false;
-    const expiry = monitorSessions.get(token);
-    if (!expiry || Date.now() > expiry) {
-        monitorSessions.delete(token);
+    const row = _msGet.get(token);
+    if (!row || Date.now() > row.expires_at) {
+        if (row) _msDel.run(token);
         return false;
     }
     return true;
@@ -1941,15 +1965,15 @@ app.post('/monitor/login', (req, res) => {
         return res.status(401).send(getLoginHtml('密碼錯誤，請再試一次'));
     }
     const token = crypto.randomBytes(32).toString('hex');
-    monitorSessions.set(token, Date.now() + MONITOR_SESSION_TTL);
-    const securePart = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    _msInsert.run(token, Date.now() + MONITOR_SESSION_TTL);
+    const securePart = req.secure ? '; Secure' : '';
     res.setHeader('Set-Cookie', `monitor_session=${token}; HttpOnly; SameSite=Strict; Path=/${securePart}; Max-Age=${MONITOR_SESSION_TTL / 1000}`);
     res.redirect('/monitor');
 });
 
 app.get('/monitor/logout', (req, res) => {
     const token = getMonitorToken(req);
-    if (token) monitorSessions.delete(token);
+    if (token) _msDel.run(token);
     res.setHeader('Set-Cookie', 'monitor_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
     res.redirect('/monitor');
 });

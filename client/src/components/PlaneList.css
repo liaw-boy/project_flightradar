@@ -3,15 +3,12 @@
     z-index: 1000;
     display: flex;
     flex-direction: column;
-    background: var(--color-glass-panel);
-    border: 1px solid var(--color-glass-border);
+    background: var(--surface-solid);
+    border: 1px solid var(--border);
     border-radius: 12px;
-    box-shadow: var(--shadow-premium);
-    backdrop-filter: blur(var(--blur-intensity));
-    -webkit-backdrop-filter: blur(var(--blur-intensity));
+    box-shadow: var(--shadow-sm);
     color: var(--color-text-primary);
 
-    /* Collapsed state defaults */
     flex: 0 0 auto;
     height: 44px;
     overflow: hidden;
@@ -19,30 +16,71 @@
 }
 
 .plane-list-panel.open {
-    /* Expanded state */
     flex: 1;
     height: auto;
     min-height: 200px;
+}
+
+.plane-list-panel.open.stats-mode {
+    flex: 0 0 auto;
+    min-height: 0;
 }
 
 .plane-list-toggle {
     height: 44px;
     display: flex;
     align-items: center;
-    padding: 0 16px;
-    font-size: 15px;
-    /* Added 2px */
-    font-weight: 700;
-    letter-spacing: 1px;
-    cursor: pointer;
-    border-bottom: 1px solid var(--color-glass-border);
-    color: var(--color-accent-cyan);
+    padding: 0 8px 0 0;
+    border-bottom: 1px solid var(--border);
     user-select: none;
-    transition: background 0.2s;
 }
 
-.plane-list-toggle:hover {
-    background: rgba(255, 255, 255, 0.05);
+.plt-tabs {
+    display: flex;
+    flex: 1;
+    height: 100%;
+}
+
+.plt-tab {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 1;
+    height: 100%;
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--color-text-dim);
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+
+.plt-tab:hover {
+    color: var(--color-text-primary);
+    background: var(--surface-hover);
+}
+
+.plt-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.plt-collapse {
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    cursor: pointer;
+    color: var(--color-text-dim);
+    transition: color 0.15s;
+}
+
+.plt-collapse:hover {
+    color: var(--color-text-primary);
 }
 
 .plane-list-content {
@@ -61,14 +99,14 @@
 .plane-list-header {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    padding: 8px 12px;
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 1px;
+    padding: 6px 12px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
     text-transform: uppercase;
-    color: var(--color-text-dim);
-    border-bottom: 1px solid var(--color-glass-border);
-    background: rgba(0, 0, 0, 0.3);
+    color: var(--text-3);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-hover);
     user-select: none;
 }
 
@@ -80,7 +118,7 @@
 }
 
 .plane-list-header>div:hover {
-    color: var(--color-text-primary);
+    color: var(--text);
 }
 
 .plane-list-header .col-alt { justify-content: center; }
@@ -89,8 +127,8 @@
 .col-callsign {
     display: flex;
     align-items: center;
-    font-weight: 700;
-    color: var(--color-text-primary);
+    font-weight: 600;
+    color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -113,7 +151,6 @@
 .plane-list-body {
     flex: 1;
     overflow-y: auto;
-    /* Height is controlled by flex constraints from the parent's max-height */
 }
 
 .plane-list-body::-webkit-scrollbar {
@@ -121,49 +158,49 @@
 }
 
 .plane-list-body::-webkit-scrollbar-thumb {
-    background: var(--color-glass-border);
+    background: var(--border);
     border-radius: 2px;
 }
 
 .plane-list-row {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    padding: 8px 12px;
-    font-size: 12px;
+    padding: 7px 12px;
+    font-size: 11px;
     font-family: var(--font-mono);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid var(--surface-active);
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    color: var(--color-text-secondary);
+    transition: all 0.15s;
+    color: var(--text-2);
 }
 
 .plane-list-row:hover {
-    background: rgba(34, 211, 238, 0.08);
-    color: var(--color-text-primary);
+    background: var(--accent-dim);
+    color: var(--text);
 }
 
 .plane-list-row.selected {
-    background: rgba(34, 211, 238, 0.15);
-    border-left: 3px solid var(--color-accent-cyan);
-    padding-left: 13px;
-    color: #fff;
+    background: var(--accent-dim);
+    border-left: 3px solid var(--accent);
+    padding-left: 9px;
+    color: var(--accent);
 }
 
 .plane-list-row.emergency {
-    color: #ef4444;
+    color: var(--accent-danger);
 }
 
 .plane-list-row.emergency.selected {
-    background: rgba(239, 68, 68, 0.15);
-    border-left: 3px solid #ef4444;
+    background: var(--accent-dim);
+    border-left: 3px solid var(--accent-danger);
 }
 
 .emg-dot {
-    width: 6px;
-    height: 6px;
-    background: #ef4444;
+    width: 5px;
+    height: 5px;
+    background: var(--accent-danger);
     border-radius: 50%;
-    margin-right: 6px;
+    margin-right: 5px;
     display: inline-block;
     animation: pulse 1s infinite alternate;
 }
@@ -171,19 +208,17 @@
 @keyframes pulse {
     from {
         opacity: 0.5;
-        box-shadow: 0 0 2px #ef4444;
+        box-shadow: 0 0 2px var(--accent-danger);
     }
-
     to {
         opacity: 1;
-        box-shadow: 0 0 8px #ef4444;
+        box-shadow: 0 0 6px var(--accent-danger);
     }
 }
 
 .plane-list-empty {
     padding: 24px;
     text-align: center;
-    font-size: 15px;
-    /* Added 2px */
-    color: var(--color-text-dim);
+    font-size: 13px;
+    color: var(--text-3);
 }

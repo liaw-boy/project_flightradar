@@ -11,7 +11,13 @@
  *   - 記憶體（如瀏覽器支援）
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { authStore } from '../store/authStore';
 import './DevPanel.css';
+
+function authHeader() {
+    const token = authStore.getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 // ── FPS bar helper ──────────────────────────────────────────────
 function FpsBar({ fps }) {
@@ -109,7 +115,7 @@ export default function DevPanel({ usageStats, apiStatus, apiStats, latency, pla
     const [health, setHealth] = useState(null);
     useEffect(() => {
         const fetch_ = () =>
-            fetch('/api/health').then(r => r.json()).then(setHealth).catch(() => {});
+            fetch('/api/health', { headers: authHeader() }).then(r => r.ok ? r.json() : null).then(d => d && setHealth(d)).catch(() => {});
         fetch_();
         const id = setInterval(fetch_, 5000);
         return () => clearInterval(id);
