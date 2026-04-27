@@ -1813,6 +1813,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const el = document.getElementById(id);
     if (el) observer.observe(el);
   });
+  // Auto-load users table on page ready
+  loadUsers();
 });
 
 refresh();

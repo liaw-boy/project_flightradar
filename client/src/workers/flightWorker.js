@@ -26,14 +26,11 @@
  */
 
 import * as msgpack from 'msgpack-lite';
+import { Buffer } from 'buffer';
 
-// Buffer polyfill for workers (msgpack-lite dependency)
-if (typeof self !== 'undefined' && typeof self.Buffer === 'undefined') {
-    self.Buffer = {
-        isBuffer: () => false,
-        from: (data) => new Uint8Array(data)
-    };
-}
+// Buffer polyfill — msgpack-lite accesses global.Buffer / globalThis.Buffer in workers
+globalThis.Buffer = Buffer;
+self.Buffer = Buffer;
 
 // ── WebSocket State ──────────────────────────────────────────────────────────
 let ws = null;

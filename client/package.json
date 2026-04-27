@@ -9,6 +9,7 @@
         "preview": "vite preview"
     },
     "dependencies": {
+        "buffer": "^6.0.3",
         "flag-icons": "^7.5.0",
         "leaflet": "^1.9.4",
         "lucide-react": "^0.577.0",
