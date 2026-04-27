@@ -327,33 +327,35 @@ app.post('/api/auth/login',    authCtrl.login);
 app.get( '/api/auth/me',       authCtrl.authMiddleware, authCtrl.me);
 
 // ── Admin API ────────────────────────────────────────────────────────────────
-const { authMiddleware: am, adminMiddleware: adm } = authCtrl;
+const { authMiddleware: am, adminMiddleware: adm, superAdminMiddleware: sadm } = authCtrl;
 const db = require('./db/sqlite');
 
-// List all users
+// List all users (admin)
 app.get('/api/admin/users', am, adm, (req, res) => {
     const users = db.prepare(
-        'SELECT id, username, email, is_admin, avatar_color, created_at FROM users ORDER BY id'
+        'SELECT id, username, email, is_admin, is_superadmin, avatar_color, created_at FROM users ORDER BY id'
     ).all();
     res.json({ users });
 });
 
-// Delete a user
-app.delete('/api/admin/users/:id', am, adm, (req, res) => {
+// Delete a user — superadmin cannot be deleted by anyone
+app.delete('/api/admin/users/:id', am, sadm, (req, res) => {
     const targetId = Number(req.params.id);
     if (targetId === req.user.id) return res.status(400).json({ error: 'cannot delete yourself' });
-    const r = db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
-    if (r.changes === 0) return res.status(404).json({ error: 'user not found' });
+    const target = db.prepare('SELECT id, is_superadmin FROM users WHERE id = ?').get(targetId);
+    if (!target) return res.status(404).json({ error: 'user not found' });
+    if (target.is_superadmin) return res.status(403).json({ error: 'cannot delete superadmin' });
+    db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
     res.json({ ok: true });
 });
 
-// Toggle admin status
-app.put('/api/admin/users/:id/admin', am, adm, (req, res) => {
+// Toggle admin status — only superadmin may grant/revoke; superadmin's own status is immutable
+app.put('/api/admin/users/:id/admin', am, sadm, (req, res) => {
     const targetId = Number(req.params.id);
-    if (targetId === req.user.id) return res.status(400).json({ error: 'cannot change your own admin status' });
-    const user = db.prepare('SELECT id, is_admin FROM users WHERE id = ?').get(targetId);
-    if (!user) return res.status(404).json({ error: 'user not found' });
-    const newVal = user.is_admin ? 0 : 1;
+    const target = db.prepare('SELECT id, is_admin, is_superadmin FROM users WHERE id = ?').get(targetId);
+    if (!target) return res.status(404).json({ error: 'user not found' });
+    if (target.is_superadmin) return res.status(403).json({ error: 'superadmin status is immutable' });
+    const newVal = target.is_admin ? 0 : 1;
     db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(newVal, targetId);
     res.json({ ok: true, is_admin: newVal });
 });
@@ -2046,22 +2048,25 @@ app.get('/monitor/api/db-status', requireMonitorAuth, (req, res) => {
 
 app.get('/monitor/api/users', requireMonitorAuth, (req, res) => {
     const users = db.prepare(
-        'SELECT id, username, email, is_admin, avatar_color, created_at FROM users ORDER BY id'
+        'SELECT id, username, email, is_admin, is_superadmin, avatar_color, created_at FROM users ORDER BY id'
     ).all();
     res.json({ users });
 });
 
 app.delete('/monitor/api/users/:id', requireMonitorAuth, (req, res) => {
     const id = Number(req.params.id);
-    const r = db.prepare('DELETE FROM users WHERE id = ?').run(id);
-    if (r.changes === 0) return res.status(404).json({ error: 'user not found' });
+    const target = db.prepare('SELECT id, is_superadmin FROM users WHERE id = ?').get(id);
+    if (!target) return res.status(404).json({ error: 'user not found' });
+    if (target.is_superadmin) return res.status(403).json({ error: 'cannot delete superadmin' });
+    db.prepare('DELETE FROM users WHERE id = ?').run(id);
     res.json({ ok: true });
 });
 
 app.put('/monitor/api/users/:id/admin', requireMonitorAuth, (req, res) => {
     const id = Number(req.params.id);
-    const user = db.prepare('SELECT id, is_admin FROM users WHERE id = ?').get(id);
+    const user = db.prepare('SELECT id, is_admin, is_superadmin FROM users WHERE id = ?').get(id);
     if (!user) return res.status(404).json({ error: 'user not found' });
+    if (user.is_superadmin) return res.status(403).json({ error: 'superadmin status is immutable' });
     const newVal = user.is_admin ? 0 : 1;
     db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(newVal, id);
     res.json({ ok: true, is_admin: newVal });

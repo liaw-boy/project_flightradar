@@ -19,7 +19,12 @@ function getJwtSecret() {
 
 function signToken(user) {
     return jwt.sign(
-        { id: user.id, username: user.username, is_admin: user.is_admin === 1 },
+        {
+            id: user.id,
+            username: user.username,
+            is_admin: user.is_admin === 1,
+            is_superadmin: user.is_superadmin === 1,
+        },
         getJwtSecret(),
         { expiresIn: TOKEN_TTL }
     );
@@ -27,7 +32,11 @@ function signToken(user) {
 
 function safeUser(user) {
     const { password_hash, ...rest } = user;
-    return { ...rest, is_admin: rest.is_admin === 1 };
+    return {
+        ...rest,
+        is_admin: rest.is_admin === 1,
+        is_superadmin: rest.is_superadmin === 1,
+    };
 }
 
 // ── POST /api/auth/register ──────────────────────────────────────────────────
@@ -108,4 +117,10 @@ function adminMiddleware(req, res, next) {
     next();
 }
 
-module.exports = { register, login, me, authMiddleware, adminMiddleware };
+// Only superadmin (liawboy) may manage other users' admin status.
+function superAdminMiddleware(req, res, next) {
+    if (!req.user?.is_superadmin) return res.status(403).json({ error: 'superadmin required' });
+    next();
+}
+
+module.exports = { register, login, me, authMiddleware, adminMiddleware, superAdminMiddleware };

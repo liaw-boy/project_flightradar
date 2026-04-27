@@ -120,6 +120,18 @@ CREATE TABLE IF NOT EXISTS monitor_sessions (
 );
 `);
 
+// ── Migrations ─────────────────────────────────────────────────────────────
+// Add columns that may not exist in older DB instances.
+const existingCols = db.pragma('table_info(users)').map(c => c.name);
+if (!existingCols.includes('is_admin')) {
+    db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
+}
+if (!existingCols.includes('is_superadmin')) {
+    db.exec('ALTER TABLE users ADD COLUMN is_superadmin INTEGER NOT NULL DEFAULT 0');
+}
+// liawboy is the permanent super-admin; ensure flag is set even after schema changes.
+db.prepare("UPDATE users SET is_superadmin = 1, is_admin = 1 WHERE username = 'liawboy'").run();
+
 // ── Batched TTL cleanup (24 h) — non-blocking, yields between chunks ─────
 const PRUNE_BATCH = 5000;            // ~120ms DELETE blocks — short enough for healthy event loop
 const PRUNE_PAUSE_MS = 500;          // 500ms pause — ample time for HTTP I/O between batches
