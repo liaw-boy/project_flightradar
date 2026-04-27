@@ -153,7 +153,7 @@ function pruneOldTrackPoints() {
     batch();
 }
 
-// ── Periodic WAL checkpoint — every 5 minutes ────────────────────────────
+// ── Periodic WAL checkpoint — every 5 minutes (PASSIVE: non-blocking) ───────
 function walCheckpoint() {
     try {
         const result = db.pragma('wal_checkpoint(PASSIVE)');
@@ -163,6 +163,22 @@ function walCheckpoint() {
         }
     } catch (e) {
         console.error('[SQLite] WAL checkpoint error:', e.message);
+    }
+}
+
+// ── Weekly WAL TRUNCATE — Sunday 03:00, shrinks the physical WAL file ────────
+// PASSIVE flushes pages but never truncates the file; TRUNCATE actually reclaims disk.
+function walTruncate() {
+    try {
+        const walPath = db.name + '-wal';
+        const { statSync } = require('fs');
+        const sizeBefore = (() => { try { return Math.round(statSync(walPath).size / 1024 / 1024); } catch { return 0; } })();
+        const result = db.pragma('wal_checkpoint(TRUNCATE)');
+        const r = result[0];
+        const sizeAfter = (() => { try { return Math.round(statSync(walPath).size / 1024 / 1024); } catch { return 0; } })();
+        console.log(`[SQLite] WAL TRUNCATE: busy=${r?.busy} log=${r?.log} checkpointed=${r?.checkpointed} | WAL ${sizeBefore}MB → ${sizeAfter}MB`);
+    } catch (e) {
+        console.error('[SQLite] WAL TRUNCATE error:', e.message);
     }
 }
 
@@ -200,18 +216,24 @@ setInterval(pruneOldTrackPoints, 3600 * 1000);
 setInterval(walCheckpoint, 5 * 60 * 1000);
 setInterval(analyzeDb, 6 * 3600 * 1000);
 
-// Weekly VACUUM — Sunday 04:05 local (roughly; node timer drifts, cron in server.js handles precision)
-const msUntilSunday4am = (() => {
+// Weekly maintenance window — Sunday 03:00 TRUNCATE, 04:05 VACUUM
+const msUntilTarget = (h, m) => {
     const now = new Date();
     const target = new Date(now);
-    target.setHours(4, 5, 0, 0);
+    target.setHours(h, m, 0, 0);
     const daysUntilSun = (7 - now.getDay()) % 7 || 7;
     target.setDate(target.getDate() + daysUntilSun);
     return target.getTime() - now.getTime();
-})();
+};
+
+setTimeout(() => {
+    walTruncate();
+    setInterval(walTruncate, 7 * 24 * 3600 * 1000);
+}, msUntilTarget(3, 0));
+
 setTimeout(() => {
     vacuumIfNeeded();
     setInterval(vacuumIfNeeded, 7 * 24 * 3600 * 1000);
-}, msUntilSunday4am);
+}, msUntilTarget(4, 5));
 
 module.exports = db;
