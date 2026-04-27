@@ -26,11 +26,20 @@ import './App.css';
 function parseUrlParams() {
     const params = new URLSearchParams(window.location.search);
     return {
-        icao: params.get('icao'),
-        lat: params.get('lat') ? parseFloat(params.get('lat')) : null,
-        lng: params.get('lng') ? parseFloat(params.get('lng')) : null,
-        zoom: params.get('zoom') ? parseInt(params.get('zoom'), 10) : null,
+        icao:  params.get('icao'),
+        panel: params.get('panel'),   // 'admin' | 'my-flights' | 'auth'
+        lat:   params.get('lat')  ? parseFloat(params.get('lat'))    : null,
+        lng:   params.get('lng')  ? parseFloat(params.get('lng'))    : null,
+        zoom:  params.get('zoom') ? parseInt(params.get('zoom'), 10) : null,
     };
+}
+
+function setUrlPanel(panel) {
+    const params = new URLSearchParams(window.location.search);
+    if (panel) params.set('panel', panel);
+    else params.delete('panel');
+    const qs = params.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
 }
 
 export default function App() {
@@ -280,6 +289,14 @@ export default function App() {
             setLoading(false);
         }, 1500);
         return () => clearTimeout(timer);
+    }, []);
+
+    // 從 URL ?panel= 自動開啟對應面板
+    useEffect(() => {
+        const { panel } = parseUrlParams();
+        if (panel === 'admin') setShowAdmin(true);
+        else if (panel === 'my-flights') { setMyFlightsInitialView('list'); setMyFlightsMode('page'); setShowMyFlights(true); }
+        else if (panel === 'auth') setShowAuthModal(true);
     }, []);
 
     // 地圖就緒
@@ -581,7 +598,7 @@ export default function App() {
     }, [planesDict, selectedIcao24, trackPoints.length]);
 
     if (showAdmin) {
-        return <AdminPanel onClose={() => setShowAdmin(false)} />;
+        return <AdminPanel onClose={() => { setShowAdmin(false); setUrlPanel(null); }} />;
     }
 
     return (
@@ -626,11 +643,11 @@ export default function App() {
                 onMapLayerChange={handleMapLayerChange}
                 showStats={showStats}
                 onToggleStats={() => setShowStats(s => !s)}
-                onOpenAuth={() => setShowAuthModal(true)}
-                onOpenMyFlights={() => { setMyFlightsInitialView('list'); setMyFlightsMode('page');  setShowMyFlights(true); }}
-                onOpenNewFlight={() => { setMyFlightsInitialView('form'); setMyFlightsMode('modal'); setShowMyFlights(true); }}
+                onOpenAuth={() => { setShowAuthModal(true); setUrlPanel('auth'); }}
+                onOpenMyFlights={() => { setMyFlightsInitialView('list'); setMyFlightsMode('page');  setShowMyFlights(true); setUrlPanel('my-flights'); }}
+                onOpenNewFlight={() => { setMyFlightsInitialView('form'); setMyFlightsMode('modal'); setShowMyFlights(true); setUrlPanel('my-flights'); }}
 
-                onOpenAdmin={() => setShowAdmin(true)}
+                onOpenAdmin={() => { setShowAdmin(true); setUrlPanel('admin'); }}
                 authUser={authUser}
                 showUserRoutes={showUserRoutes}
                 onToggleUserRoutes={() => setShowUserRoutes(v => !v)}
@@ -735,7 +752,7 @@ export default function App() {
 
             {/* ── Auth / MyFlights Modals ── */}
             {showAuthModal && (
-                <AuthModal onClose={() => setShowAuthModal(false)} />
+                <AuthModal onClose={() => { setShowAuthModal(false); setUrlPanel(null); }} />
             )}
 
             {showMyFlights && (
@@ -744,6 +761,7 @@ export default function App() {
                     mode={myFlightsMode}
                     onClose={() => {
                         setShowMyFlights(false);
+                        setUrlPanel(null);
                         // 關閉時重新拉取路線，確保新增的航班反映在地圖上
                         if (authUser) {
                             apiFlightMapData().then(d => setUserRoutes(d.routes || [])).catch(() => {});
