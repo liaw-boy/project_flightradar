@@ -300,13 +300,23 @@ export default function App() {
         return () => clearTimeout(timer);
     }, []);
 
-    // 從 URL ?panel= / ?stats= 自動開啟對應面板
+    // 從 URL ?panel= / ?stats= 自動開啟對應面板（帶 auth 檢查）
     useEffect(() => {
         const { panel, stats } = parseUrlParams();
-        if (panel === 'admin') setShowAdmin(true);
-        else if (panel === 'my-flights') { setMyFlightsInitialView('list'); setMyFlightsMode('page'); setShowMyFlights(true); }
-        else if (panel === 'new-flight') { setMyFlightsInitialView('form'); setMyFlightsMode('modal'); setShowMyFlights(true); }
-        else if (panel === 'auth') setShowAuthModal(true);
+        const user = authStore.getUser();
+        if (panel === 'admin') {
+            // 只有 superadmin 才能開管理員面板；非 admin 導向登入
+            if (user?.is_superadmin) setShowAdmin(true);
+            else { setUrlPanel(null); if (!user) setShowAuthModal(true); }
+        } else if (panel === 'my-flights') {
+            if (user) { setMyFlightsInitialView('list'); setMyFlightsMode('page'); setShowMyFlights(true); }
+            else { setUrlPanel(null); setShowAuthModal(true); }
+        } else if (panel === 'new-flight') {
+            if (user) { setMyFlightsInitialView('form'); setMyFlightsMode('modal'); setShowMyFlights(true); }
+            else { setUrlPanel(null); setShowAuthModal(true); }
+        } else if (panel === 'auth') {
+            setShowAuthModal(true);
+        }
         if (stats) setShowStats(true);
     }, []);
 
