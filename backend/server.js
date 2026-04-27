@@ -1206,6 +1206,8 @@ a:hover{opacity:.75}
 .mon-btn:hover{background:rgba(169,223,216,.18)}
 .mon-btn-danger{border-color:rgba(248,113,113,.3);background:rgba(248,113,113,.08);color:#f87171}
 .mon-btn-danger:hover{background:rgba(248,113,113,.2)}
+.mon-btn-warning{border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.08);color:#f59e0b}
+.mon-btn-warning:hover{background:rgba(245,158,11,.2)}
 </style>
 </head>
 <body>
@@ -1831,11 +1833,16 @@ async function loadUsers() {
         <td style="color:var(--td)">\${u.id}</td>
         <td style="font-weight:600;color:var(--t)">\${u.username}</td>
         <td style="color:var(--td)">\${u.email || '—'}</td>
-        <td>\${u.is_admin ? '<span style="color:#a9dfd8;font-weight:700">Admin</span>' : '<span style="color:var(--td)">User</span>'}</td>
+        <td>
+          \${u.is_superadmin ? '<span style="color:#f59e0b;font-weight:700">⭐ Superadmin</span>' : u.is_admin ? '<span style="color:#a9dfd8;font-weight:700">Admin</span>' : '<span style="color:var(--td)">User</span>'}
+        </td>
         <td style="color:var(--td);font-size:11px">\${new Date(u.created_at*1000).toLocaleDateString()}</td>
         <td>
-          \${u.is_admin ? '' : \`<button class="mon-btn" onclick="toggleAdmin(\${u.id})">Make Admin</button>\`}
-          <button class="mon-btn mon-btn-danger" onclick="deleteUser(\${u.id}, '\${u.username}')">Delete</button>
+          \${u.is_superadmin ? '' : u.is_admin
+            ? \`<button class="mon-btn mon-btn-warning" onclick="toggleAdmin(\${u.id})">Remove Admin</button>\`
+            : \`<button class="mon-btn" onclick="toggleAdmin(\${u.id})">Make Admin</button>\`
+          }
+          \${u.is_superadmin ? '' : \`<button class="mon-btn mon-btn-danger" onclick="deleteUser(\${u.id}, '\${u.username}')">Delete</button>\`}
         </td>
       </tr>\`).join('');
     wrap.innerHTML = \`<table class="mon-table"><thead><tr>
