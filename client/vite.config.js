@@ -6,6 +6,10 @@ export default defineConfig({
     plugins: [
         react()
     ],
+    define: {
+        // msgpack-lite in Web Worker accesses global.Buffer — map to globalThis
+        global: 'globalThis',
+    },
     optimizeDeps: {
         include: [
             '@deck.gl/core',

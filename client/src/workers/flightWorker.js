@@ -25,12 +25,7 @@
  *   DISCONNECT    null
  */
 
-import * as msgpack from 'msgpack-lite';
-import { Buffer } from 'buffer';
-
-// Buffer polyfill — msgpack-lite accesses global.Buffer / globalThis.Buffer in workers
-globalThis.Buffer = Buffer;
-self.Buffer = Buffer;
+import { decode, encode } from '@msgpack/msgpack';
 
 // ── WebSocket State ──────────────────────────────────────────────────────────
 let ws = null;
@@ -176,14 +171,14 @@ function connectWebSocket(baseUrl) {
         postMessage({ type: 'WS_CONNECTED', payload: null });
         // Re-send selected plane on reconnect so server resumes track_point push
         if (selectedIcao24) {
-            ws.send(msgpack.encode({ type: 'SELECT_PLANE', icao24: selectedIcao24 }));
+            ws.send(encode({ type: 'SELECT_PLANE', icao24: selectedIcao24 }));
         }
     };
 
     ws.onmessage = (event) => {
         try {
             if (event.data instanceof ArrayBuffer) {
-                const decoded = msgpack.decode(new Uint8Array(event.data));
+                const decoded = decode(new Uint8Array(event.data));
                 handleDecodedMessage(decoded);
             }
         } catch (err) {
@@ -219,13 +214,13 @@ self.onmessage = (event) => {
             break;
         case 'SET_VIEWPORT':
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(msgpack.encode({ type: 'SET_VIEWPORT', payload }));
+                ws.send(encode({ type: 'SET_VIEWPORT', payload }));
             }
             break;
         case 'SELECT_PLANE':
             selectedIcao24 = payload.icao24 || null; // persist across reconnects
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(msgpack.encode({ type: 'SELECT_PLANE', icao24: selectedIcao24 }));
+                ws.send(encode({ type: 'SELECT_PLANE', icao24: selectedIcao24 }));
             }
             break;
         case 'DISCONNECT':
