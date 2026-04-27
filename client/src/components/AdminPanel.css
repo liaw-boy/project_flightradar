@@ -361,6 +361,7 @@
     font-size: 11px;
     font-weight: 600;
 }
+.adm-role-super { background: rgba(245, 158, 11, 0.12); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); }
 .adm-role-admin { background: var(--surface-active); color: var(--accent); border: 1px solid var(--border); }
 .adm-role-user  { background: var(--input-bg); color: var(--text-2); border: 1px solid var(--border); }
 
@@ -385,6 +386,8 @@
 }
 .adm-btn-teal   { color: var(--accent); border-color: var(--border); background: var(--surface-active); }
 .adm-btn-teal:hover   { background: var(--surface-active); }
+.adm-btn-warning { color: #f59e0b; border-color: rgba(245, 158, 11, 0.25); background: rgba(245, 158, 11, 0.07); }
+.adm-btn-warning:hover { background: rgba(245, 158, 11, 0.14); }
 .adm-btn-danger { color: #ef4444; border-color: rgba(239, 68, 68, 0.25); background: rgba(239, 68, 68, 0.07); }
 .adm-btn-danger:hover { background: rgba(239, 68, 68, 0.14); }
 

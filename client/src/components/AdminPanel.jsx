@@ -95,23 +95,31 @@ function UsersTab() {
                                         </td>
                                         <td className="adm-td-muted">{u.email || '—'}</td>
                                         <td>
-                                            {u.is_admin
-                                                ? <span className="adm-role adm-role-admin"><ShieldCheck size={11} /> 管理員</span>
-                                                : <span className="adm-role adm-role-user">用戶</span>}
+                                            {u.is_superadmin
+                                                ? <span className="adm-role adm-role-super"><ShieldCheck size={11} /> 超級管理員</span>
+                                                : u.is_admin
+                                                    ? <span className="adm-role adm-role-admin"><ShieldCheck size={11} /> 管理員</span>
+                                                    : <span className="adm-role adm-role-user">用戶</span>}
                                         </td>
                                         <td className="adm-td-muted adm-td-sm">
                                             {new Date(u.created_at * 1000).toLocaleDateString('zh-TW')}
                                         </td>
                                         <td>
                                             <div className="adm-row-actions">
-                                                {!u.is_admin && (
-                                                    <button className="adm-btn adm-btn-teal" onClick={() => toggleAdmin(u.id)}>
-                                                        <ShieldCheck size={12} /> 設管理員
+                                                {!u.is_superadmin && (
+                                                    u.is_admin
+                                                        ? <button className="adm-btn adm-btn-warning" onClick={() => toggleAdmin(u.id)}>
+                                                            <ShieldCheck size={12} /> 取消管理員
+                                                          </button>
+                                                        : <button className="adm-btn adm-btn-teal" onClick={() => toggleAdmin(u.id)}>
+                                                            <ShieldCheck size={12} /> 設管理員
+                                                          </button>
+                                                )}
+                                                {!u.is_superadmin && (
+                                                    <button className="adm-btn adm-btn-danger" onClick={() => del(u.id, u.username)}>
+                                                        <Trash2 size={12} /> 刪除
                                                     </button>
                                                 )}
-                                                <button className="adm-btn adm-btn-danger" onClick={() => del(u.id, u.username)}>
-                                                    <Trash2 size={12} /> 刪除
-                                                </button>
                                             </div>
                                         </td>
                                     </tr>
