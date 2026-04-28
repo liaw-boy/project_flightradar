@@ -285,9 +285,29 @@ app.get('/airline-banners/*splat', (req, res) => res.status(204).end());
 
 
 // [v3.0] Security Headers
+// img-src includes map tile providers (CartoCD, ArcGIS, OpenTopoMap) + Planespotters CDN for aircraft photos.
+// script-src keeps 'unsafe-inline' because Vite injects module-preload inline scripts at build time.
+// connect-src 'self' covers same-origin XHR, fetch, SSE, and WebSocket (ws/wss same-origin).
 app.use(helmet({
-    contentSecurityPolicy: false, // Prevents blocking of inline scripts and external map tiles
-    crossOriginEmbedderPolicy: false, // Prevents blocking of external assets
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc:            ["'self'"],
+            scriptSrc:             ["'self'", "'unsafe-inline'"],
+            styleSrc:              ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            fontSrc:               ["'self'", "https://fonts.gstatic.com"],
+            imgSrc:                ["'self'", "data:", "blob:",
+                                    "https://*.cartocdn.com",
+                                    "https://server.arcgisonline.com",
+                                    "https://tile.opentopomap.org",
+                                    "https://*.planespotters.net"],
+            connectSrc:            ["'self'"],
+            workerSrc:             ["'self'", "blob:"],
+            frameSrc:              ["'none'"],
+            objectSrc:             ["'none'"],
+            baseUri:               ["'self'"],
+        },
+    },
+    crossOriginEmbedderPolicy: false, // Needed for Leaflet tile img cross-origin
 }));
 // General API rate limiter
 const apiLimiter = rateLimit({
