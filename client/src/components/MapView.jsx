@@ -3,205 +3,28 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getAirlineLogoUrl, getAirlineBannerUrl, normalizeLongitude, predictPosition, getAltitudeColor, initAirportDatabase } from '../utils/flightUtils';
 import { processTrailPath } from '../utils/trailSpline';
-import { getAircraftScale, getDrawSize, resolveTypecodeKey, getDynamicImage, prewarmExactSvg, AIRCRAFT_CATALOG as paths, ICON_SCALE_VERSION } from '../utils/aircraftIcons';
+import { getAircraftScale, getDrawSize, getDynamicImage, prewarmExactSvg, ICON_SCALE_VERSION } from '../utils/aircraftIcons';
 import { dataManager } from '../services/dataManager';
 import { enrichPlaneDetails, getEnrichedData } from '../services/staticOsintCache';
 import HoverCard from './HoverCard';
 import ClickCard from './ClickCard';
 import { logger } from '../utils/logger';
+import PlaneCanvasLayer from './PlaneCanvasLayer';
+import AltitudeLegend from './AltitudeLegend';
+import {
+    _greatCirclePoints,
+    FR24_BASE_PX,
+    haversineKm,
+    vectorPathsMap,
+    _enrichScheduled,
+    measureCached,
+    GC_THRESHOLD_KM,
+    greatCirclePoints,
+    RENDER_MODE_FULL,
+    RENDER_MODE_SIMPLE,
+    getAircraftVectorKey,
+} from './mapViewUtils';
 
-// ── 大圓弧插值（個人路線用）────────────────────────────────────────────────────
-function _greatCirclePoints(lat1, lng1, lat2, lng2, n = 64) {
-    const toRad = d => d * Math.PI / 180;
-    const toDeg = r => r * 180 / Math.PI;
-    const φ1 = toRad(lat1), λ1 = toRad(lng1);
-    const φ2 = toRad(lat2), λ2 = toRad(lng2);
-    const x1 = Math.cos(φ1)*Math.cos(λ1), y1 = Math.cos(φ1)*Math.sin(λ1), z1 = Math.sin(φ1);
-    const x2 = Math.cos(φ2)*Math.cos(λ2), y2 = Math.cos(φ2)*Math.sin(λ2), z2 = Math.sin(φ2);
-    const dot = Math.max(-1, Math.min(1, x1*x2 + y1*y2 + z1*z2));
-    const Ω = Math.acos(dot);
-    if (Ω < 0.001) return [[lat1, lng1], [lat2, lng2]];
-    const sinΩ = Math.sin(Ω);
-    const pts = [];
-    for (let i = 0; i <= n; i++) {
-        const t = i / n;
-        const a = Math.sin((1-t)*Ω) / sinΩ;
-        const b = Math.sin(t*Ω) / sinΩ;
-        const x = a*x1 + b*x2, y = a*y1 + b*y2, z = a*z1 + b*z2;
-        pts.push([toDeg(Math.atan2(z, Math.sqrt(x*x + y*y))), toDeg(Math.atan2(y, x))]);
-    }
-    return pts;
-}
-
-/**
- * Custom Leaflet Canvas Layer for High-Performance Rendering
- */
-const PlaneCanvasLayer = L.Layer.extend({
-    onAdd: function (map) {
-        this._map = map;
-        this._canvas = L.DomUtil.create('canvas', 'leaflet-zoom-animated');
-        this._canvas.style.pointerEvents = 'none'; // Let map handle clicks
-        this._canvas.style.zIndex = 10;
-        this.ctx = this._canvas.getContext('2d', { alpha: true });
-
-        map.getPanes().overlayPane.appendChild(this._canvas);
-        map.on('move', this._reset, this);
-        map.on('resize', this._resize, this);
-        if (map.options.zoomAnimation && L.Browser.any3d) {
-            map.on('zoomanim', this._animateZoom, this);
-        }
-        this._reset();
-    },
-    onRemove: function (map) {
-        map.getPanes().overlayPane.removeChild(this._canvas);
-        map.off('move', this._reset, this);
-        map.off('resize', this._resize, this);
-        if (map.options.zoomAnimation) {
-            map.off('zoomanim', this._animateZoom, this);
-        }
-    },
-    _resize: function () {
-        const size = this._map.getSize();
-        const dpr = window.devicePixelRatio || 1;
-        this._canvas.width = size.x * dpr;
-        this._canvas.height = size.y * dpr;
-        this._canvas.style.width = size.x + 'px';
-        this._canvas.style.height = size.y + 'px';
-        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        this._reset();
-    },
-    _reset: function () {
-        const size = this._map.getSize();
-        const dpr = window.devicePixelRatio || 1;
-        this._canvas.width = size.x * dpr;
-        this._canvas.height = size.y * dpr;
-        this._canvas.style.width = size.x + 'px';
-        this._canvas.style.height = size.y + 'px';
-        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-        // Critical Fix: Clear canvas immediately on move/reset before the next animation frame
-        if (this.ctx) {
-            this.ctx.clearRect(0, 0, size.x, size.y);
-        }
-
-        const topLeft = this._map.containerPointToLayerPoint([0, 0]);
-        L.DomUtil.setPosition(this._canvas, topLeft);
-    },
-    _animateZoom: function (e) {
-        const scale = this._map.getZoomScale(e.zoom);
-        const offset = this._map._latLngBoundsToNewLayerBounds(this._map.getBounds(), e.zoom, e.center).min;
-        L.DomUtil.setTransform(this._canvas, offset, scale);
-    },
-    getCanvas: function () { return this._canvas; }
-});
-
-// ── FR24-Grade Zoom-Responsive Icon Sizing ──────────────────────────────────
-// Two rendering tiers matching FlightRadar24 behavior:
-//   Zoom 3-11 : Stable aircraft silhouette — NEVER shrinks to dots.
-//               Density filtering (shouldShowPlane) controls clutter.
-//   Zoom 12+  : Linear scale-up with full wingspan proportionality.
-//
-// `scale` is the wingspan-proportional factor from aircraftIcons (B738 = 1.0).
-// Larger aircraft (B744, A380) render physically bigger at all zoom levels.
-
-const FR24_BASE_PX = 36; // Base icon size — PlaneFinder reference
-
-// [v14.0] High-Performance Rendering Logic
-
-
-// ─── Haversine distance helper (km) ──────────────────────────────────────────
-function haversineKm(lat1, lon1, lat2, lon2) {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 +
-        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-        Math.sin(dLon / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-// ─── [v14.0] Path2D Vector Object Cache (with ViewBox support) ──────────────
-const vectorPathsMap = new Map();
-Object.entries(paths).forEach(([key, entry]) => {
-    const vbArr = (entry.vb || "0 0 500 500").split(/\s+/).map(Number);
-    vectorPathsMap.set(key, {
-        path: new Path2D(entry.d),
-        vb: vbArr
-    });
-});
-
-// ─── [PERF-4 Fix] Module-level enrichment guard — persists across React re-renders ──
-const _enrichScheduled = new Set();
-
-// ─── measureText cache — avoids redundant font measurement each frame ─────────
-const _textWidthCache = new Map(); // 'font|text' → width
-function measureCached(ctx, text, font) {
-    const key = font + '|' + text;
-    const cached = _textWidthCache.get(key);
-    if (cached !== undefined) return cached;
-    ctx.font = font;
-    const w = ctx.measureText(text).width;
-    if (_textWidthCache.size > 2000) _textWidthCache.clear();
-    _textWidthCache.set(key, w);
-    return w;
-}
-
-// ─── Great Circle Arc Interpolation (tar1090-style) ──────────────────────────
-// For segments longer than GC_THRESHOLD_KM, insert intermediate points along
-// the spherical great-circle arc so the path follows Earth's curvature.
-// Returns an array of [lat, lng] tuples including the two endpoints.
-const GC_THRESHOLD_KM = 500;
-function greatCirclePoints(lat1, lng1, lat2, lng2, distKm) {
-    const steps = Math.min(16, Math.ceil(distKm / 200)); // 1 point per ~200km, max 16
-    if (steps < 2) return [[lat1, lng1], [lat2, lng2]];
-    const φ1 = lat1 * Math.PI / 180, λ1 = lng1 * Math.PI / 180;
-    const φ2 = lat2 * Math.PI / 180, λ2 = lng2 * Math.PI / 180;
-    const sinφ1 = Math.sin(φ1), cosφ1 = Math.cos(φ1);
-    const sinφ2 = Math.sin(φ2), cosφ2 = Math.cos(φ2);
-    const cosλd = Math.cos(λ2 - λ1);
-    const d = Math.acos(Math.min(1, sinφ1 * sinφ2 + cosφ1 * cosφ2 * cosλd));
-    if (d < 1e-9) return [[lat1, lng1], [lat2, lng2]];
-    const pts = [];
-    for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const A = Math.sin((1 - t) * d) / Math.sin(d);
-        const B = Math.sin(t * d) / Math.sin(d);
-        const x = A * cosφ1 * Math.cos(λ1) + B * cosφ2 * Math.cos(λ2);
-        const y = A * cosφ1 * Math.sin(λ1) + B * cosφ2 * Math.sin(λ2);
-        const z = A * sinφ1 + B * sinφ2;
-        const φ = Math.atan2(z, Math.sqrt(x * x + y * y));
-        const λ = Math.atan2(y, x);
-        pts.push([φ * 180 / Math.PI, (λ * 180 / Math.PI + 540) % 360 - 180]);
-    }
-    return pts;
-}
-
-// ─── [v12.0] Altitude Coloring Logic ─────────────────────────────────────────
-// [Visual] Standardized altitude colors imported from flightUtils
-// [v14.0] High-Performance Rendering Mode Active
-const RENDER_MODE_FULL = 0;
-const RENDER_MODE_SIMPLE = 1;
-
-/**
- * MapView — 管理 Leaflet 地圖、飛機 markers、軌跡線、機場圖層
- * 使用原生 Leaflet（非 react-leaflet）以獲得對 marker 的完全控制
- */
-// [v14.1] High-Performance Vector Silhouettes resolver
-// Uses resolveTypecodeKey() from aircraftIcons for full fuzzy matching,
-// guaranteeing every call returns a key that exists in vectorPathsMap.
-const getAircraftVectorKey = (plane) => {
-    // 1. Backend-provided shape key — only accept if it's a known catalog entry
-    if (plane.icon_type) {
-        const k = plane.icon_type.toUpperCase();
-        if (paths[k]) return k;
-    }
-    // 2. Direct catalog hit (exact typecode match)
-    const tc = (plane._activeTypecode || plane.typecode || '').toUpperCase();
-    if (tc && paths[tc]) return tc;
-    // 3. Full fuzzy resolution: prefix alias → category detection → CATEGORY_FALLBACK → DEFAULT
-    //    resolveTypecodeKey() is guaranteed to return a key present in AIRCRAFT_CATALOG.
-    return resolveTypecodeKey(tc, plane.category);
-};
 
 export default function MapView({
     planesDict,
@@ -1829,65 +1652,3 @@ export default function MapView({
     );
 }
 
-// ─── Altitude Color Legend ──────────────────────────────────────────────────
-// Shows the tar1090 HSL gradient with altitude labels, matching the track colors.
-// Only visible in ALTITUDE scheme; hidden in TACTICAL and other solid-color modes.
-function AltitudeLegend({ colorScheme }) {
-    if (colorScheme === 'TACTICAL' || colorScheme === 'MONO') return null;
-
-    // Key stops from the tar1090 HSL table (label, hue, sat, light)
-    const stops = [
-        { label: 'GND',    h: 20,  s: 88, l: 52 },
-        { label: '3km',    h: 140, s: 88, l: 41 },
-        { label: '12km',   h: 300, s: 88, l: 48 },
-        { label: '15km+',  h: 360, s: 88, l: 52 },
-    ];
-    const gradientColors = [
-        `hsl(20,88%,52%)`,
-        `hsl(54,88%,49%)`,
-        `hsl(140,88%,41%)`,
-        `hsl(220,88%,52%)`,
-        `hsl(300,88%,48%)`,
-        `hsl(360,88%,52%)`,
-    ].join(', ');
-
-    return (
-        <div style={{
-            position: 'absolute',
-            bottom: '28px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 1000,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '3px',
-            pointerEvents: 'none',
-        }}>
-            <div style={{
-                width: '220px',
-                height: '7px',
-                borderRadius: '4px',
-                background: `linear-gradient(to right, ${gradientColors})`,
-                boxShadow: '0 1px 6px rgba(0,0,0,0.7)',
-            }} />
-            <div style={{
-                width: '220px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                padding: '0 2px',
-            }}>
-                {stops.map(({ label, h, s, l }) => (
-                    <span key={label} style={{
-                        fontSize: '9px',
-                        fontFamily: 'JetBrains Mono, monospace',
-                        fontWeight: 700,
-                        color: `hsl(${h},${s}%,${Math.min(l + 15, 80)}%)`,
-                        textShadow: '0 1px 3px rgba(0,0,0,0.9)',
-                        letterSpacing: '0.4px',
-                    }}>{label}</span>
-                ))}
-            </div>
-        </div>
-    );
-}
