@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-    X, Plus, Pencil, Trash2, Plane, MapPin, Calendar,
-    ChevronLeft, ChevronRight, AlertCircle, CheckCircle, BarChart2, Loader
+    X, Plus, Pencil, Trash2, Plane,
+    ChevronLeft, ChevronRight, AlertCircle, CheckCircle, Loader, ArrowRight
 } from 'lucide-react';
 import {
     apiListFlights, apiCreateFlight, apiUpdateFlight,
@@ -10,252 +10,225 @@ import {
 } from '../store/authStore';
 import './MyFlightsPanel.css';
 
-// ── 登機證條碼裝飾（固定，不用 random）────────────────────────────────────────
 const BARCODE = [18,10,24,12,20,28,8,18,22,14,20,10,26,18,14,22,10,20,16,18,24,8,20,18,22,16,12,26,10,18,20,22,16,24,12,18,20,26,14,22,10,18,24,12,20,16,28,8,18,22,14,20,26,12,18,16,24,10,22,28];
 
-// ── 空白表單 ──────────────────────────────────────────────────────────────────
-function todayStr() {
-    return new Date().toISOString().slice(0, 10);
-}
+function todayStr() { return new Date().toISOString().slice(0, 10); }
 
 const EMPTY_FORM = {
     flight_date: todayStr(), flight_number: '', callsign: '', icao24: '',
     aircraft_type: '', registration: '', dep_icao: '', arr_icao: '',
     dep_time: '', arr_time: '', seat_number: '', seat_class: '', notes: '',
 };
-
-// ── 艙等選項 ─────────────────────────────────────────────────────────────────
 const SEAT_CLASSES = ['經濟艙', '豪華經濟艙', '商務艙', '頭等艙'];
+const CLASS_MAP = {
+    '頭等艙': 'FIRST', '商務艙': 'BUSINESS', '豪華經濟艙': 'PREM ECO', '經濟艙': 'ECONOMY',
+    'first': 'FIRST', 'business': 'BUSINESS', 'premium_economy': 'PREM ECO', 'economy': 'ECONOMY',
+};
 
-// ── 子元件：統計卡（可點擊展開詳細儀表板）────────────────────────────────────
-function StatsBar({ stats, onShowStats }) {
-    if (!stats) return null;
-    return (
-        <div className="mfp-stats-bar" onClick={onShowStats} title="點擊查看詳細統計" style={{ cursor: 'pointer' }}>
-            <div className="mfp-stat">
-                <span className="mfp-stat-label">FLIGHTS</span>
-                <span className="mfp-stat-v">{stats.total_flights}</span>
-                <span className="mfp-stat-unit">SECTORS</span>
-            </div>
-            <div className="mfp-stat">
-                <span className="mfp-stat-label">DISTANCE</span>
-                <span className="mfp-stat-v">{stats.total_km >= 1000 ? `${(stats.total_km / 1000).toFixed(1)}k` : stats.total_km}</span>
-                <span className="mfp-stat-unit">KM TOTAL</span>
-            </div>
-            <div className="mfp-stat">
-                <span className="mfp-stat-label">AIRPORTS</span>
-                <span className="mfp-stat-v">{stats.total_airports}</span>
-                <span className="mfp-stat-unit">VISITED</span>
-            </div>
-            <div className="mfp-stat mfp-stat-cta">
-                <span className="mfp-stat-label">DETAILS</span>
-                <span className="mfp-stat-v">→</span>
-            </div>
-        </div>
-    );
-}
-
-// ── 子元件：詳細統計儀表板 ────────────────────────────────────────────────────
+// ── 統計儀表板 ────────────────────────────────────────────────────────────────
 function StatsDashboard({ stats, onBack }) {
     if (!stats) return null;
     const maxAc = stats.top_aircraft?.[0]?.count || 1;
     const maxRt = stats.top_routes?.[0]?.count || 1;
     return (
-        <div className="mfp-stats-dashboard">
-            <div className="mfp-dash-back" onClick={onBack}>← 返回航班記錄</div>
+        <div className="sd-wrap">
+            <button className="sd-back" onClick={onBack}>
+                <ChevronLeft size={16} /> 返回航班記錄
+            </button>
+            <h1 className="sd-hero">FLIGHT<br /><span className="sd-hero-gold">METRICS</span></h1>
 
-            {/* 大數字摘要 */}
-            <div className="mfp-dash-summary">
-                <div className="mfp-dash-num">
-                    <span className="mfp-dash-big">{stats.total_flights}</span>
-                    <span className="mfp-dash-lbl">SECTORS</span>
+            {/* Big 3 cards */}
+            <div className="sd-summary">
+                <div className="sd-card">
+                    <span className="sd-card-num">01</span>
+                    <div className="sd-card-label">Sectors flown</div>
+                    <div className="sd-card-big">{stats.total_flights ?? '—'}</div>
                 </div>
-                <div className="mfp-dash-num">
-                    <span className="mfp-dash-big">
-                        {stats.total_km >= 1000
-                            ? `${(stats.total_km / 1000).toFixed(1)}k`
-                            : stats.total_km}
-                    </span>
-                    <span className="mfp-dash-lbl">KM FLOWN</span>
+                <div className="sd-card">
+                    <span className="sd-card-num">02</span>
+                    <div className="sd-card-label">Distance · km</div>
+                    <div className="sd-card-big">
+                        {stats.total_km >= 1000 ? `${(stats.total_km / 1000).toFixed(1)}k` : (stats.total_km ?? '—')}
+                    </div>
                 </div>
-                <div className="mfp-dash-num">
-                    <span className="mfp-dash-big">{stats.total_airports}</span>
-                    <span className="mfp-dash-lbl">AIRPORTS</span>
+                <div className="sd-card">
+                    <span className="sd-card-num">03</span>
+                    <div className="sd-card-label">Airports visited</div>
+                    <div className="sd-card-big">{stats.total_airports ?? '—'}</div>
                 </div>
             </div>
 
-            {/* 最常搭機型 */}
-            {stats.top_aircraft?.length > 0 && (
-                <div className="mfp-dash-section">
-                    <div className="mfp-dash-section-title">▸ TOP AIRCRAFT TYPES</div>
-                    {stats.top_aircraft.map(({ type, count }) => (
-                        <div key={type} className="mfp-dash-bar-row">
-                            <span className="mfp-dash-bar-label">{type}</span>
-                            <div className="mfp-dash-bar-track">
-                                <div className="mfp-dash-bar-fill" style={{ width: `${(count / maxAc) * 100}%` }} />
-                            </div>
-                            <span className="mfp-dash-bar-count">{count}</span>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {/* 最常飛航線 */}
-            {stats.top_routes?.length > 0 && (
-                <div className="mfp-dash-section">
-                    <div className="mfp-dash-section-title">▸ TOP ROUTES</div>
-                    {stats.top_routes.map(({ route, count }) => {
-                        const [dep, arr] = route.split('-');
-                        return (
-                            <div key={route} className="mfp-dash-bar-row">
-                                <span className="mfp-dash-bar-label route-label">
-                                    {dep} <span className="mfp-dash-arrow">→</span> {arr}
-                                </span>
-                                <div className="mfp-dash-bar-track">
-                                    <div className="mfp-dash-bar-fill" style={{ width: `${(count / maxRt) * 100}%` }} />
+            <div className="sd-grid">
+                <div className="sd-col">
+                    {stats.top_aircraft?.length > 0 && (
+                        <section className="sd-section">
+                            <div className="sd-section-title">Top aircraft types</div>
+                            {stats.top_aircraft.map(({ type, count }) => (
+                                <div key={type} className="sd-bar-row">
+                                    <div className="sd-bar-label">{type}</div>
+                                    <div className="sd-bar-track">
+                                        <div className="sd-bar-fill" style={{ width: `${(count / maxAc) * 100}%` }} />
+                                    </div>
+                                    <div className="sd-bar-count">{count}</div>
                                 </div>
-                                <span className="mfp-dash-bar-count">{count}</span>
-                            </div>
-                        );
-                    })}
+                            ))}
+                        </section>
+                    )}
+                    {stats.top_routes?.length > 0 && (
+                        <section className="sd-section">
+                            <div className="sd-section-title">Top routes</div>
+                            {stats.top_routes.map(({ route, count }) => {
+                                const [dep, arr] = route.split('-');
+                                return (
+                                    <div key={route} className="sd-bar-row sd-route-row">
+                                        <div className="sd-bar-label">
+                                            {dep} <ArrowRight size={10} className="sd-arrow" /> {arr}
+                                        </div>
+                                        <div className="sd-bar-track">
+                                            <div className="sd-bar-fill" style={{ width: `${(count / maxRt) * 100}%` }} />
+                                        </div>
+                                        <div className="sd-bar-count">{count}</div>
+                                    </div>
+                                );
+                            })}
+                        </section>
+                    )}
                 </div>
-            )}
 
-            {/* 最近 5 筆 */}
-            {stats.recent?.length > 0 && (
-                <div className="mfp-dash-section">
-                    <div className="mfp-dash-section-title">▸ RECENT FLIGHTS</div>
-                    {stats.recent.map(f => (
-                        <div key={f.id} className="mfp-dash-recent-row">
-                            <span className="mfp-iata small">{f.dep_icao || '??'}</span>
-                            <Plane size={9} style={{ opacity: 0.5 }} />
-                            <span className="mfp-iata small">{f.arr_icao || '??'}</span>
-                            {f.flight_number && <span className="mfp-tag small">{f.flight_number}</span>}
-                            <span className="mfp-date small">{f.flight_date}</span>
-                        </div>
-                    ))}
-                </div>
-            )}
+                {stats.recent?.length > 0 && (
+                    <div className="sd-col">
+                        <section className="sd-section">
+                            <div className="sd-section-title">Recent flights</div>
+                            <div className="sd-recent-list">
+                                {stats.recent.map(f => (
+                                    <div key={f.id} className="sd-recent-row">
+                                        <div className="sd-recent-route">
+                                            <span className="sd-recent-iata">{f.dep_icao || '??'}</span>
+                                            <Plane size={10} className="sd-recent-plane" />
+                                            <span className="sd-recent-iata">{f.arr_icao || '??'}</span>
+                                        </div>
+                                        {f.flight_number && (
+                                            <div className="sd-recent-tag">{f.flight_number}</div>
+                                        )}
+                                        <div className="sd-recent-date">{f.flight_date}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
 
-// ── 子元件：航班列表行（登機證卡片 v3）───────────────────────────────────────
+// ── 航班列表卡（登機證 v4 — Stitch design）────────────────────────────────────
 function FlightRow({ flight, onEdit, onDelete }) {
-    const classMap = {
-        '頭等艙': 'FIRST', '商務艙': 'BUSINESS', '豪華經濟艙': 'PREM ECO', '經濟艙': 'ECONOMY',
-        'first': 'FIRST', 'business': 'BUSINESS', 'premium_economy': 'PREM ECO', 'economy': 'ECONOMY',
-    };
-    const classLabel = classMap[flight.seat_class] || (flight.seat_class ? flight.seat_class.toUpperCase() : null);
+    const classLabel = CLASS_MAP[flight.seat_class] || (flight.seat_class ? flight.seat_class.toUpperCase() : null);
     const hasDetails = flight.aircraft_type || classLabel || flight.seat_number || flight.registration;
-
     return (
-        <div className="fhr-card">
-            {/* ── Top bar: brand / flight / date / actions ── */}
-            <div className="fhr-topbar">
-                <div className="fhr-brand">
-                    <Plane size={9} />
+        <div className="fc-card">
+            {/* Top bar */}
+            <div className="fc-top">
+                <div className="fc-brand">
+                    <Plane size={9} style={{ transform: 'rotate(90deg)' }} />
                     AEROSTRAT
                 </div>
-                {flight.flight_number && (
-                    <div className="fhr-fn">{flight.flight_number}</div>
-                )}
-                <div className="fhr-date">{flight.flight_date}</div>
-                <div className="fhr-actions">
-                    <button className="fhr-btn" onClick={() => onEdit(flight)}>
-                        <Pencil size={11} /> EDIT
+                {flight.flight_number && <div className="fc-fn">{flight.flight_number}</div>}
+                <div className="fc-date">{flight.flight_date}</div>
+                <div className="fc-actions">
+                    <button className="fc-btn" onClick={() => onEdit(flight)} title="Edit">
+                        <Pencil size={12} />
                     </button>
-                    <button className="fhr-btn fhr-btn-danger" onClick={() => onDelete(flight.id)}>
-                        <Trash2 size={11} />
+                    <button className="fc-btn fc-btn-del" onClick={() => onDelete(flight.id)} title="Delete">
+                        <Trash2 size={12} />
                     </button>
                 </div>
             </div>
 
-            {/* ── Route ── */}
-            <div className="fhr-route">
-                <div className="fhr-apt-block">
-                    <div className="fhr-iata">{flight.dep_icao || '——'}</div>
-                    {flight.dep_time && <div className="fhr-time">{flight.dep_time}</div>}
+            {/* Route */}
+            <div className="fc-route">
+                <div className="fc-apt">
+                    <div className="fc-iata">{flight.dep_icao || '——'}</div>
+                    {flight.dep_time && <div className="fc-time">{flight.dep_time} · Depart</div>}
                 </div>
-                <div className="fhr-route-mid">
-                    <div className="fhr-route-line">
-                        <div className="fhr-rdot" />
-                        <div className="fhr-rdash" />
-                        <Plane size={16} style={{ transform: 'rotate(90deg)', color: '#c4a260', flexShrink: 0 }} />
-                        <div className="fhr-rdash" />
-                        <div className="fhr-rdot" />
+                <div className="fc-mid">
+                    <div className="fc-mid-line" />
+                    <div className="fc-mid-plane">
+                        <Plane size={20} style={{ transform: 'rotate(90deg)', color: '#e6c27c' }} />
                     </div>
+                    <div className="fc-mid-line" />
                 </div>
-                <div className="fhr-apt-block fhr-apt-r">
-                    <div className="fhr-iata">{flight.arr_icao || '——'}</div>
-                    {flight.arr_time && <div className="fhr-time fhr-time-r">{flight.arr_time}</div>}
+                <div className="fc-apt fc-apt-r">
+                    <div className="fc-iata">{flight.arr_icao || '——'}</div>
+                    {flight.arr_time && <div className="fc-time fc-time-r">{flight.arr_time} · Arrive</div>}
                 </div>
             </div>
 
-            {/* ── Detail strip (only if there is data) ── */}
+            {/* Tear line */}
+            <div className="fc-tear">
+                <div className="fc-notch fc-notch-l" />
+                <div className="fc-tear-line" />
+                <div className="fc-notch fc-notch-r" />
+            </div>
+
+            {/* Details */}
             {hasDetails && (
-                <div className="fhr-details">
+                <div className="fc-details">
                     {flight.aircraft_type && (
-                        <div className="fhr-detail-item">
-                            <div className="fhr-dl">A/C</div>
-                            <div className="fhr-dv">{flight.aircraft_type}</div>
+                        <div className="fc-detail">
+                            <div className="fc-dl">Aircraft</div>
+                            <div className="fc-dv">{flight.aircraft_type}</div>
                         </div>
                     )}
                     {classLabel && (
-                        <div className="fhr-detail-item">
-                            <div className="fhr-dl">CLASS</div>
-                            <div className="fhr-dv">{classLabel}</div>
+                        <div className="fc-detail">
+                            <div className="fc-dl">Class</div>
+                            <div className="fc-dv">{classLabel}</div>
                         </div>
                     )}
                     {flight.seat_number && (
-                        <div className="fhr-detail-item">
-                            <div className="fhr-dl">SEAT</div>
-                            <div className="fhr-dv fhr-dv-seat">{flight.seat_number}</div>
+                        <div className="fc-detail">
+                            <div className="fc-dl">Seat</div>
+                            <div className="fc-dv fc-dv-seat">{flight.seat_number}</div>
                         </div>
                     )}
                     {flight.registration && (
-                        <div className="fhr-detail-item">
-                            <div className="fhr-dl">REG</div>
-                            <div className="fhr-dv">{flight.registration}</div>
+                        <div className="fc-detail">
+                            <div className="fc-dl">Registration</div>
+                            <div className="fc-dv">{flight.registration}</div>
                         </div>
                     )}
                 </div>
             )}
-
-            {/* ── Notes ── */}
-            {flight.notes && (
-                <div className="fhr-notes">{flight.notes}</div>
-            )}
+            {flight.notes && <div className="fc-notes">{flight.notes}</div>}
         </div>
     );
 }
 
-// ── 子元件：新增 / 編輯表單（登機證風格）──────────────────────────────────────
+// ── 新增 / 編輯表單（橫向登機證 — Stitch design）────────────────────────────
 function FlightForm({ initial, prefill, onSave, onCancel }) {
     const [form, setForm] = useState(() => ({
         ...EMPTY_FORM,
         ...(initial || {}),
-        ...(prefill  || {}),
-        // editing: keep existing date; new: today
+        ...(prefill || {}),
         flight_date: initial?.flight_date || prefill?.flight_date || todayStr(),
     }));
-    const [loading, setLoading]   = useState(false);
-    const [error, setError]       = useState('');
-    const [csLooking, setCsLooking] = useState(false);  // callsign lookup spinner
-    const [enriching, setEnriching] = useState(false);  // auto-enrich spinner
-    const [depHint, setDepHint]   = useState('');
-    const [arrHint, setArrHint]   = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [csLooking, setCsLooking] = useState(false);
+    const [enriching, setEnriching] = useState(false);
+    const [depHint, setDepHint] = useState('');
+    const [arrHint, setArrHint] = useState('');
     const csTimerRef = useRef(null);
     const enrichedRef = useRef(false);
 
     const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-    // ── 自動補全：當有 icao24+callsign 時呼叫 complete-details ─────────────────
     useEffect(() => {
-        if (enrichedRef.current) return;  // only once
-        if (initial?.id) return;           // 編輯模式不自動填
+        if (enrichedRef.current || initial?.id) return;
         const hex = prefill?.icao24;
-        const cs  = prefill?.callsign;
+        const cs = prefill?.callsign;
         if (!hex || !cs) return;
         enrichedRef.current = true;
         setEnriching(true);
@@ -279,7 +252,6 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
             .finally(() => setEnriching(false));
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // ── 航班號自動查詢（debounce 600ms）────────────────────────────────────────
     function handleFlightNumberChange(val) {
         set('flight_number', val);
         if (csTimerRef.current) clearTimeout(csTimerRef.current);
@@ -303,7 +275,6 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
         }, 600);
     }
 
-    // ── 機場代碼查詢（輸入滿 3 碼 IATA 或 4 碼 ICAO）─────────────────────────
     async function handleAirportBlur(field, val) {
         const code = val.toUpperCase().trim();
         if (code.length < 3 || code.length > 4) return;
@@ -315,12 +286,10 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
 
     async function handleSubmit(e) {
         e.preventDefault();
-        if (!form.flight_date) { setError('FLIGHT DATE REQUIRED'); return; }
+        if (!form.flight_date) { setError('Flight date is required'); return; }
         setLoading(true); setError('');
         try {
-            const payload = Object.fromEntries(
-                Object.entries(form).filter(([, v]) => v !== '')
-            );
+            const payload = Object.fromEntries(Object.entries(form).filter(([, v]) => v !== ''));
             await onSave(payload);
         } catch (err) {
             setError(err.message);
@@ -329,168 +298,175 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
         }
     }
 
-    // ── 共用欄位 JSX ────────────────────────────────────────────────────────────
-    const routeSection = (
-        <>
-            <div className="bpf-hcard-apt">
-                <div className="bpf-apt-lbl">FROM</div>
-                <input className="bpf-h-iata" placeholder="TPE" maxLength={4}
-                    value={form.dep_icao}
-                    onChange={e => { set('dep_icao', e.target.value.toUpperCase()); setDepHint(''); }}
-                    onBlur={e => handleAirportBlur('dep', e.target.value)} />
-                {depHint
-                    ? <div className="bpf-apt-hint">{depHint}</div>
-                    : <input type="time" className="bpf-h-time" value={form.dep_time} onChange={e => set('dep_time', e.target.value)} />}
-            </div>
-            <div className="bpf-hcard-route-mid">
-                <div className="bpf-route-vis">
-                    <div className="bpf-rdot" />
-                    <div className="bpf-rdash" />
-                    <Plane size={16} style={{ transform: 'rotate(90deg)', color: 'rgba(26,39,68,0.35)', flexShrink: 0 }} />
-                    <div className="bpf-rdash" />
-                    <div className="bpf-rdot" />
-                </div>
-                <div className="bpf-flt-wrap">
-                    <input className="bpf-flt" placeholder="CI101"
-                        value={form.flight_number}
-                        onChange={e => handleFlightNumberChange(e.target.value)} />
-                    {csLooking && <Loader size={10} className="bpf-spin" />}
-                </div>
-            </div>
-            <div className="bpf-hcard-apt bpf-hcard-apt-r">
-                <div className="bpf-apt-lbl bpf-apt-lbl-r">TO</div>
-                <input className="bpf-h-iata bpf-h-iata-r" placeholder="HKG" maxLength={4}
-                    value={form.arr_icao}
-                    onChange={e => { set('arr_icao', e.target.value.toUpperCase()); setArrHint(''); }}
-                    onBlur={e => handleAirportBlur('arr', e.target.value)} />
-                {arrHint
-                    ? <div className="bpf-apt-hint bpf-apt-hint-r">{arrHint}</div>
-                    : <input type="time" className="bpf-h-time bpf-h-time-r" value={form.arr_time} onChange={e => set('arr_time', e.target.value)} />}
-            </div>
-        </>
-    );
-
-    const detailsGrid = (
-        <div className="bpf-grid">
-            <div className="bpf-cell">
-                <div className="bpf-cl">DATE</div>
-                <input type="date" className="bpf-cv" required value={form.flight_date} onChange={e => set('flight_date', e.target.value)} />
-            </div>
-            <div className="bpf-cell">
-                <div className="bpf-cl">AIRCRAFT</div>
-                <input className="bpf-cv" placeholder="A333" value={form.aircraft_type} onChange={e => set('aircraft_type', e.target.value.toUpperCase())} />
-            </div>
-            <div className="bpf-cell bpf-cell-end">
-                <div className="bpf-cl">CLASS</div>
-                <select className="bpf-cv" value={form.seat_class} onChange={e => set('seat_class', e.target.value)}>
-                    <option value="">—</option>
-                    {SEAT_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-            </div>
-            <div className="bpf-cell bpf-cell-r2">
-                <div className="bpf-cl">REGISTRATION</div>
-                <input className="bpf-cv" placeholder="B-18805" value={form.registration} onChange={e => set('registration', e.target.value.toUpperCase())} />
-            </div>
-            <div className="bpf-cell bpf-cell-r2">
-                <div className="bpf-cl">SEAT</div>
-                <input className="bpf-cv" placeholder="32A" value={form.seat_number} onChange={e => set('seat_number', e.target.value)} />
-            </div>
-            <div className="bpf-cell bpf-cell-r2 bpf-cell-end">
-                <div className="bpf-cl">CALLSIGN</div>
-                <input className="bpf-cv" placeholder="CI101" value={form.callsign} onChange={e => set('callsign', e.target.value.toUpperCase())} />
-            </div>
-        </div>
-    );
-
     const passengerName = authStore.getUser?.()?.username?.toUpperCase() || '—';
 
-    const headerBlock = (
-        <div className="bpf-header">
-            <div className="bpf-logo">
-                <Plane size={18} />
-                <div>
-                    <div className="bpf-logo-name">AEROSTRAT</div>
-                    <div className="bpf-logo-sub">FLIGHT RECORD</div>
-                </div>
-            </div>
-            <div className="bpf-header-right">
-                {enriching && (
-                    <span className="bpf-enrich-badge">
-                        <Loader size={9} className="bpf-spin" /> AUTO-FILL
-                    </span>
-                )}
-                <span className="bpf-bp-label">BOARDING PASS</span>
-            </div>
-        </div>
-    );
-
-    const passengerRow = (
-        <div className="bpf-passenger-row">
-            <div className="bpf-passenger-col">
-                <div className="bpf-passenger-label">PASSENGER NAME</div>
-                <div className="bpf-passenger-name">{passengerName}</div>
-            </div>
-            <div className="bpf-passenger-col bpf-passenger-col-r">
-                <div className="bpf-passenger-label">FLIGHT DATE</div>
-                <div className="bpf-passenger-date">{form.flight_date || '—'}</div>
-            </div>
-        </div>
-    );
-
-    // ── 橫向登機證（全頁模式） ─────────────────────────────────────────────────
     return (
-        <div className="bpf-hwrapper">
-            <form className="bpf-hcard" onSubmit={handleSubmit}>
+        <div className="bf-wrap">
+            <form className="bf-card" onSubmit={handleSubmit}>
 
-                {/* ── Main section ── */}
-                <div className="bpf-hcard-main">
-                    {headerBlock}
-                    {passengerRow}
-                    <div className="bpf-hcard-body">
-                        <div className="bpf-hcard-route">{routeSection}</div>
-                        <div className="bpf-hcard-vdivider" />
-                        <div className="bpf-hcard-details">{detailsGrid}</div>
+                {/* LEFT: main ticket */}
+                <div className="bf-main">
+                    {/* Header */}
+                    <div className="bf-header">
+                        <div className="bf-logo">
+                            <Plane size={20} />
+                            <span className="bf-logo-name">AEROSTRAT</span>
+                        </div>
+                        <div className="bf-header-right">
+                            {enriching && (
+                                <span className="bf-enrich">
+                                    <Loader size={9} className="bf-spin" /> Auto-filling
+                                </span>
+                            )}
+                            <span className="bf-bp-label">Boarding pass</span>
+                        </div>
+                    </div>
+
+                    {/* Passenger row */}
+                    <div className="bf-pax">
+                        <div className="bf-pax-col">
+                            <div className="bf-pax-lbl">Passenger</div>
+                            <div className="bf-pax-name">{passengerName}</div>
+                        </div>
+                        <div className="bf-pax-col bf-pax-col-r">
+                            <div className="bf-pax-lbl">Flight date</div>
+                            <div className="bf-pax-date">{form.flight_date || '—'}</div>
+                        </div>
+                    </div>
+
+                    {/* Route */}
+                    <div className="bf-route">
+                        <div className="bf-apt-col">
+                            <div className="bf-apt-lbl">From</div>
+                            <input
+                                className="bf-iata"
+                                placeholder="TPE"
+                                maxLength={4}
+                                value={form.dep_icao}
+                                onChange={e => { set('dep_icao', e.target.value.toUpperCase()); setDepHint(''); }}
+                                onBlur={e => handleAirportBlur('dep', e.target.value)}
+                            />
+                            {depHint
+                                ? <div className="bf-apt-hint">{depHint}</div>
+                                : <input type="time" className="bf-time" value={form.dep_time} onChange={e => set('dep_time', e.target.value)} />
+                            }
+                        </div>
+                        <div className="bf-route-mid">
+                            <div className="bf-route-line-wrap">
+                                <div className="bf-rdash" />
+                                <div className="bf-rplane">
+                                    <Plane size={22} style={{ transform: 'rotate(90deg)', color: '#c4a260' }} />
+                                </div>
+                                <div className="bf-rdash" />
+                            </div>
+                            <div className="bf-fn-wrap">
+                                <input
+                                    className="bf-fn"
+                                    placeholder="CI101"
+                                    value={form.flight_number}
+                                    onChange={e => handleFlightNumberChange(e.target.value)}
+                                />
+                                {csLooking && <Loader size={10} className="bf-spin" />}
+                            </div>
+                        </div>
+                        <div className="bf-apt-col bf-apt-col-r">
+                            <div className="bf-apt-lbl bf-apt-lbl-r">To</div>
+                            <input
+                                className="bf-iata bf-iata-r"
+                                placeholder="HKG"
+                                maxLength={4}
+                                value={form.arr_icao}
+                                onChange={e => { set('arr_icao', e.target.value.toUpperCase()); setArrHint(''); }}
+                                onBlur={e => handleAirportBlur('arr', e.target.value)}
+                            />
+                            {arrHint
+                                ? <div className="bf-apt-hint bf-apt-hint-r">{arrHint}</div>
+                                : <input type="time" className="bf-time bf-time-r" value={form.arr_time} onChange={e => set('arr_time', e.target.value)} />
+                            }
+                        </div>
+                    </div>
+
+                    {/* 3×2 grid */}
+                    <div className="bf-grid">
+                        <div className="bf-cell">
+                            <div className="bf-cl">Date</div>
+                            <input type="date" className="bf-cv" required value={form.flight_date} onChange={e => set('flight_date', e.target.value)} />
+                        </div>
+                        <div className="bf-cell">
+                            <div className="bf-cl">Aircraft</div>
+                            <input className="bf-cv" placeholder="A350" value={form.aircraft_type} onChange={e => set('aircraft_type', e.target.value.toUpperCase())} />
+                        </div>
+                        <div className="bf-cell">
+                            <div className="bf-cl">Class</div>
+                            <select className="bf-cv" value={form.seat_class} onChange={e => set('seat_class', e.target.value)}>
+                                <option value="">—</option>
+                                {SEAT_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        </div>
+                        <div className="bf-cell">
+                            <div className="bf-cl">Registration</div>
+                            <input className="bf-cv" placeholder="B-18805" value={form.registration} onChange={e => set('registration', e.target.value.toUpperCase())} />
+                        </div>
+                        <div className="bf-cell">
+                            <div className="bf-cl">Seat</div>
+                            <input className="bf-cv" placeholder="12A" value={form.seat_number} onChange={e => set('seat_number', e.target.value)} />
+                        </div>
+                        <div className="bf-cell">
+                            <div className="bf-cl">Callsign</div>
+                            <input className="bf-cv" placeholder="CI101" value={form.callsign} onChange={e => set('callsign', e.target.value.toUpperCase())} />
+                        </div>
                     </div>
                 </div>
 
-                {/* ── Vertical tear ── */}
-                <div className="bpf-htear">
-                    <div className="bpf-htear-line" />
+                {/* VERTICAL TEAR */}
+                <div className="bf-vtear">
+                    <div className="bf-vnotch bf-vnotch-t" />
+                    <div className="bf-vtear-line" />
+                    <div className="bf-vnotch bf-vnotch-b" />
                 </div>
 
-                {/* ── Stub ── */}
-                <div className="bpf-hstub">
-                    <div className="bpf-stub-summary">
-                        <div className="bpf-stub-row">
-                            <div className="bpf-cl">FLIGHT</div>
-                            <div className="bpf-stub-val">{form.flight_number || '—'}</div>
+                {/* RIGHT STUB */}
+                <div className="bf-stub">
+                    <div className="bf-stub-body">
+                        <div className="bf-stub-row">
+                            <div className="bf-cl">Flight</div>
+                            <div className="bf-stub-val">{form.flight_number || '—'}</div>
                         </div>
-                        <div className="bpf-stub-row">
-                            <div className="bpf-cl">SEAT</div>
-                            <div className="bpf-stub-val bpf-stub-seat">{form.seat_number || '—'}</div>
+                        <div className="bf-stub-seat-row">
+                            <div>
+                                <div className="bf-cl">Seat</div>
+                                <div className="bf-stub-seat">{form.seat_number || '—'}</div>
+                            </div>
+                            <div className="bf-stub-class-col">
+                                <div className="bf-cl">Class</div>
+                                <div className="bf-stub-val">{CLASS_MAP[form.seat_class] || form.seat_class || '—'}</div>
+                            </div>
                         </div>
-                        <div className="bpf-stub-row">
-                            <div className="bpf-cl">CLASS</div>
-                            <div className="bpf-stub-val">{form.seat_class || '—'}</div>
-                        </div>
+                        <div className="bf-stub-divider" />
+                        <div className="bf-cl" style={{ marginBottom: 6 }}>Notes</div>
+                        <textarea
+                            className="bf-notes"
+                            placeholder="A few words about this flight…"
+                            rows={4}
+                            value={form.notes}
+                            onChange={e => set('notes', e.target.value)}
+                        />
+                        {error && (
+                            <div className="bf-error"><AlertCircle size={11} /> {error}</div>
+                        )}
                     </div>
-                    <div className="bpf-stub-divider" />
-                    <div className="bpf-stub-field">
-                        <div className="bpf-cl">REMARKS</div>
-                        <textarea className="bpf-notes bpf-notes-h" placeholder="Window seat, delay, turbulence..."
-                            rows={3} value={form.notes} onChange={e => set('notes', e.target.value)} />
-                    </div>
-                    {error && (
-                        <div className="bpf-error"><AlertCircle size={11} /> {error}</div>
-                    )}
-                    <div className="bpf-actions">
-                        <button type="button" className="bpf-btn bpf-cancel" onClick={onCancel}>CANCEL</button>
-                        <button type="submit" className="bpf-btn bpf-submit" disabled={loading}>
-                            {loading ? '● SAVING...' : initial?.id ? '▶ UPDATE' : '▶ LOG FLIGHT'}
+                    <div className="bf-stub-footer">
+                        <button
+                            type="submit"
+                            className="bf-btn-submit"
+                            disabled={loading}
+                        >
+                            {loading ? 'Saving…' : initial?.id ? 'Update flight' : 'Log this flight'}
                         </button>
-                    </div>
-                    <div className="bpf-barcode" aria-hidden="true">
-                        {BARCODE.map((h, i) => <span key={i} style={{ height: h + 'px' }} />)}
+                        <button type="button" className="bf-btn-cancel" onClick={onCancel}>Cancel</button>
+                        <div className="bf-barcode" aria-hidden="true">
+                            {BARCODE.map((h, i) => <span key={i} style={{ height: h + 'px' }} />)}
+                        </div>
                     </div>
                 </div>
 
@@ -500,23 +476,18 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
 }
 
 // ── 主元件 ────────────────────────────────────────────────────────────────────
-// mode: 'modal' (預設，overlay 彈窗) | 'page' (全頁，取代主畫面)
 export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView = 'list', mode = 'modal' }) {
-    const [view, setView]         = useState(initialView);   // 'list' | 'form' | 'stats'
-    const [formFromList, setFormFromList] = useState(initialView !== 'form'); // true = navigated from list
+    const [view, setView]         = useState(initialView);
     const [flights, setFlights]   = useState([]);
     const [total, setTotal]       = useState(0);
     const [page, setPage]         = useState(1);
     const [stats, setStats]       = useState(null);
-    const [editTarget, setEditTarget] = useState(null); // flight obj or null
+    const [editTarget, setEditTarget] = useState(null);
     const [loading, setLoading]   = useState(false);
     const [toast, setToast]       = useState('');
     const LIMIT = 20;
 
-    const showToast = (msg) => {
-        setToast(msg);
-        setTimeout(() => setToast(''), 2500);
-    };
+    const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 2500); };
 
     const loadFlights = useCallback(async (p = 1) => {
         setLoading(true);
@@ -525,33 +496,19 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
             setFlights(data.flights);
             setTotal(data.total);
             setPage(p);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
+        } catch (e) { console.error(e); }
+        finally { setLoading(false); }
     }, []);
 
     const loadStats = useCallback(async () => {
-        try {
-            const s = await apiFlightStats();
-            setStats(s);
-        } catch (_) {}
+        try { setStats(await apiFlightStats()); } catch (_) {}
     }, []);
 
-    useEffect(() => {
-        loadFlights(1);
-        loadStats();
-    }, [loadFlights, loadStats]);
+    useEffect(() => { loadFlights(1); loadStats(); }, [loadFlights, loadStats]);
 
     async function handleSave(payload) {
-        if (editTarget?.id) {
-            await apiUpdateFlight(editTarget.id, payload);
-            showToast('已更新');
-        } else {
-            await apiCreateFlight(payload);
-            showToast('已新增');
-        }
+        if (editTarget?.id) { await apiUpdateFlight(editTarget.id, payload); showToast('已更新'); }
+        else { await apiCreateFlight(payload); showToast('已新增'); }
         setView('list');
         setEditTarget(null);
         loadFlights(page);
@@ -567,151 +524,167 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
     }
 
     const totalPages = Math.max(1, Math.ceil(total / LIMIT));
+    const goBack = () => { setView('list'); setEditTarget(null); };
 
-    // ── 表單全頁（優先渲染，覆蓋整個畫面）───────────────────────────────────────
+    // ── 全頁表單 ──────────────────────────────────────────────────────────────
     if (view === 'form') {
         return (
             <>
-                <div className="mfp-form-fullpage">
-                    <div className="mfp-form-fullpage-bar">
-                        <button className="mfp-form-fullpage-back"
-                            onClick={() => { setView('list'); setEditTarget(null); }}>
+                <div className="mfp-fullpage">
+                    <div className="mfp-fp-bar">
+                        <button className="mfp-fp-back" onClick={goBack}>
                             <ChevronLeft size={15} /> BACK
                         </button>
-                        <div className="mfp-form-fullpage-title">
-                            <Plane size={13} />
-                            {editTarget ? 'EDIT FLIGHT' : 'LOG FLIGHT'}
+                        <div className="mfp-fp-title">
+                            <Plane size={14} />
+                            {editTarget ? 'Edit flight' : 'Log a flight'}
                         </div>
-                        <div className="mfp-form-fullpage-spacer" />
+                        <div className="mfp-fp-spacer" />
                     </div>
-                    <div className="mfp-form-fullpage-body">
+                    <div className="mfp-fp-body">
                         <FlightForm
                             initial={editTarget}
                             prefill={!editTarget && prefillFromPlane ? prefillFromPlane : undefined}
                             onSave={handleSave}
-                            onCancel={() => {
-                                if (formFromList) { setView('list'); setEditTarget(null); }
-                                else { onClose(); }
-                            }}
+                            onCancel={goBack}
                         />
                     </div>
                 </div>
-                {toast && <div className="mfp-toast"><CheckCircle size={11} /> {toast.toUpperCase()}</div>}
+                {toast && <div className="mfp-toast"><CheckCircle size={11} /> {toast}</div>}
             </>
         );
     }
 
-    // ── 共用內容區（list / stats）────────────────────────────────────────────────
-    const content = (
-        <>
-            {/* Stats bar */}
-            {view === 'list' && <StatsBar stats={stats} onShowStats={() => setView('stats')} />}
+    // ── 共用：stats strip ────────────────────────────────────────────────────
+    const statsStrip = (
+        <div className="mfp-stats-strip" onClick={() => setView('stats')}>
+            <div className="mfp-stat-cell">
+                <div className="mfp-stat-label">Flights</div>
+                <div className="mfp-stat-big">{stats?.total_flights ?? '—'}</div>
+                <div className="mfp-stat-unit">sectors</div>
+            </div>
+            <div className="mfp-stat-cell">
+                <div className="mfp-stat-label">Distance</div>
+                <div className="mfp-stat-big">
+                    {stats?.total_km != null
+                        ? (stats.total_km >= 1000 ? `${(stats.total_km / 1000).toFixed(1)}k` : stats.total_km)
+                        : '—'}
+                </div>
+                <div className="mfp-stat-unit">km</div>
+            </div>
+            <div className="mfp-stat-cell mfp-stat-cta">
+                <div className="mfp-stat-label">Airports</div>
+                <div className="mfp-stat-big">{stats?.total_airports ?? '—'}</div>
+                <div className="mfp-stat-unit">→ Details</div>
+            </div>
+        </div>
+    );
 
-            {/* 智慧帶入提示 */}
-            {view === 'list' && prefillFromPlane && (
-                <div className="mfp-prefill-hint" onClick={() => { setEditTarget(null); setFormFromList(true); setView('form'); }}>
+    // ── 共用：list content ────────────────────────────────────────────────────
+    const listContent = (
+        <>
+            {prefillFromPlane && view === 'list' && (
+                <div className="mfp-prefill" onClick={() => { setEditTarget(null); setView('form'); }}>
                     <CheckCircle size={13} />
                     點此記錄當前選取的飛機 <strong>{prefillFromPlane.callsign || prefillFromPlane.icao24}</strong>
                 </div>
             )}
-
             {view === 'stats' ? (
-                <div className="mfp-form-wrapper">
-                    <StatsDashboard stats={stats} onBack={() => setView('list')} />
-                </div>
+                <StatsDashboard stats={stats} onBack={goBack} />
             ) : (
-                <div className="mfp-list-wrapper">
-                    {loading && <div className="mfp-loading">載入中…</div>}
+                <div className="mfp-list">
+                    {loading && <div className="mfp-loading">Loading…</div>}
                     {!loading && flights.length === 0 && (
                         <div className="mfp-empty">
-                            <Plane size={28} style={{ opacity: 0.4 }} />
-                            <p>NO FLIGHT RECORDS FOUND</p>
-                            <button className="mfp-btn primary" onClick={() => { setFormFromList(true); setView('form'); }}>▶ LOG FIRST FLIGHT</button>
+                            <Plane size={32} style={{ opacity: 0.3 }} />
+                            <p>No flights logged yet</p>
+                            <button className="mfp-log-btn" onClick={() => { setEditTarget(null); setView('form'); }}>
+                                Log your first flight
+                            </button>
                         </div>
                     )}
                     {flights.map(f => (
                         <FlightRow
                             key={f.id}
                             flight={f}
-                            onEdit={(fl) => { setEditTarget(fl); setFormFromList(true); setView('form'); }}
+                            onEdit={fl => { setEditTarget(fl); setView('form'); }}
                             onDelete={handleDelete}
                         />
                     ))}
                     {totalPages > 1 && (
                         <div className="mfp-pagination">
-                            <button className="mfp-icon-btn" disabled={page <= 1} onClick={() => loadFlights(page - 1)}><ChevronLeft size={14} /></button>
-                            <span>{page} / {totalPages}</span>
-                            <button className="mfp-icon-btn" disabled={page >= totalPages} onClick={() => loadFlights(page + 1)}><ChevronRight size={14} /></button>
+                            <button className="mfp-page-btn" disabled={page <= 1} onClick={() => loadFlights(page - 1)}>
+                                <ChevronLeft size={14} />
+                            </button>
+                            <span className="mfp-page-info">{page} / {totalPages}</span>
+                            <button className="mfp-page-btn" disabled={page >= totalPages} onClick={() => loadFlights(page + 1)}>
+                                <ChevronRight size={14} />
+                            </button>
                         </div>
                     )}
                 </div>
             )}
-
-            {toast && <div className="mfp-toast"><CheckCircle size={11} /> {toast.toUpperCase()}</div>}
+            {toast && <div className="mfp-toast"><CheckCircle size={11} /> {toast}</div>}
         </>
     );
 
-    // ── 全頁模式（歷史紀錄頁）────────────────────────────────────────────────────
+    // ── 全頁模式 ───────────────────────────────────────────────────────────────
     if (mode === 'page') {
         return (
             <div className="mfp-page">
-                {/* Page top bar */}
-                <div className="mfp-page-bar">
+                <div className="mfp-page-topbar">
                     <button className="mfp-page-back" onClick={onClose}>
                         <ChevronLeft size={16} /> 返回地圖
                     </button>
                     <div className="mfp-page-title">
                         <Plane size={14} />
-                        <span>FLIGHT LOG</span>
-                        <span className="mfp-count">{total} SECTORS</span>
+                        <span>Flight log</span>
+                        <span className="mfp-page-count">{total} sectors</span>
                     </div>
                     <div className="mfp-page-actions">
                         {view === 'list' && (
-                            <button className="mfp-btn primary small" onClick={() => { setEditTarget(null); setFormFromList(true); setView('form'); }}>
-                                <Plus size={11} /> LOG FLIGHT
+                            <button className="mfp-log-btn" onClick={() => { setEditTarget(null); setView('form'); }}>
+                                <Plus size={12} /> Log flight
                             </button>
                         )}
                         {view !== 'list' && (
-                            <button className="mfp-btn ghost small" onClick={() => { setView('list'); setEditTarget(null); }}>
-                                ← 記錄列表
-                            </button>
+                            <button className="mfp-ghost-btn" onClick={goBack}>← 記錄列表</button>
                         )}
                     </div>
                 </div>
-
-                {/* Page content */}
                 <div className="mfp-page-body">
                     <div className="mfp-page-inner">
-                        {content}
+                        {statsStrip}
+                        {listContent}
                     </div>
                 </div>
             </div>
         );
     }
 
-    // ── Modal 模式（預設，overlay 彈窗）─────────────────────────────────────────
+    // ── Modal 模式 ────────────────────────────────────────────────────────────
     return (
-        <div className="mfp-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+        <div className="mfp-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
             <div className="mfp-panel">
-                <div className="mfp-header">
-                    <div className="mfp-header-title">
-                        <span className="mfp-header-eyebrow">AEROSTRAT / PERSONAL RECORD</span>
-                        <div className="mfp-header-name">
-                            <Plane size={15} />
-                            FLIGHT LOG
-                            <span className="mfp-count">{total} SECTORS</span>
+                <div className="mfp-panel-header">
+                    <div className="mfp-panel-title">
+                        <div className="mfp-panel-eyebrow">Aerostrat · Personal record</div>
+                        <div className="mfp-panel-name">
+                            <Plane size={16} /> Flight log
+                            <span className="mfp-panel-count">{total} sectors</span>
                         </div>
                     </div>
-                    <div className="mfp-header-actions">
+                    <div className="mfp-panel-acts">
                         {view === 'list' && (
-                            <button className="mfp-btn primary small" onClick={() => { setEditTarget(null); setFormFromList(true); setView('form'); }}>
-                                <Plus size={11} /> LOG FLIGHT
+                            <button className="mfp-log-btn" onClick={() => { setEditTarget(null); setView('form'); }}>
+                                <Plus size={11} /> Log flight
                             </button>
                         )}
-                        <button className="mfp-close" onClick={onClose}><X size={14} /></button>
+                        <button className="mfp-close-btn" onClick={onClose}><X size={14} /></button>
                     </div>
                 </div>
-                {content}
+                {statsStrip}
+                <div className="mfp-panel-content">{listContent}</div>
             </div>
         </div>
     );

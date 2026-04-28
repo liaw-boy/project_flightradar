@@ -54,6 +54,7 @@
 .sb-header-watermark img {
     height: 100%;
     width: auto;
+    max-width: 180px;
     object-fit: contain;
 }
 

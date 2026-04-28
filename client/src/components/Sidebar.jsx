@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from 'react-leaflet';
 import { X, AlertTriangle, Plane as PlaneIcon, Map, Fingerprint, Activity, MapPin, ChevronLeft, ChevronRight, Share2, Check } from 'lucide-react';
 import {
-    getAirlineLogoUrl, getAirlineName, getCountryIso, getCategoryName,
+    getAirlineLogoUrl, getAirlineBannerUrl, getAirlineName, getCountryIso, getCategoryName,
     getNearestAirport, formatVerticalRate, getAirportDisplayData,
     formatLocalTime, ICAO_TO_IATA
 } from '../utils/flightUtils';
@@ -377,34 +377,39 @@ export default function Sidebar({
     const [isFetching, setIsFetching] = useState(false);
     const [prevPhotoUrl, setPrevPhotoUrl] = useState(''); // [v6.9] Backdrop mirror for zero-flicker
 
+    // [v7.0] Fix double-fetch: use plane.registration immediately (available at open time),
+    // NOT displayRegistration — that updates again when fusionData loads, causing a second
+    // network round-trip and resetting isImageLoaded to false.
+    const photoRegRef = useRef(null);
+    useEffect(() => {
+        // Only update the registration key when icao24 changes (new plane)
+        photoRegRef.current = plane.registration && plane.registration !== 'N/A'
+            ? plane.registration
+            : null;
+    }, [icao24]); // eslint-disable-line react-hooks/exhaustive-deps
+
     useEffect(() => {
         let active = true;
-        
-        // [v6.8] Do NOT clear current photos immediately to prevent "Black Flash"
-        // Instead, we just start the new fetch in the background.
-        setIsFetching(true); 
+        setIsFetching(true);
 
-        dataManager.getPhotos(icao24, displayRegistration !== '--' ? displayRegistration : undefined)
+        const reg = photoRegRef.current;
+        dataManager.getPhotos(icao24, reg || undefined)
             .then(results => {
                 if (!active) return;
-                
-                // Format photos — only keep the first (best quality) photo
                 const formatted = (results || []).slice(0, 1).map(p => ({
                     url: p.thumbnail_large?.src || p.thumbnail?.src || p.link || null,
                     photographer: p.photographer || 'Planespotters.net'
                 })).filter(h => h.url);
-                
-                // [v6.8] BOMB FIX: Only update UI when we actually have the new set
                 setPhotos(formatted);
                 setCurrentPhotoIdx(0);
-                setIsImageLoaded(false); 
+                setIsImageLoaded(false);
                 setIsFetching(false);
             })
             .catch(() => {
                 if (active) setIsFetching(false);
             });
         return () => { active = false; };
-    }, [icao24, displayRegistration]);
+    }, [icao24]); // [v7.0] Only re-fetch on new plane, not on displayRegistration change
 
     const nextPhoto = (e) => {
         e.stopPropagation();
@@ -460,6 +465,7 @@ export default function Sidebar({
     const iataFlight   = iataPrefix ? `${iataPrefix}${flightNum}` : null;
 
     const logoUrl = getAirlineLogoUrl(plane.callsign);
+    const bannerUrl = getAirlineBannerUrl(plane.callsign);
     const nowUnix = Math.floor(Date.now() / 1000);
     const dataAge = Math.max(0, nowUnix - (plane.lastContact || nowUnix));
     const contactTime = new Date((plane.lastContact || nowUnix) * 1000).toLocaleTimeString();
@@ -470,9 +476,19 @@ export default function Sidebar({
     return (
         <div className="sidebar active" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
             <div className="sb-header">
-                {logoUrl && (
+                {(bannerUrl || logoUrl) && (
                     <div className="sb-header-watermark">
-                        <img src={logoUrl} alt="" />
+                        <img
+                            src={bannerUrl || logoUrl}
+                            alt=""
+                            onError={(e) => {
+                                if (e.target.src !== logoUrl && logoUrl) {
+                                    e.target.src = logoUrl;
+                                } else {
+                                    e.target.style.display = 'none';
+                                }
+                            }}
+                        />
                     </div>
                 )}
                 <div className="sb-header-main" style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>

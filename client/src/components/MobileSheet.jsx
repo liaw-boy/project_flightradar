@@ -14,6 +14,7 @@ export default function MobileSheet({ plane, icao24, metadata, route, onClose, o
 
     const touchStartY   = useRef(null);
     const currentSnapH  = snap === 'peek' ? PEEK_H : MID_H;
+    const photoRegRef   = useRef(null);
 
     /* ── Data ── */
     const callsign     = plane?.callsign    || icao24  || '---';
@@ -33,15 +34,20 @@ export default function MobileSheet({ plane, icao24, metadata, route, onClose, o
 
     /* ── Photo ── */
     useEffect(() => {
+        const reg = plane?.registration && plane.registration !== 'N/A' ? plane.registration : null;
+        photoRegRef.current = reg;
+    }, [icao24]);
+
+    useEffect(() => {
         if (!icao24) return;
         setPhotoUrl(null);
-        dataManager.getPhotos(icao24, registration || undefined)
+        dataManager.getPhotos(icao24, photoRegRef.current || undefined)
             .then(results => {
                 const first = results?.[0];
                 if (first) setPhotoUrl(first.thumbnail_large?.src || first.thumbnail?.src || null);
             })
             .catch(() => {});
-    }, [icao24, registration]);
+    }, [icao24]);
 
     /* ── Gesture ── */
     const handleTouchStart = (e) => {

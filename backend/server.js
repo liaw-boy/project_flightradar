@@ -321,9 +321,19 @@ const lookupLimiter = rateLimit({
 app.use('/api/lookup', lookupLimiter);
 app.use(express.json());
 
+// ── Auth rate limiter: 5 attempts / minute / IP to prevent brute force ──────
+const loginLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many login attempts, please wait a minute.' },
+    keyGenerator: (req) => req.ip,
+});
+
 // ── User Auth ────────────────────────────────────────────────────────────────
 app.post('/api/auth/register', authCtrl.register);
-app.post('/api/auth/login',    authCtrl.login);
+app.post('/api/auth/login',    loginLimiter, authCtrl.login);
 app.post('/api/auth/refresh',  authCtrl.refresh);
 app.get( '/api/auth/me',       authCtrl.authMiddleware, authCtrl.me);
 

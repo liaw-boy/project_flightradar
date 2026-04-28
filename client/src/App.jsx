@@ -13,13 +13,17 @@ import StatsPanel from './components/StatsPanel';
 import AuthModal from './components/AuthModal';
 import MyFlightsPanel from './components/MyFlightsPanel';
 import AdminPanel from './components/AdminPanel';
+import ErrorBoundary from './components/ErrorBoundary';
 import { useFlightData } from './hooks/useFlightData';
 import { useI18n } from './hooks/useI18n';
+import { useAnomalyStream } from './hooks/useAnomalyStream';
+import { useFlightPhase } from './hooks/useFlightPhase';
 import { logToServer, logger } from './utils/logger';
 import { dataManager } from './services/dataManager';
 import { initAircraftShapes } from './utils/aircraftIcons';
 import { trackStore } from './store/FlightDataStore';
 import { authStore, apiFlightMapData } from './store/authStore';
+import { flightDetailsCache } from './services/flightDetailsCache';
 import './App.css';
 
 // URL Parsing Utility
@@ -148,7 +152,6 @@ export default function App() {
 
     // [v4.2.0] Anomaly alerts from server SSE
     const [anomalyAlerts, setAnomalyAlerts] = useState([]);
-    const seenAlertKeys = useRef(new Set());
     const [showStats, setShowStats] = useState(false);
 
     const playSquawkAlert = useCallback((severity) => {
@@ -220,43 +223,10 @@ export default function App() {
         return () => { trackPointListenerRef.current = null; };
     }, [trackPointListenerRef]);
 
-    // [v2.9.0] SSE EventSource — real-time server push
-    // fetchPlanesRef keeps the latest fetchPlanes without causing SSE reconnects
+    // [v2.9.0] SSE EventSource — real-time server push (logic in useAnomalyStream)
     const fetchPlanesRef = useRef(fetchPlanes);
     useEffect(() => { fetchPlanesRef.current = fetchPlanes; }, [fetchPlanes]);
-
-    useEffect(() => {
-        const es = new EventSource('/api/events');
-        es.onmessage = (e) => {
-            try {
-                const data = JSON.parse(e.data);
-                if (data.type === 'planes-updated') {
-                    fetchPlanesRef.current(); // Immediate fetch on new data
-                } else if (data.type === 'anomalies' && data.alerts?.length > 0) {
-                    // Play sound for NEW alerts only
-                    const newAlerts = data.alerts.filter(a => {
-                        const key = `${a.icao24}-${a.type}`;
-                        if (seenAlertKeys.current.has(key)) return false;
-                        seenAlertKeys.current.add(key);
-                        return true;
-                    });
-                    if (newAlerts.length > 0) {
-                        const severity = newAlerts.some(a => a.severity === 'critical') ? 'critical' : 'warning';
-                        playSquawkAlert(severity);
-                    }
-                    setAnomalyAlerts(prev => {
-                        // Merge, deduplicate by icao24+type, keep latest 10
-                        const merged = [...data.alerts, ...prev.filter(a =>
-                            !data.alerts.some(b => b.icao24 === a.icao24 && b.type === a.type)
-                        )].slice(0, 10);
-                        return merged;
-                    });
-                }
-            } catch (e) { /* ignore parse error */ }
-        };
-        es.onerror = () => { }; // Auto-reconnects natively
-        return () => es.close();
-    }, []); // SSE connection runs once for the lifetime of the app
+    useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkAlert });
 
     // Initial URL Params parsing
     const initializedUrlRef = useRef(false);
@@ -419,10 +389,12 @@ export default function App() {
                     setSelectedRoute({ noData: true });
                 });
 
-            // Update URL
+            // Update URL — skip if another panel/page is active
             const url = new URL(window.location);
-            url.searchParams.set('icao', icao24);
-            window.history.replaceState({}, '', url);
+            if (!url.searchParams.has('panel')) {
+                url.searchParams.set('icao', icao24);
+                window.history.replaceState({}, '', url);
+            }
         },
         [fetchTrack]
     );
@@ -449,15 +421,20 @@ export default function App() {
         window.history.replaceState({}, '', url);
     }, []);
 
-    // Fetch departure airport coords when a plane is selected
+    // Fetch departure airport coords when a plane is selected.
+    // Result is also stored in flightDetailsCache so Sidebar can reuse it without a second request.
     useEffect(() => {
         if (!selectedIcao24) return;
         const plane = planesDict[selectedIcao24];
         const callsign = plane?.callsign;
         if (!callsign) return;
-        fetch(`/api/flight/complete-details/${selectedIcao24}/${callsign}`)
+        const callsignParam = (callsign.trim() && callsign !== selectedIcao24.toUpperCase())
+            ? callsign.trim() : 'N/A';
+        fetch(`/api/flight/complete-details/${selectedIcao24}/${callsignParam}`)
             .then(r => r.ok ? r.json() : null)
             .then(data => {
+                if (!data) return;
+                flightDetailsCache.set(selectedIcao24, data); // share with Sidebar — avoids N+1
                 const coords = data?.route?.depCoords;
                 if (coords?.lat && coords?.lng) setDepCoords(coords);
             })
@@ -520,106 +497,16 @@ export default function App() {
         }
     }, [planesDict, selectedIcao24, trackMode, handleDeselectPlane]);
 
-    // ── 飛行階段狀態機 ──────────────────────────────────────────────────────
-    // 規則一覽：
-    //
-    // 輸入欄位（ADS-B）
-    //   onGround : boolean
-    //   altitude : 公尺
-    //   velocity : m/s  → 換算 kts = velocity * 1.944
-    //   vRate    : ft/min（正 = 爬升，負 = 下降）
-    //
-    // 階段定義
-    //   PARKED          onGround=true  AND  速度 < 5 kts
-    //   TAXIING         onGround=true  AND  速度 5–80 kts
-    //   TAKEOFF_ROLL    onGround=true  AND  速度 > 80 kts
-    //   CLIMBING        onGround=false AND  vRate > +1.52 m/s  (≈ +300 ft/min)
-    //   CRUISE          onGround=false AND  |vRate| ≤ 1.52 m/s   AND  高度 > 1500m
-    //   DESCENDING      onGround=false AND  vRate < -1.52 m/s    AND  高度 > 1500m
-    //   APPROACH        onGround=false AND  vRate < -1.02 m/s    AND  高度 ≤ 1500m
-    //   LANDING_ROLL    onGround=true  AND  速度 > 5 kts（剛接地）
-    //
-    // 關鍵轉換
-    //   PARKED/TAXIING → TAKEOFF_ROLL → CLIMBING          = 起飛
-    //   DESCENDING/APPROACH → LANDING_ROLL → PARKED       = 降落
-    //
-    // 航班結束條件（清除軌跡）
-    //   曾經進入 CLIMBING 或以上階段（has_been_airborne = true）
-    //   AND 現在是 PARKED 狀態持續 ≥ 30 秒
-    //
-    // 防誤判
-    //   Touch-and-go：LANDING_ROLL 後若速度再次 > 80 kts，視為重新起飛，不清除
-    //   資料缺失：velocity / vRate 為 null 時，保守判斷（不觸發清除）
-    // ────────────────────────────────────────────────────────────────────────
-
-    const flightPhaseRef = useRef({
-        phase: 'UNKNOWN',       // 目前階段
-        hasBeenAirborne: false, // 本次選取後是否曾進入空中
-        parkedSince: null,      // 進入 PARKED 的時間戳
-    });
-
-    useEffect(() => {
-        // 選取新飛機時重置狀態機
-        flightPhaseRef.current = { phase: 'UNKNOWN', hasBeenAirborne: false, parkedSince: null };
-    }, [selectedIcao24]);
-
-    useEffect(() => {
-        if (!selectedIcao24 || trackPoints.length === 0) return;
-        const plane = planesDict[selectedIcao24];
-        if (!plane) return;
-
-        const kts      = (plane.velocity ?? 0) * 1.944;   // m/s → kts
-        const vRate    = plane.vRate   ?? 0;               // m/s
-        const alt      = plane.altitude ?? 0;              // 公尺
-        const onGround = !!plane.onGround;
-        const state    = flightPhaseRef.current;
-
-        // ── 計算當前階段 ──────────────────────────────────────
-        let phase;
-        if (onGround) {
-            if      (kts > 80)  phase = 'TAKEOFF_ROLL';
-            else if (kts > 5)   phase = 'LANDING_ROLL';  // 滑行 or 落地後減速
-            else                phase = 'PARKED';
-        } else {
-            if      (vRate > 1.52)                       phase = 'CLIMBING';
-            else if (vRate < -1.02 && alt <= 1500)       phase = 'APPROACH';
-            else if (vRate < -1.52 && alt >  1500)       phase = 'DESCENDING';
-            else                                         phase = 'CRUISE';
-        }
-
-        // ── 更新 hasBeenAirborne ──────────────────────────────
-        if (phase === 'CLIMBING' || phase === 'CRUISE' || phase === 'DESCENDING') {
-            state.hasBeenAirborne = true;
-        }
-
-        // ── 防 touch-and-go：TAKEOFF_ROLL 重置 PARKED 計時 ───
-        if (phase === 'TAKEOFF_ROLL') {
-            state.parkedSince = null;
-        }
-
-        // ── PARKED 計時 ───────────────────────────────────────
-        if (phase === 'PARKED') {
-            if (!state.parkedSince) state.parkedSince = Date.now();
-        } else {
-            state.parkedSince = null;
-        }
-
-        state.phase = phase;
-
-        // ── 航班結束判定：曾在空中 + 停機 ≥ 30 秒 ────────────
-        if (
-            state.hasBeenAirborne &&
-            phase === 'PARKED' &&
-            state.parkedSince &&
-            Date.now() - state.parkedSince >= 30000
-        ) {
-            logger.info('UI', `Flight completed (${phase}): ${plane.callsign || selectedIcao24} — clearing trail`);
+    // ── 飛行階段狀態機 (邏輯移至 useFlightPhase hook) ──────────────────────
+    useFlightPhase({
+        selectedIcao24,
+        planesDict,
+        trackPointsLength: trackPoints.length,
+        onFlightComplete: useCallback(() => {
             setTrackPoints([]);
             trailOwnerRef.current = null;
-            state.hasBeenAirborne = false;
-            state.parkedSince = null;
-        }
-    }, [planesDict, selectedIcao24, trackPoints.length]);
+        }, []),
+    });
 
     if (showAdmin) {
         return <AdminPanel onClose={() => { setShowAdmin(false); setUrlPanel(null); }} />;
@@ -747,19 +634,21 @@ export default function App() {
                 <>
                     {/* Mobile backdrop — tap outside to close bottom drawer */}
                     {isMobile && <div className="sidebar-backdrop" onClick={() => setShowFullSidebar(false)} />}
-                    <Sidebar
-                        plane={selectedPlane}
-                        icao24={selectedIcao24}
-                        metadata={selectedMetadata}
-                        route={selectedRoute}
-                        trackPoints={trackPoints}
-                        playbackTime={playbackTime}
-                        onPlaybackChange={handlePlaybackChange}
-                        flightHistoryRef={flightHistoryRef}
-                        onClose={isMobile ? () => setShowFullSidebar(false) : handleDeselectPlane}
-                        trackMode={trackMode}
-                        onToggleTrack={handleToggleTrackMode}
-                    />
+                    <ErrorBoundary>
+                        <Sidebar
+                            plane={selectedPlane}
+                            icao24={selectedIcao24}
+                            metadata={selectedMetadata}
+                            route={selectedRoute}
+                            trackPoints={trackPoints}
+                            playbackTime={playbackTime}
+                            onPlaybackChange={handlePlaybackChange}
+                            flightHistoryRef={flightHistoryRef}
+                            onClose={isMobile ? () => setShowFullSidebar(false) : handleDeselectPlane}
+                            trackMode={trackMode}
+                            onToggleTrack={handleToggleTrackMode}
+                        />
+                    </ErrorBoundary>
                 </>
             )}
 

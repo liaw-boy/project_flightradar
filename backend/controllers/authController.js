@@ -6,6 +6,11 @@ const db     = require('../db/sqlite');
 const SALT_ROUNDS = 10;
 const TOKEN_TTL   = '7d';   // reduced from 30d
 
+// Pre-hashed dummy — used in login() to prevent user-enumeration via timing differences.
+// Running bcrypt.compare against this when username is not found equalizes response time.
+let DUMMY_HASH = '$2b$10$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
+bcrypt.hash('__dummy_timing_equalization__', SALT_ROUNDS).then(h => { DUMMY_HASH = h; });
+
 function getJwtSecret() {
     const s = process.env.JWT_SECRET;
     if (!s) {
@@ -77,7 +82,11 @@ async function login(req, res) {
 
     try {
         const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-        if (!user) return res.status(401).json({ error: 'invalid credentials' });
+        if (!user) {
+            // Run bcrypt anyway to prevent timing-based user enumeration
+            await bcrypt.compare(password, DUMMY_HASH);
+            return res.status(401).json({ error: 'invalid credentials' });
+        }
 
         const ok = await bcrypt.compare(password, user.password_hash);
         if (!ok) return res.status(401).json({ error: 'invalid credentials' });

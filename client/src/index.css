@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Share+Tech+Mono&family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Share+Tech+Mono&family=Inter:wght@300;400;500;600;700&family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,0..100;1,9..144,300..900,0..100&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* Leaflet map default gray → dark to match theme */
 .leaflet-container { background: var(--bg, #050a14) !important; }
@@ -63,9 +63,16 @@
     --radius-sm:       8px;
     --radius-full:     9999px;
 
-    /* Fonts */
-    --font-main:       'Outfit', -apple-system, sans-serif;
-    --font-mono:       'Share Tech Mono', 'JetBrains Mono', monospace;
+    /* Fonts — editorial direction (v5) */
+    --font-main:       'Inter', 'PingFang TC', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-display:    'Fraunces', 'Cormorant Garamond', 'Songti TC', Georgia, serif;
+    --font-mono:       'JetBrains Mono', 'SF Mono', 'Share Tech Mono', Menlo, monospace;
+    --font-mono-soft:  'JetBrains Mono', 'SF Mono', Menlo, monospace;
+
+    /* Brass-gold (editorial accent — pairs with Fraunces) */
+    --accent-warm:     #d6b275;
+    --accent-warm-2:   #b89456;
+    --accent-warm-dim: rgba(214, 178, 117, 0.15);
 
     /* Legacy aliases (keep for backward compat) */
     --color-bg-base:         var(--bg);
@@ -141,9 +148,16 @@
     /* Misc */
     --blur:            blur(8px);
 
-    /* Fonts */
-    --font-main:       'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-mono:       'Share Tech Mono', 'JetBrains Mono', monospace;
+    /* Fonts — editorial direction (v5) */
+    --font-main:       'Inter', 'PingFang TC', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-display:    'Fraunces', 'Cormorant Garamond', 'Songti TC', Georgia, serif;
+    --font-mono:       'JetBrains Mono', 'SF Mono', 'Share Tech Mono', Menlo, monospace;
+    --font-mono-soft:  'JetBrains Mono', 'SF Mono', Menlo, monospace;
+
+    /* Brass-gold (editorial accent) — slightly warmer in light theme */
+    --accent-warm:     #b89456;
+    --accent-warm-2:   #8b6e3a;
+    --accent-warm-dim: rgba(184, 148, 86, 0.12);
 
     /* Legacy aliases */
     --color-bg-base:         var(--bg);

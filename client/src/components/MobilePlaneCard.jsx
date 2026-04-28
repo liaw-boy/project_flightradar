@@ -7,6 +7,7 @@ export default function MobilePlaneCard({ plane, icao24, metadata, route, onClos
     const [photoUrl, setPhotoUrl] = useState(null);
     const touchStartY = useRef(null);
     const cardRef = useRef(null);
+    const photoRegRef = useRef(null);
 
     const callsign     = plane?.callsign || icao24 || '---';
     const typecode     = plane?.typecode || metadata?.typecode || '';
@@ -17,14 +18,19 @@ export default function MobilePlaneCard({ plane, icao24, metadata, route, onClos
     const arr = route?.arrival?.airport?.iata   || route?.arrival?.iata   || null;
 
     useEffect(() => {
+        const reg = plane?.registration && plane.registration !== 'N/A' ? plane.registration : null;
+        photoRegRef.current = reg;
+    }, [icao24]);
+
+    useEffect(() => {
         if (!icao24) return;
-        dataManager.getPhotos(icao24, registration || undefined)
+        dataManager.getPhotos(icao24, photoRegRef.current || undefined)
             .then(results => {
                 const first = results?.[0];
                 if (first) setPhotoUrl(first.thumbnail_large?.src || first.thumbnail?.src || null);
             })
             .catch(() => {});
-    }, [icao24, registration]);
+    }, [icao24]);
 
     // 往上滑 → 展開詳細；往下滑 → 關閉
     const handleTouchStart = (e) => {

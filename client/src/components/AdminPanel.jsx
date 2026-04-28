@@ -1,10 +1,48 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
     ArrowLeft, Users, Activity, Trash2, ShieldCheck,
-    RefreshCw, Plane, Database, Wifi, Cpu, BarChart2, LogOut
+    RefreshCw, Plane, Database, Wifi, Cpu, BarChart2, LogOut,
+    AlertTriangle, X, Clock, HardDrive, Server, Zap
 } from 'lucide-react';
 import { authStore } from '../store/authStore';
 import './AdminPanel.css';
+
+// ── Radial Gauge (conic-gradient) ────────────────────────────────────────────
+function RadialGauge({ pct = 0, color = 'var(--accent)', size = 58, label }) {
+    const clamped = Math.max(0, Math.min(100, pct));
+    return (
+        <div
+            className="adm-gauge"
+            style={{ '--gp': `${clamped}%`, '--gc': color, width: size, height: size }}
+        >
+            <div className="adm-gauge-inner">
+                <span className="adm-gauge-label">{label}</span>
+            </div>
+        </div>
+    );
+}
+
+// ── Confirm Dialog ────────────────────────────────────────────────────────────
+function ConfirmDialog({ title, message, variant = 'danger', confirmLabel = '確認', onConfirm, onCancel }) {
+    return (
+        <div className="adm-dialog-backdrop" onClick={onCancel}>
+            <div className="adm-dialog" onClick={e => e.stopPropagation()}>
+                <div className={`adm-dialog-icon adm-dialog-icon--${variant}`}>
+                    <AlertTriangle size={22} />
+                </div>
+                <h3 className="adm-dialog-title">{title}</h3>
+                <p className="adm-dialog-msg">{message}</p>
+                <div className="adm-dialog-actions">
+                    <button className="adm-dialog-cancel" onClick={onCancel}>取消</button>
+                    <button className={`adm-dialog-confirm adm-dialog-confirm--${variant}`} onClick={onConfirm}>
+                        {confirmLabel}
+                    </button>
+                </div>
+                <button className="adm-dialog-close" onClick={onCancel}><X size={14} /></button>
+            </div>
+        </div>
+    );
+}
 
 function authHeader() {
     const token = authStore.getToken();
@@ -13,9 +51,10 @@ function authHeader() {
 
 // ── Users Tab ────────────────────────────────────────────────────────────────
 function UsersTab() {
-    const [users, setUsers]     = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError]     = useState(null);
+    const [users, setUsers]       = useState([]);
+    const [loading, setLoading]   = useState(true);
+    const [error, setError]       = useState(null);
+    const [dialog, setDialog]     = useState(null); // { title, message, variant, confirmLabel, onConfirm }
 
     const load = useCallback(async () => {
         setLoading(true); setError(null);
@@ -30,23 +69,56 @@ function UsersTab() {
 
     useEffect(() => { load(); }, [load]);
 
+    function ask(opts) {
+        return new Promise(resolve => {
+            setDialog({
+                ...opts,
+                onConfirm: () => { setDialog(null); resolve(true);  },
+                onCancel:  () => { setDialog(null); resolve(false); },
+            });
+        });
+    }
+
     async function del(id, name) {
-        if (!confirm(`刪除用戶「${name}」？此操作無法復原。`)) return;
+        const ok = await ask({
+            title:        '刪除用戶',
+            message:      `確定要刪除用戶「${name}」嗎？此操作無法復原，該帳號所有資料將永久移除。`,
+            variant:      'danger',
+            confirmLabel: '確認刪除',
+        });
+        if (!ok) return;
         const r = await fetch(`/api/admin/users/${id}`, { method: 'DELETE', headers: authHeader() });
         const j = await r.json();
         if (j.ok) setUsers(u => u.filter(x => x.id !== id));
-        else alert('錯誤：' + (j.error || 'unknown'));
+        else setError('刪除失敗：' + (j.error || 'unknown'));
     }
 
-    async function toggleAdmin(id) {
+    async function toggleAdmin(id, isCurrentlyAdmin, name) {
+        const ok = await ask(isCurrentlyAdmin
+            ? {
+                title:        '移除管理員身份',
+                message:      `確定要移除「${name}」的管理員身份嗎？該用戶將失去所有後台管理權限。`,
+                variant:      'warning',
+                confirmLabel: '確認移除',
+            }
+            : {
+                title:        '授予管理員身份',
+                message:      `確定要將「${name}」設為管理員嗎？該用戶將獲得後台管理權限。`,
+                variant:      'info',
+                confirmLabel: '確認授予',
+            }
+        );
+        if (!ok) return;
         const r = await fetch(`/api/admin/users/${id}/admin`, { method: 'PUT', headers: authHeader() });
         const j = await r.json();
         if (j.ok) setUsers(u => u.map(x => x.id === id ? { ...x, is_admin: j.is_admin } : x));
-        else alert('錯誤：' + (j.error || 'unknown'));
+        else setError('操作失敗：' + (j.error || 'unknown'));
     }
 
     return (
         <div className="adm-content">
+            {dialog && <ConfirmDialog {...dialog} />}
+
             <div className="adm-page-hd">
                 <div>
                     <h1 className="adm-page-title">用戶管理</h1>
@@ -108,10 +180,10 @@ function UsersTab() {
                                             <div className="adm-row-actions">
                                                 {!u.is_superadmin && (
                                                     u.is_admin
-                                                        ? <button className="adm-btn adm-btn-warning" onClick={() => toggleAdmin(u.id)}>
+                                                        ? <button className="adm-btn adm-btn-warning" onClick={() => toggleAdmin(u.id, true, u.username)}>
                                                             <ShieldCheck size={12} /> 取消管理員
                                                           </button>
-                                                        : <button className="adm-btn adm-btn-teal" onClick={() => toggleAdmin(u.id)}>
+                                                        : <button className="adm-btn adm-btn-teal" onClick={() => toggleAdmin(u.id, false, u.username)}>
                                                             <ShieldCheck size={12} /> 設管理員
                                                           </button>
                                                 )}
@@ -178,6 +250,16 @@ function MonitorTab() {
         return h > 0 ? `${h}h ${m}m` : `${m}m`;
     };
 
+    const sys = health?.performance?.system;
+    const mem = health?.performance?.process?.memory;
+
+    const cpuPct   = sys?.cpuUsage ?? 0;
+    const cpuColor = cpuPct > 80 ? '#ef4444' : cpuPct > 50 ? '#f59e0b' : '#10b981';
+    const loadVal  = sys?.load?.[0] ?? 0;
+    const loadColor = loadVal > (sys?.cpuCores ?? 4) * 0.8 ? '#ef4444' : loadVal > (sys?.cpuCores ?? 4) * 0.5 ? '#f59e0b' : '#10b981';
+    const memFreePct = sys ? Math.round((sys.freeMem / (sys.totalMem || 1)) * 100) : 0;
+    const heapPct  = mem ? Math.round((mem.heapUsed / (mem.heapTotal || 1)) * 100) : 0;
+
     return (
         <div className="adm-content">
             <div className="adm-page-hd">
@@ -192,45 +274,45 @@ function MonitorTab() {
 
             {error && <div className="adm-alert adm-alert-err">{error}</div>}
 
-            {/* KPI Grid */}
+            {/* ── KPI Row ── */}
             <div className="adm-kpi-grid">
-                <div className="adm-kpi-card">
+                <div className="adm-kpi-card adm-kpi-accent-blue">
                     <div className="adm-kpi-icon adm-kpi-blue"><Plane size={18} /></div>
                     <div className="adm-kpi-body">
                         <div className="adm-kpi-val">{health?.cacheSize ?? '—'}</div>
                         <div className="adm-kpi-lbl">追蹤飛機</div>
                     </div>
                 </div>
-                <div className="adm-kpi-card">
+                <div className="adm-kpi-card adm-kpi-accent-green">
                     <div className="adm-kpi-icon adm-kpi-green"><Activity size={18} /></div>
                     <div className="adm-kpi-body">
                         <div className="adm-kpi-val adm-val-green">{health?.activeSessions ?? '—'}</div>
                         <div className="adm-kpi-lbl">活躍 Sessions</div>
                     </div>
                 </div>
-                <div className="adm-kpi-card">
+                <div className="adm-kpi-card adm-kpi-accent-purple">
                     <div className="adm-kpi-icon adm-kpi-purple"><Wifi size={18} /></div>
                     <div className="adm-kpi-body">
                         <div className="adm-kpi-val">{health?.ingestion?.totalPoints?.toLocaleString() ?? '—'}</div>
                         <div className="adm-kpi-lbl">收錄航跡點</div>
                     </div>
                 </div>
-                <div className="adm-kpi-card">
+                <div className="adm-kpi-card adm-kpi-accent-yellow">
                     <div className="adm-kpi-icon adm-kpi-yellow"><BarChart2 size={18} /></div>
                     <div className="adm-kpi-body">
                         <div className="adm-kpi-val">{stats?.totalCalls ?? '—'}</div>
                         <div className="adm-kpi-lbl">API 呼叫總數</div>
                     </div>
                 </div>
-                <div className="adm-kpi-card">
+                <div className="adm-kpi-card adm-kpi-accent-teal">
                     <div className="adm-kpi-icon adm-kpi-teal"><Database size={18} /></div>
                     <div className="adm-kpi-body">
                         <div className="adm-kpi-val adm-val-sm">{health?.storage?.dbSize ? fmt(health.storage.dbSize) : '—'}</div>
                         <div className="adm-kpi-lbl">資料庫大小</div>
                     </div>
                 </div>
-                <div className="adm-kpi-card">
-                    <div className="adm-kpi-icon adm-kpi-gray"><Cpu size={18} /></div>
+                <div className="adm-kpi-card adm-kpi-accent-gray">
+                    <div className="adm-kpi-icon adm-kpi-gray"><Clock size={18} /></div>
                     <div className="adm-kpi-body">
                         <div className="adm-kpi-val adm-val-sm">{uptimeStr(health?.uptime)}</div>
                         <div className="adm-kpi-lbl">運行時間</div>
@@ -238,12 +320,71 @@ function MonitorTab() {
                 </div>
             </div>
 
+            {/* ── System Resources ── */}
+            {sys && (
+                <div className="adm-card adm-mb">
+                    <div className="adm-card-hd">
+                        <span className="adm-card-title"><Server size={14} style={{ display:'inline', marginRight:6, verticalAlign:'middle' }} />系統資源</span>
+                        <span className="adm-badge-count">{sys.cpuCores ?? '?'} 核 CPU</span>
+                    </div>
+                    <div className="adm-sysres-grid2">
+                        {/* CPU gauge */}
+                        <div className="adm-sysres2-card">
+                            <RadialGauge pct={cpuPct} color={cpuColor} label={`${cpuPct.toFixed(1)}%`} />
+                            <div className="adm-sysres2-info">
+                                <span className="adm-sysres2-lbl">CPU 使用率</span>
+                                <span className="adm-sysres2-sub" style={{ color: cpuColor }}>
+                                    {cpuPct > 80 ? '負載偏高' : cpuPct > 50 ? '負載適中' : '運作正常'}
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* System Load gauge */}
+                        <div className="adm-sysres2-card">
+                            <RadialGauge
+                                pct={Math.min(100, (loadVal / (sys.cpuCores || 4)) * 100)}
+                                color={loadColor}
+                                label={loadVal.toFixed(2)}
+                                size={58}
+                            />
+                            <div className="adm-sysres2-info">
+                                <span className="adm-sysres2-lbl">系統負載</span>
+                                <span className="adm-sysres2-sub" style={{ color: loadColor }}>1 分鐘均值</span>
+                            </div>
+                        </div>
+
+                        {/* Memory bar */}
+                        <div className="adm-sysres2-card adm-sysres2-card--wide">
+                            <div className="adm-sysres2-bargroup">
+                                <div className="adm-sysres2-barrow">
+                                    <span className="adm-sysres2-barlbl">可用記憶體</span>
+                                    <span className="adm-sysres2-barval">{fmt(sys.freeMem)} / {fmt(sys.totalMem)}</span>
+                                </div>
+                                <div className="adm-sysres2-track">
+                                    <div className="adm-sysres2-fill adm-sysres2-fill--mem" style={{ width: `${memFreePct}%` }} />
+                                </div>
+                                <div className="adm-sysres2-barrow" style={{ marginTop: 14 }}>
+                                    <span className="adm-sysres2-barlbl">磁碟剩餘</span>
+                                    <span className="adm-sysres2-barval">{sys.disk?.free ? fmt(sys.disk.free) : '—'}</span>
+                                </div>
+                                <div className="adm-sysres2-track">
+                                    <div className="adm-sysres2-fill adm-sysres2-fill--disk" style={{
+                                        width: sys.disk?.total ? `${Math.round((sys.disk.free / sys.disk.total) * 100)}%` : '0%'
+                                    }} />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="adm-two-col">
                 {/* OpenSky Accounts */}
                 {stats?.accounts?.length > 0 && (
                     <div className="adm-card">
                         <div className="adm-card-hd">
-                            <span className="adm-card-title">OpenSky 帳號配額</span>
+                            <span className="adm-card-title"><Zap size={14} style={{ display:'inline', marginRight:6, verticalAlign:'middle' }} />OpenSky 帳號配額</span>
+                            <span className="adm-badge-count">{stats.accounts.length} 個帳號</span>
                         </div>
                         <div className="adm-card-body">
                             {stats.accounts.map(a => {
@@ -253,14 +394,19 @@ function MonitorTab() {
                                 return (
                                     <div key={a.user} className="adm-quota-row">
                                         <div className="adm-quota-info">
-                                            <span className="adm-quota-name">{a.user}</span>
-                                            <span className={`adm-quota-num ${low ? 'adm-warn' : 'adm-ok'}`}>
-                                                {a.remainingCredits ?? '?'} 剩餘
-                                            </span>
+                                            <div className="adm-quota-left">
+                                                <div className={`adm-quota-dot ${low ? 'adm-quota-dot--warn' : 'adm-quota-dot--ok'}`} />
+                                                <span className="adm-quota-name">{a.user}</span>
+                                            </div>
+                                            <div className="adm-quota-right">
+                                                <span className={`adm-quota-num ${low ? 'adm-warn' : 'adm-ok'}`}>{a.remainingCredits ?? '?'}</span>
+                                                <span className="adm-quota-unit"> 剩餘</span>
+                                            </div>
                                         </div>
                                         <div className="adm-quota-bar">
                                             <div className={`adm-quota-fill ${low ? 'adm-fill-warn' : 'adm-fill-ok'}`} style={{ width: pct + '%' }} />
                                         </div>
+                                        <div className="adm-quota-pct">{pct}% 已用</div>
                                     </div>
                                 );
                             })}
@@ -268,26 +414,26 @@ function MonitorTab() {
                     </div>
                 )}
 
-                {/* Memory */}
-                {health?.performance?.process?.memory && (() => {
-                    const mem = health.performance.process.memory;
-                    return (
-                        <div className="adm-card">
-                            <div className="adm-card-hd">
-                                <span className="adm-card-title">記憶體使用</span>
-                            </div>
-                            <div className="adm-card-body">
+                {/* Process Memory */}
+                {mem && (
+                    <div className="adm-card">
+                        <div className="adm-card-hd">
+                            <span className="adm-card-title"><HardDrive size={14} style={{ display:'inline', marginRight:6, verticalAlign:'middle' }} />進程記憶體</span>
+                            <span className="adm-badge-count">Heap {heapPct}%</span>
+                        </div>
+                        <div className="adm-card-body adm-card-body--center">
+                            <RadialGauge pct={heapPct} color={heapPct > 85 ? '#ef4444' : heapPct > 60 ? '#f59e0b' : 'var(--accent)'} label={`${heapPct}%`} size={72} />
+                            <div className="adm-mem-list">
                                 {[
-                                    ['Heap Used',  mem.heapUsed],
-                                    ['Heap Total', mem.heapTotal],
-                                    ['RSS',        mem.rss],
-                                    ['External',   mem.external],
-                                ].map(([lbl, val]) => val != null && (
+                                    ['Heap Used',  mem.heapUsed,  mem.heapTotal],
+                                    ['RSS',        mem.rss,       mem.rss],
+                                    ['External',   mem.external,  mem.rss],
+                                ].map(([lbl, val, base]) => val != null && (
                                     <div key={lbl} className="adm-mem-row">
                                         <span className="adm-mem-lbl">{lbl}</span>
                                         <div className="adm-mem-bar-wrap">
                                             <div className="adm-mem-bar">
-                                                <div className="adm-mem-fill" style={{ width: Math.min(100, val / (mem.rss || 1) * 100) + '%' }} />
+                                                <div className="adm-mem-fill" style={{ width: Math.min(100, val / (base || 1) * 100) + '%' }} />
                                             </div>
                                             <span className="adm-mem-val">{fmt(val)}</span>
                                         </div>
@@ -295,15 +441,15 @@ function MonitorTab() {
                                 ))}
                             </div>
                         </div>
-                    );
-                })()}
+                    </div>
+                )}
             </div>
 
             {/* Data Sources */}
             {stats?.sourceHealth && (
                 <div className="adm-card">
                     <div className="adm-card-hd">
-                        <span className="adm-card-title">資料來源狀態</span>
+                        <span className="adm-card-title"><Activity size={14} style={{ display:'inline', marginRight:6, verticalAlign:'middle' }} />資料來源狀態</span>
                         <span className="adm-badge-count">{stats.totalPlanes?.toLocaleString() ?? '—'} 架飛機</span>
                     </div>
                     <div className="adm-source-grid">
@@ -341,30 +487,6 @@ function MonitorTab() {
                                 </div>
                             );
                         })}
-                    </div>
-                </div>
-            )}
-
-            {/* System */}
-            {health?.performance?.system && (
-                <div className="adm-card">
-                    <div className="adm-card-hd">
-                        <span className="adm-card-title">系統資源</span>
-                    </div>
-                    <div className="adm-card-body" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '12px' }}>
-                        {[
-                            ['CPU 使用率', `${health.performance.system.cpuUsage?.toFixed(1) ?? '?'}%`],
-                            ['CPU 核心',   `${health.performance.system.cpuCores ?? '?'} 核`],
-                            ['系統負載',   health.performance.system.load?.[0]?.toFixed(2) ?? '?'],
-                            ['可用記憶體', fmt(health.performance.system.freeMem)],
-                            ['總記憶體',   fmt(health.performance.system.totalMem)],
-                            ['磁碟剩餘',   fmt(health.performance.system.disk?.free)],
-                        ].map(([lbl, val]) => (
-                            <div key={lbl} style={{ padding: '8px 0' }}>
-                                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>{lbl}</div>
-                                <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>{val}</div>
-                            </div>
-                        ))}
                     </div>
                 </div>
             )}

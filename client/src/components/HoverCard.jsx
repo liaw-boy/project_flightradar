@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plane } from 'lucide-react';
 import { dataManager } from '../services/dataManager';
 import { flightDetailsCache } from '../services/flightDetailsCache';
-import { ICAO_TO_IATA } from '../utils/flightUtils';
+import { ICAO_TO_IATA, getAirlineLogoUrl } from '../utils/flightUtils';
 import './HoverCard.css';
 
 /**
@@ -13,6 +13,7 @@ import './HoverCard.css';
 export default function HoverCard({ plane, pos }) {
     const [photo, setPhoto] = useState(null);
     const [route, setRoute] = useState(null);
+    const [routeLoading, setRouteLoading] = useState(false);
     const [depInfo, setDepInfo] = useState(null);
     const [arrInfo, setArrInfo] = useState(null);
     const prevIcaoRef = useRef(null);
@@ -23,6 +24,7 @@ export default function HoverCard({ plane, pos }) {
         prevIcaoRef.current = plane.icao24;
 
         setRoute(null);
+        setRouteLoading(true);
         setDepInfo(null);
         setArrInfo(null);
 
@@ -51,13 +53,14 @@ export default function HoverCard({ plane, pos }) {
                 arrCity: fusionRoute.destination_city || fusionRoute.destination_name || null,
             };
             setRoute(merged);
+            setRouteLoading(false);
 
             // Still fetch airport details for city names if fusion didn't provide them
             if (merged.departureAirport && !merged.depCity)
                 dataManager.getAirport(merged.departureAirport).then(setDepInfo).catch(() => {});
             if (merged.arrivalAirport && !merged.arrCity)
                 dataManager.getAirport(merged.arrivalAirport).then(setArrInfo).catch(() => {});
-        }).catch(() => {});
+        }).catch(() => { setRouteLoading(false); });
 
     }, [plane?.icao24, plane?.callsign, plane?.registration]);
 
@@ -70,6 +73,9 @@ export default function HoverCard({ plane, pos }) {
     const depCode = route?.departureAirport || null;
     const arrCode = route?.arrivalAirport || null;
     const hasRoute = depCode || arrCode;
+
+    const icaoPrefix = (plane.callsign || '').replace(/\d.*$/, '').toUpperCase().slice(0, 3);
+    const logoUrl = icaoPrefix.length === 3 ? getAirlineLogoUrl(plane.callsign) : null;
 
     // 優先顯示 IATA 3 碼；若拿到的是 ICAO 4 碼則嘗試從 airport 查詢結果取 iata
     const toIata = (code, info) => {
@@ -103,27 +109,51 @@ export default function HoverCard({ plane, pos }) {
                         <div className="photo-credit">&copy; {photo.photographer || 'Network'}</div>
                     </>
                 ) : (
-                    <div className="photo-placeholder">{plane.callsign || plane.icao24}</div>
+                    <div className="photo-placeholder">
+                        {logoUrl && (
+                            <img
+                                className="photo-placeholder-logo"
+                                src={logoUrl}
+                                alt=""
+                                onError={e => { e.currentTarget.style.display = 'none'; }}
+                            />
+                        )}
+                        <span className="photo-placeholder-callsign">{plane.callsign || plane.icao24}</span>
+                    </div>
                 )}
             </div>
 
             <div className="hover-card-content">
                 <div className="hover-card-header">
-                    {(() => {
-                        const icao = plane.callsign || '';
-                        const prefix = icao.replace(/\d.*$/, '').toUpperCase();
-                        const iataP = ICAO_TO_IATA[prefix];
-                        const num = icao.replace(/^[A-Z]+/, '');
-                        const iata = iataP ? `${iataP}${num}` : null;
-                        return <>
-                            <span className="hover-callsign">{iata || icao || 'N/A'}</span>
-                            {iata && <span className="hover-icao-badge">{icao}</span>}
-                        </>;
-                    })()}
+                    <div className="hover-header-left">
+                        {logoUrl && (
+                            <img
+                                className="hover-airline-logo"
+                                src={logoUrl}
+                                alt=""
+                                onError={e => { e.currentTarget.style.display = 'none'; }}
+                            />
+                        )}
+                        {(() => {
+                            const icao = plane.callsign || '';
+                            const prefix = icao.replace(/\d.*$/, '').toUpperCase();
+                            const iataP = ICAO_TO_IATA[prefix];
+                            const num = icao.replace(/^[A-Z]+/, '');
+                            const iata = iataP ? `${iataP}${num}` : null;
+                            return <>
+                                <span className="hover-callsign">{iata || icao || 'N/A'}</span>
+                                {iata && <span className="hover-icao-badge">{icao}</span>}
+                            </>;
+                        })()}
+                    </div>
                     <span className="hover-typecode">{plane.typecode || 'UNK'}</span>
                 </div>
 
-                {hasRoute && (
+                {routeLoading ? (
+                    <div className="hover-route-loading">
+                        <span className="hover-route-spinner" />
+                    </div>
+                ) : hasRoute ? (
                     <div className="hover-route-block">
                         <div className="hover-route-hero">
                             <div className="hover-route-node">
@@ -131,7 +161,7 @@ export default function HoverCard({ plane, pos }) {
                                 {depName && <span className="hover-city">{depName}</span>}
                             </div>
                             <div className="hover-route-center">
-                                <Plane size={18} color="#00ff88" strokeWidth={1.5} />
+                                <Plane size={18} color="var(--accent)" strokeWidth={1.5} />
                             </div>
                             <div className="hover-route-node hover-route-node-right">
                                 <span className="hover-iata">{arrDisplay}</span>
@@ -139,12 +169,20 @@ export default function HoverCard({ plane, pos }) {
                             </div>
                         </div>
                     </div>
-                )}
+                ) : null}
 
                 <div className="hover-stats">
                     <span>{plane.onGround ? 'GND' : `${Math.round((plane.altitude || 0) * 3.28084).toLocaleString()} ft`}</span>
                     <span className="stats-divider">&bull;</span>
                     <span>{Math.round((plane.velocity || 0) * 1.94384)} kts</span>
+                    {plane.vRate && Math.abs(plane.vRate) > 50 && (
+                        <>
+                            <span className="stats-divider">&bull;</span>
+                            <span className={plane.vRate > 0 ? 'stats-climb' : 'stats-descend'}>
+                                {plane.vRate > 0 ? '↑' : '↓'} {Math.abs(Math.round(plane.vRate * 196.85))} fpm
+                            </span>
+                        </>
+                    )}
                 </div>
             </div>
         </div>
