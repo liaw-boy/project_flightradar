@@ -10,7 +10,7 @@ export default function AeroIcon({ size = 24, bg = true, className = '', color, 
     };
     return (
         <img
-            src="/airplane-icon.png"
+            src="/airplane-icon.png?v=20260428g"
             width={size}
             height={size}
             className={className}
