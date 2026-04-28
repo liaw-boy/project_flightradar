@@ -7,8 +7,28 @@
 const KEY_TOKEN = 'aerostrat_token';
 const KEY_USER  = 'aerostrat_user';
 
-let _token    = localStorage.getItem(KEY_TOKEN) || null;
-let _user     = (() => { try { return JSON.parse(localStorage.getItem(KEY_USER)); } catch { return null; } })();
+// Decode JWT exp claim without a library (base64 decode the payload segment)
+function tokenExpiresAt(token) {
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        return payload.exp ? payload.exp * 1000 : null;
+    } catch { return null; }
+}
+
+let _token = localStorage.getItem(KEY_TOKEN) || null;
+let _user  = (() => { try { return JSON.parse(localStorage.getItem(KEY_USER)); } catch { return null; } })();
+
+// Clear expired token on startup so stale localStorage doesn't linger
+if (_token) {
+    const exp = tokenExpiresAt(_token);
+    if (exp && Date.now() > exp) {
+        localStorage.removeItem(KEY_TOKEN);
+        localStorage.removeItem(KEY_USER);
+        _token = null;
+        _user  = null;
+    }
+}
+
 const _listeners = new Set();
 
 function notify() {
@@ -41,12 +61,48 @@ export const authStore = {
     logout() { this._set(null, null); },
 };
 
+// ── Sliding-window token refresh ──────────────────────────────────────────────
+// If token has < 3 days remaining, silently swap for a fresh 7-day token.
+const REFRESH_THRESHOLD_MS = 3 * 24 * 60 * 60 * 1000;
+let _refreshing = false;
+
+async function maybeRefreshToken() {
+    if (!_token || _refreshing) return;
+    const exp = tokenExpiresAt(_token);
+    if (!exp) return;
+    const remaining = exp - Date.now();
+    if (remaining <= 0 || remaining > REFRESH_THRESHOLD_MS) return;
+
+    _refreshing = true;
+    try {
+        const res = await fetch('/api/auth/refresh', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${_token}` },
+        });
+        if (res.ok) {
+            const data = await res.json();
+            authStore._set(data.token, data.user);
+        }
+    } catch { /* silent — not critical */ } finally {
+        _refreshing = false;
+    }
+}
+
+// Check once on load, then every 6 hours
+maybeRefreshToken();
+setInterval(maybeRefreshToken, 6 * 60 * 60 * 1000);
+
 // ── API helpers ───────────────────────────────────────────────────────────────
 
 async function apiFetch(path, options = {}) {
     const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
     if (_token) headers['Authorization'] = `Bearer ${_token}`;
     const res = await fetch(path, { ...options, headers });
+    // Auto-logout on 401 so stale/revoked tokens don't leave users in a broken state
+    if (res.status === 401) {
+        authStore.logout();
+        throw new Error('登入已過期，請重新登入');
+    }
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
     return body;

@@ -56,6 +56,7 @@ export default function App() {
     const [loading, setLoading] = useState(true);
     const [selectedIcao24, setSelectedIcao24] = useState(null);
     const [showFullSidebar, setShowFullSidebar] = useState(false);
+    const [showSidebar, setShowSidebar] = useState(false);
     const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 960);
     useEffect(() => {
         const mq = window.matchMedia('(max-width: 960px)');
@@ -370,7 +371,8 @@ export default function App() {
                 setPlaybackTime(null);
             }
             setSelectedIcao24(icao24);
-            setShowFullSidebar(false); // 手機先顯示 compact card
+            setShowFullSidebar(false);
+            if (!isMobile) setShowSidebar(true); // desktop: auto-open sidebar on plane select
             // Don't auto-enable tracking on click — tracking activates automatically
             // only when the plane drifts near the viewport edge (handled in MapView).
 
@@ -436,7 +438,8 @@ export default function App() {
         setDepCoords(null);
         setTrackMode(false); // 取消追蹤模式
         setPlaybackTime(null); // [v3.1] clear playback on deselect
-        
+        setShowSidebar(false);
+
         // [v11.0] Deactivate High-Res Buffer
         trackStore.setSelected(null);
 
@@ -635,6 +638,7 @@ export default function App() {
                 selectedRoute={selectedRoute}
                 onSelectPlane={handleSelectPlane}
                 onDeselectPlane={handleDeselectPlane}
+                onOpenDetails={() => setShowSidebar(true)}
                 onMapReady={handleMapReady}
                 onMapMove={handleMapMove}
                 onUsageUpdate={setUsageStats}
@@ -739,7 +743,7 @@ export default function App() {
                 />
             )}
 
-            {selectedPlane && (!isMobile || showFullSidebar) && (
+            {selectedPlane && ((!isMobile && showSidebar) || (isMobile && showFullSidebar)) && (
                 <>
                     {/* Mobile backdrop — tap outside to close bottom drawer */}
                     {isMobile && <div className="sidebar-backdrop" onClick={() => setShowFullSidebar(false)} />}

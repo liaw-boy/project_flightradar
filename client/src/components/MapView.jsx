@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getAirlineLogoUrl, normalizeLongitude, predictPosition, getAltitudeColor, initAirportDatabase } from '../utils/flightUtils';
+import { getAirlineLogoUrl, getAirlineBannerUrl, normalizeLongitude, predictPosition, getAltitudeColor, initAirportDatabase } from '../utils/flightUtils';
 import { processTrailPath } from '../utils/trailSpline';
 import { getAircraftScale, getDrawSize, resolveTypecodeKey, getDynamicImage, prewarmExactSvg, AIRCRAFT_CATALOG as paths, ICON_SCALE_VERSION } from '../utils/aircraftIcons';
 import { dataManager } from '../services/dataManager';
 import { enrichPlaneDetails, getEnrichedData } from '../services/staticOsintCache';
 import HoverCard from './HoverCard';
+import ClickCard from './ClickCard';
 import { logger } from '../utils/logger';
 
 // ── 大圓弧插值（個人路線用）────────────────────────────────────────────────────
@@ -211,6 +212,7 @@ export default function MapView({
     selectedRoute,
     onSelectPlane,
     onDeselectPlane,
+    onOpenDetails,
     onMapReady,
     onMapMove,
     onUsageUpdate,
@@ -227,7 +229,8 @@ export default function MapView({
 }) {
     const [hoveredPlane, setHoveredPlane] = useState(null);
     const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
-    // Detect touch device once — skip HoverCard on mobile/tablet
+    const [selectedScreenPos, setSelectedScreenPos] = useState(null);
+    // Detect touch device once — skip HoverCard / ClickCard on mobile/tablet
     const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
     useEffect(() => {
@@ -847,6 +850,29 @@ export default function MapView({
     const selectedIcao24Ref = useRef(selectedIcao24);
     useEffect(() => { selectedIcao24Ref.current = selectedIcao24; }, [selectedIcao24]);
 
+    // Track selected plane's screen position for ClickCard
+    useEffect(() => {
+        const map = mapInstance;
+        if (!map || !selectedIcao24) { setSelectedScreenPos(null); return; }
+        const updatePos = () => {
+            const icao = selectedIcao24Ref.current;
+            if (!icao) return;
+            const plane = planesDictRef.current?.[icao];
+            if (!plane?.renderLat || !plane?.renderLng) return;
+            const pt = map.latLngToContainerPoint([plane.renderLat, normalizeLongitude(plane.renderLng)]);
+            setSelectedScreenPos({ x: pt.x, y: pt.y });
+        };
+        updatePos();
+        map.on('move', updatePos);
+        map.on('zoom', updatePos);
+        const interval = setInterval(updatePos, 800);
+        return () => {
+            map.off('move', updatePos);
+            map.off('zoom', updatePos);
+            clearInterval(interval);
+        };
+    }, [mapInstance, selectedIcao24]);
+
     // [v3.2] Keep shouldShowPlane accessible for the pointer click event
     const shouldShowPlaneRef = useRef(shouldShowPlane);
     useEffect(() => { shouldShowPlaneRef.current = shouldShowPlane; }, [shouldShowPlane]);
@@ -916,7 +942,7 @@ export default function MapView({
         if (!map) return;
 
 
-        // [v3.4] Airline Logo Cache for Canvas
+        // [v3.4] Airline Logo Cache for Canvas (square logos, small, next to plane)
         const getLogoImage = (callsign) => {
             const logoUrl = getAirlineLogoUrl(callsign);
             if (!logoUrl) return null;
@@ -1796,7 +1822,8 @@ export default function MapView({
 
     return (
         <div ref={mapContainerRef} className="map-container">
-            {hoveredPlane && <HoverCard plane={hoveredPlane} pos={hoverPos} />}
+            {hoveredPlane && hoveredPlane.icao24 !== selectedIcao24 && <HoverCard plane={hoveredPlane} pos={hoverPos} />}
+            {/* ClickCard disabled — sidebar opens automatically on plane select */}
             <AltitudeLegend colorScheme={colorScheme} />
         </div>
     );

@@ -1,0 +1,214 @@
+/* Hidden on touch devices */
+@media (hover: none) and (pointer: coarse) {
+    .click-card { display: none !important; }
+}
+
+.click-card {
+    position: absolute;
+    width: min(220px, calc(100vw - 28px));
+    background: var(--surface-solid);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+    border-radius: 10px;
+    box-shadow:
+        0 4px 16px rgba(0,0,0,.28),
+        0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    z-index: 9998;
+    overflow: visible;
+    pointer-events: all;
+}
+
+/* Entry animation — only triggers on mount (key=icao24) */
+.click-card--above {
+    animation: cc-in-above 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.click-card--below {
+    animation: cc-in-below 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes cc-in-above {
+    from { opacity: 0; transform: translate(-50%, calc(-100% + 8px)); }
+    to   { opacity: 1; transform: translate(-50%, -100%); }
+}
+@keyframes cc-in-below {
+    from { opacity: 0; transform: translate(-50%, -8px); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* ── Arrow ──────────────────────────────────────────────────────────── */
+.click-card::after {
+    content: '';
+    position: absolute;
+    left: var(--arrow-offset, 50%);
+    transform: translateX(-50%) rotate(45deg);
+    width: 10px;
+    height: 10px;
+    background: var(--surface-solid);
+}
+
+.click-card--above::after {
+    bottom: -5px;
+    border-right: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.click-card--below::after {
+    top: -5px;
+    border-left: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+    border-top: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+/* ── Close button ───────────────────────────────────────────────────── */
+.click-card-close {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    cursor: pointer;
+    color: var(--text-2);
+    padding: 0;
+    transition: background 0.12s, color 0.12s;
+    z-index: 1;
+}
+.click-card-close:hover {
+    background: var(--border);
+    color: var(--text);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+.click-card-header {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 9px 30px 8px 11px;
+}
+
+.click-card-logo {
+    height: 16px;
+    width: auto;
+    max-width: 36px;
+    object-fit: contain;
+    flex-shrink: 0;
+    opacity: 0.85;
+}
+
+.click-card-flight {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+}
+
+.click-card-icao {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 4px;
+    flex-shrink: 0;
+}
+
+.click-card-type {
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--surface-hover);
+    border-radius: 4px;
+    padding: 2px 5px;
+    color: var(--text-2);
+    flex-shrink: 0;
+}
+
+/* ── Route ──────────────────────────────────────────────────────────── */
+.click-card-route {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    padding: 6px 11px;
+    background: var(--surface-hover);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+}
+
+.click-card-port {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    flex: 1;
+    min-width: 0;
+}
+.click-card-port--right { align-items: flex-end; text-align: right; }
+
+.click-card-iata {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--text);
+    line-height: 1;
+    letter-spacing: 0.3px;
+}
+
+.click-card-city {
+    font-size: 9px;
+    color: var(--text-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 68px;
+    margin-top: 2px;
+}
+
+.click-card-arrow {
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+/* ── Stats ──────────────────────────────────────────────────────────── */
+.click-card-stats {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 11px 9px;
+    font-size: 11px;
+    color: var(--text-2);
+}
+
+.click-card-dot { color: var(--border); }
+.click-card-gnd { font-weight: 600; color: var(--text-2); }
+.click-card-climb { color: #22c55e; font-weight: 600; }
+.click-card-desc  { color: #f97316; font-weight: 600; }
+
+/* ── Details button ─────────────────────────────────────────────────────── */
+.click-card-details {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 100%;
+    padding: 8px 11px 9px;
+    background: var(--surface-active);
+    border: none;
+    border-top: 1px solid var(--border);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s;
+    border-radius: 0 0 10px 10px;
+}
+.click-card-details:hover {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+

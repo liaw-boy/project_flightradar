@@ -166,12 +166,29 @@ function pruneOldTrackPoints() {
 }
 
 // ── Periodic WAL checkpoint — every 5 minutes (PASSIVE: non-blocking) ───────
+// If WAL exceeds 2GB, escalate to TRUNCATE to prevent unbounded growth.
+const WAL_SIZE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
 function walCheckpoint() {
     try {
-        const result = db.pragma('wal_checkpoint(PASSIVE)');
-        const r = result[0];
-        if (r && r.log > 0) {
-            console.log(`[SQLite] WAL checkpoint: ${r.busy} busy, ${r.log} log pages, ${r.checkpointed} checkpointed`);
+        const { statSync } = require('fs');
+        const walPath = db.name + '-wal';
+        let walSize = 0;
+        try { walSize = statSync(walPath).size; } catch { /* file may not exist */ }
+
+        if (walSize > WAL_SIZE_LIMIT_BYTES) {
+            const sizeMB = Math.round(walSize / 1024 / 1024);
+            console.warn(`[SQLite] WAL ${sizeMB}MB exceeds 2GB limit — running TRUNCATE`);
+            const result = db.pragma('wal_checkpoint(TRUNCATE)');
+            const r = result[0];
+            let sizeAfter = 0;
+            try { sizeAfter = Math.round(statSync(walPath).size / 1024 / 1024); } catch { /* truncated away */ }
+            console.log(`[SQLite] WAL TRUNCATE (size trigger): busy=${r?.busy} log=${r?.log} checkpointed=${r?.checkpointed} | ${sizeMB}MB → ${sizeAfter}MB`);
+        } else {
+            const result = db.pragma('wal_checkpoint(PASSIVE)');
+            const r = result[0];
+            if (r && r.log > 0) {
+                console.log(`[SQLite] WAL checkpoint: ${r.busy} busy, ${r.log} log pages, ${r.checkpointed} checkpointed`);
+            }
         }
     } catch (e) {
         console.error('[SQLite] WAL checkpoint error:', e.message);

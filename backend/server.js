@@ -324,6 +324,7 @@ app.use(express.json());
 // ── User Auth ────────────────────────────────────────────────────────────────
 app.post('/api/auth/register', authCtrl.register);
 app.post('/api/auth/login',    authCtrl.login);
+app.post('/api/auth/refresh',  authCtrl.refresh);
 app.get( '/api/auth/me',       authCtrl.authMiddleware, authCtrl.me);
 
 // ── Admin API ────────────────────────────────────────────────────────────────

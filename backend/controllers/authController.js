@@ -123,4 +123,21 @@ function superAdminMiddleware(req, res, next) {
     next();
 }
 
-module.exports = { register, login, me, authMiddleware, adminMiddleware, superAdminMiddleware };
+// ── POST /api/auth/refresh ───────────────────────────────────────────────────
+// Issues a new 7-day JWT if the current token is valid (regardless of remaining TTL).
+// Frontend calls this when token has < 3 days left, keeping active users logged in.
+async function refresh(req, res) {
+    const header = req.headers.authorization || '';
+    const token  = header.startsWith('Bearer ') ? header.slice(7) : null;
+    if (!token) return res.status(401).json({ error: 'no token' });
+    try {
+        const payload = jwt.verify(token, getJwtSecret());
+        const user    = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
+        if (!user) return res.status(401).json({ error: 'user not found' });
+        return res.json({ token: signToken(user), user: safeUser(user) });
+    } catch {
+        return res.status(401).json({ error: 'invalid or expired token' });
+    }
+}
+
+module.exports = { register, login, me, refresh, authMiddleware, adminMiddleware, superAdminMiddleware };
