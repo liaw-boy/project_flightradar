@@ -6,7 +6,7 @@ export default function AeroIcon({ size = 24, bg = true, className = '', color, 
         height: size,
         borderRadius: radius,
         flexShrink: 0,
-        filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.7)) drop-shadow(0 1px 1px rgba(0,0,0,0.5))',
+        filter: 'brightness(1.25) saturate(0.85) hue-rotate(-15deg) drop-shadow(0 2px 4px rgba(0,0,0,0.7))',
     };
     return (
         <img
