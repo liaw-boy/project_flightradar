@@ -353,10 +353,28 @@ const loginLimiter = rateLimit({
     keyGenerator: (req) => req.ip,
 });
 
+const registerLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour window
+    max: 5,                    // 5 registrations per IP per hour
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many registration attempts, please try again later.' },
+    keyGenerator: (req) => req.ip,
+});
+
+const refreshLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many refresh requests.' },
+    keyGenerator: (req) => req.ip,
+});
+
 // ── User Auth ────────────────────────────────────────────────────────────────
-app.post('/api/auth/register', authCtrl.register);
+app.post('/api/auth/register', registerLimiter, authCtrl.register);
 app.post('/api/auth/login',    loginLimiter, authCtrl.login);
-app.post('/api/auth/refresh',  authCtrl.refresh);
+app.post('/api/auth/refresh',  refreshLimiter, authCtrl.refresh);
 app.post('/api/auth/logout',   authCtrl.logout);
 app.get( '/api/auth/me',       authCtrl.authMiddleware, authCtrl.me);
 

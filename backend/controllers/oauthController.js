@@ -6,18 +6,39 @@ const FacebookStrategy = require('passport-facebook').Strategy;
 const jwt           = require('jsonwebtoken');
 const db            = require('../db/sqlite');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'aerostrat-secret-change-in-prod';
-const TOKEN_TTL  = '30d';
+const TOKEN_TTL = '7d';
+
+function getJwtSecret() {
+    const s = process.env.JWT_SECRET;
+    if (!s) {
+        console.error('[FATAL] JWT_SECRET environment variable is not set.');
+        process.exit(1);
+    }
+    return s;
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function signToken(user) {
-    return jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: TOKEN_TTL });
+    return jwt.sign(
+        {
+            id:           user.id,
+            username:     user.username,
+            is_admin:     user.is_admin === 1 || user.is_admin === true,
+            is_superadmin: user.is_superadmin === 1 || user.is_superadmin === true,
+        },
+        getJwtSecret(),
+        { expiresIn: TOKEN_TTL }
+    );
 }
 
 function safeUser(user) {
     const { password_hash, ...rest } = user;
-    return rest;
+    return {
+        ...rest,
+        is_admin:      rest.is_admin === 1 || rest.is_admin === true,
+        is_superadmin: rest.is_superadmin === 1 || rest.is_superadmin === true,
+    };
 }
 
 /**
