@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import AeroIcon from './AeroIcon';
 import {
     X, Plus, Pencil, Trash2, Plane,
     ChevronLeft, ChevronRight, AlertCircle, CheckCircle, Loader, ArrowRight
@@ -132,7 +133,7 @@ function FlightRow({ flight, onEdit, onDelete }) {
             {/* Top bar */}
             <div className="fc-top">
                 <div className="fc-brand">
-                    <Plane size={9} style={{ transform: 'rotate(90deg)' }} />
+                    <AeroIcon size={12} bg={false} />
                     AEROSTRAT
                 </div>
                 {flight.flight_number && <div className="fc-fn">{flight.flight_number}</div>}
@@ -312,7 +313,7 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
                     {/* Header */}
                     <div className="bf-header">
                         <div className="bf-logo">
-                            <Plane size={20} />
+                            <AeroIcon size={22} bg={false} />
                             <span className="bf-logo-name">AEROSTRAT</span>
                         </div>
                         <div className="bf-header-right">

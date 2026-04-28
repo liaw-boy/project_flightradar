@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import AeroIcon from './AeroIcon';
 import {
     ArrowLeft, Users, Activity, Trash2, ShieldCheck,
     RefreshCw, Plane, Database, Wifi, Cpu, BarChart2, LogOut,
@@ -487,9 +488,7 @@ export default function AdminPanel({ onClose }) {
             {/* Sidebar */}
             <aside className="adm-sidebar">
                 <div className="adm-brand">
-                    <svg className="adm-brand-icon" viewBox="0 0 24 24" fill="none" stroke="#a9dfd8" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/>
-                    </svg>
+                    <AeroIcon size={32} bg={true} />
                     <div>
                         <div className="adm-brand-name">AEROSTRAT</div>
                         <div className="adm-brand-sub">管理後台</div>
