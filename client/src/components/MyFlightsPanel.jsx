@@ -8,6 +8,7 @@ import {
     apiDeleteFlight, apiFlightStats, apiLookupCallsign, apiLookupAirport,
     authStore,
 } from '../store/authStore';
+import ConfirmDialog from './ConfirmDialog';
 import './MyFlightsPanel.css';
 
 const BARCODE = [18,10,24,12,20,28,8,18,22,14,20,10,26,18,14,22,10,20,16,18,24,8,20,18,22,16,12,26,10,18,20,22,16,24,12,18,20,26,14,22,10,18,24,12,20,16,28,8,18,22,14,20,26,12,18,16,24,10,22,28];
@@ -221,21 +222,22 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
     const [depHint, setDepHint] = useState('');
     const [arrHint, setArrHint] = useState('');
     const csTimerRef = useRef(null);
-    const enrichedRef = useRef(false);
 
     const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
+    // Re-run when the selected plane changes (prefillKey tracks identity across renders)
+    const prefillKey = `${prefill?.icao24}|${prefill?.callsign}`;
     useEffect(() => {
-        if (enrichedRef.current || initial?.id) return;
+        if (initial?.id) return;
         const hex = prefill?.icao24;
         const cs = prefill?.callsign;
         if (!hex || !cs) return;
-        enrichedRef.current = true;
+        let cancelled = false;
         setEnriching(true);
         fetch(`/api/flight/complete-details/${encodeURIComponent(hex)}/${encodeURIComponent(cs)}`)
             .then(r => r.ok ? r.json() : null)
             .then(data => {
-                if (!data) return;
+                if (cancelled || !data) return;
                 setForm(f => ({
                     ...f,
                     dep_icao:      f.dep_icao      || data.route?.origin_icao      || '',
@@ -249,8 +251,9 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
                 if (data.route?.destination_name) setArrHint(data.route.destination_name);
             })
             .catch(() => {})
-            .finally(() => setEnriching(false));
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+            .finally(() => { if (!cancelled) setEnriching(false); });
+        return () => { cancelled = true; };
+    }, [prefillKey, initial?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
     function handleFlightNumberChange(val) {
         set('flight_number', val);
@@ -485,6 +488,7 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
     const [editTarget, setEditTarget] = useState(null);
     const [loading, setLoading]   = useState(false);
     const [toast, setToast]       = useState('');
+    const [deleteTarget, setDeleteTarget] = useState(null);
     const LIMIT = 20;
 
     const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 2500); };
@@ -515,8 +519,10 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
         loadStats();
     }
 
-    async function handleDelete(id) {
-        if (!window.confirm('確定刪除這筆航班記錄？')) return;
+    async function confirmDelete() {
+        if (!deleteTarget) return;
+        const id = deleteTarget;
+        setDeleteTarget(null);
         await apiDeleteFlight(id);
         showToast('已刪除');
         loadFlights(page);
@@ -608,7 +614,7 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
                             key={f.id}
                             flight={f}
                             onEdit={fl => { setEditTarget(fl); setView('form'); }}
-                            onDelete={handleDelete}
+                            onDelete={setDeleteTarget}
                         />
                     ))}
                     {totalPages > 1 && (
@@ -686,6 +692,15 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
                 {statsStrip}
                 <div className="mfp-panel-content">{listContent}</div>
             </div>
+            {deleteTarget && (
+                <ConfirmDialog
+                    title="刪除航班記錄"
+                    message="確定刪除這筆航班記錄？此操作無法復原。"
+                    confirmLabel="刪除"
+                    onConfirm={confirmDelete}
+                    onCancel={() => setDeleteTarget(null)}
+                />
+            )}
         </div>
     );
 }

@@ -1,16 +1,20 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /**
  * Manages the SSE /api/events connection for planes-updated triggers and anomaly alerts.
- * Extracted from App.jsx to reduce God-component surface area.
+ * Returns { sseStale } — true when the connection is down and data may be outdated.
  */
 export function useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkAlert }) {
     const seenAlertKeys = useRef(new Set());
+    const [sseStale, setSseStale] = useState(false);
 
     useEffect(() => {
         const es = new EventSource('/api/events');
 
+        es.onopen = () => setSseStale(false);
+
         es.onmessage = (e) => {
+            setSseStale(false);
             try {
                 const data = JSON.parse(e.data);
                 if (data.type === 'planes-updated') {
@@ -39,12 +43,13 @@ export function useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkA
             } catch (_) { /* ignore SSE parse error */ }
         };
 
-        // Browser auto-reconnects on error; log for visibility
         es.onerror = () => {
-            console.warn('[SSE] Connection error — browser will auto-reconnect');
+            setSseStale(true);
         };
 
         return () => es.close();
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
     // fetchPlanesRef, setAnomalyAlerts, playSquawkAlert are all stable refs/stable setters
+
+    return { sseStale };
 }

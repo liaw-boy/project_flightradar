@@ -153,9 +153,23 @@ export async function apiFlightMapData() {
 }
 
 export async function apiLookupCallsign(cs) {
-    return fetch(`/api/lookup/callsign/${encodeURIComponent(cs)}`).then(r => r.json()).catch(() => ({ found: false }));
+    try {
+        const r = await fetch(`/api/lookup/callsign/${encodeURIComponent(cs)}`);
+        if (!r.ok) return { found: false, networkError: r.status !== 404 };
+        return r.json();
+    } catch (err) {
+        console.error('[lookup] callsign network error:', err);
+        return { found: false, networkError: true };
+    }
 }
 
 export async function apiLookupAirport(code) {
-    return fetch(`/api/lookup/airport/${encodeURIComponent(code)}`).then(r => r.json()).catch(() => ({ found: false }));
+    try {
+        const r = await fetch(`/api/lookup/airport/${encodeURIComponent(code)}`);
+        if (!r.ok) return { found: false, networkError: r.status !== 404 };
+        return r.json();
+    } catch (err) {
+        console.error('[lookup] airport network error:', err);
+        return { found: false, networkError: true };
+    }
 }

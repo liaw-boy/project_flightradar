@@ -13,6 +13,7 @@ export default function TopBar({
     groundCount,
     apiStatus,
     apiStatusClass,
+    sseStale = false,
     planesDict,
     onSearchSelect,
     filters,
@@ -78,8 +79,11 @@ export default function TopBar({
                     <AeroIcon size={28} bg={false} />
                     <h2>AEROSTRAT RADAR</h2>
                 </div>
-
-
+                {sseStale && (
+                    <div className="tb-stale-badge" title="即時資料連線中斷，顯示的資料可能已過時">
+                        資料可能已過時
+                    </div>
+                )}
 
             </div>
 

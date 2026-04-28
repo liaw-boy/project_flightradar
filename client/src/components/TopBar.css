@@ -56,6 +56,36 @@
     gap: 6px;
 }
 
+.tb-stale-badge {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: #f59e0b;
+    animation: tb-stale-pulse 2s ease-in-out infinite;
+}
+
+.tb-stale-badge::before {
+    content: '';
+    display: block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #f59e0b;
+    animation: tb-stale-pulse 2s ease-in-out infinite;
+}
+
+@keyframes tb-stale-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.4; }
+}
+
 .brand-monitor-text {
     font-size: 10px;
     font-weight: 500;

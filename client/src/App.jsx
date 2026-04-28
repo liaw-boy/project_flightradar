@@ -226,7 +226,7 @@ export default function App() {
     // [v2.9.0] SSE EventSource — real-time server push (logic in useAnomalyStream)
     const fetchPlanesRef = useRef(fetchPlanes);
     useEffect(() => { fetchPlanesRef.current = fetchPlanes; }, [fetchPlanes]);
-    useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkAlert });
+    const { sseStale } = useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkAlert });
 
     // Initial URL Params parsing
     const initializedUrlRef = useRef(false);
@@ -547,6 +547,7 @@ export default function App() {
                 groundCount={groundCount}
                 apiStatus={apiStatus}
                 apiStatusClass={apiStatusClass}
+                sseStale={sseStale}
                 planesDict={planesDict}
                 onSearchSelect={handleSearchSelect}
                 filters={filters}
@@ -666,10 +667,13 @@ export default function App() {
 
             {/* ── Auth / MyFlights Modals ── */}
             {showAuthModal && (
-                <AuthModal onClose={() => { setShowAuthModal(false); setUrlPanel(null); }} />
+                <ErrorBoundary>
+                    <AuthModal onClose={() => { setShowAuthModal(false); setUrlPanel(null); }} />
+                </ErrorBoundary>
             )}
 
             {showMyFlights && (
+                <ErrorBoundary>
                 <MyFlightsPanel
                     initialView={myFlightsInitialView}
                     mode={myFlightsMode}
@@ -692,6 +696,7 @@ export default function App() {
                         arr_icao:      selectedRoute?.arrivalAirport || '',
                     } : null}
                 />
+                </ErrorBoundary>
             )}
 
         </div>
