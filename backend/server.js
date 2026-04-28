@@ -1,6 +1,7 @@
 const config = require('./config');
 const logger = require('./logger');
 const express = require('express');
+const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const compression = require('compression');
 const helmet = require('helmet');
@@ -339,6 +340,7 @@ const lookupLimiter = rateLimit({
     message: { error: 'Too many lookup requests.' },
 });
 app.use('/api/lookup', lookupLimiter);
+app.use(cookieParser());
 app.use(express.json());
 
 // ── Auth rate limiter: 5 attempts / minute / IP to prevent brute force ──────
@@ -355,6 +357,7 @@ const loginLimiter = rateLimit({
 app.post('/api/auth/register', authCtrl.register);
 app.post('/api/auth/login',    loginLimiter, authCtrl.login);
 app.post('/api/auth/refresh',  authCtrl.refresh);
+app.post('/api/auth/logout',   authCtrl.logout);
 app.get( '/api/auth/me',       authCtrl.authMiddleware, authCtrl.me);
 
 // ── Admin API ────────────────────────────────────────────────────────────────

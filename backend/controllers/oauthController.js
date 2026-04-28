@@ -132,15 +132,26 @@ passport.deserializeUser((id, done) => {
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 /**
- * After OAuth success, redirect to frontend with JWT in URL hash
- * (hash is never sent to server — safer than query param)
+ * After OAuth success, set the JWT as an httpOnly cookie and redirect to
+ * the frontend with only the user profile (no token) encoded in the URL param.
  */
 function oauthSuccess(req, res) {
     if (!req.user) return res.redirect('/?oauth_error=auth_failed');
     const token = signToken(req.user);
-    const user  = JSON.stringify(safeUser(req.user));
-    // Encode and redirect; frontend picks up from URL hash
-    const encoded = Buffer.from(JSON.stringify({ token, user })).toString('base64url');
+    const user  = safeUser(req.user);
+
+    // Set httpOnly cookie — token never touches client JS
+    res.cookie('aerostrat_token', token, {
+        httpOnly: true,
+        secure:   process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge:   7 * 24 * 60 * 60 * 1000,
+        path:     '/',
+    });
+
+    const payload = jwt.decode(token);
+    const tokenExpiry = payload?.exp ? payload.exp * 1000 : null;
+    const encoded = Buffer.from(JSON.stringify({ user, tokenExpiry })).toString('base64url');
     res.redirect(`/?oauth_success=${encoded}`);
 }
 

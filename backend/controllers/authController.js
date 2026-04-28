@@ -3,11 +3,12 @@ const bcrypt = require('bcrypt');
 const jwt    = require('jsonwebtoken');
 const db     = require('../db/sqlite');
 
-const SALT_ROUNDS = 10;
-const TOKEN_TTL   = '7d';   // reduced from 30d
+const SALT_ROUNDS  = 10;
+const TOKEN_TTL    = '7d';
+const COOKIE_NAME  = 'aerostrat_token';
+const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
-// Pre-hashed dummy — used in login() to prevent user-enumeration via timing differences.
-// Running bcrypt.compare against this when username is not found equalizes response time.
+// Pre-hashed dummy — equalizes login response time to prevent user-enumeration.
 let DUMMY_HASH = '$2b$10$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
 bcrypt.hash('__dummy_timing_equalization__', SALT_ROUNDS).then(h => { DUMMY_HASH = h; });
 
@@ -20,7 +21,7 @@ function getJwtSecret() {
     return s;
 }
 
-// ── helpers ─────────────────────────────────────────────────────────────────
+// ── helpers ──────────────────────────────────────────────────────────────────
 
 function signToken(user) {
     return jwt.sign(
@@ -42,6 +43,28 @@ function safeUser(user) {
         is_admin: rest.is_admin === 1,
         is_superadmin: rest.is_superadmin === 1,
     };
+}
+
+// Set the JWT as an httpOnly cookie (invisible to JS — prevents XSS token theft).
+// Also returns the exp timestamp so the frontend can schedule a silent refresh
+// without needing to read the cookie.
+function setTokenCookie(res, token) {
+    res.cookie(COOKIE_NAME, token, {
+        httpOnly: true,
+        secure:   process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge:   COOKIE_MAX_AGE,
+        path:     '/',
+    });
+    // Decode exp for the frontend (non-secret — it's just a timestamp)
+    try {
+        const payload = jwt.decode(token);
+        return payload?.exp ? payload.exp * 1000 : null;
+    } catch { return null; }
+}
+
+function clearTokenCookie(res) {
+    res.clearCookie(COOKIE_NAME, { httpOnly: true, sameSite: 'strict', path: '/' });
 }
 
 // ── POST /api/auth/register ──────────────────────────────────────────────────
@@ -66,7 +89,9 @@ async function register(req, res) {
         ).run(username, email || null, hash);
 
         const user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
-        res.status(201).json({ token: signToken(user), user: safeUser(user) });
+        const token = signToken(user);
+        const tokenExpiry = setTokenCookie(res, token);
+        res.status(201).json({ user: safeUser(user), tokenExpiry });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -83,7 +108,6 @@ async function login(req, res) {
     try {
         const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
         if (!user) {
-            // Run bcrypt anyway to prevent timing-based user enumeration
             await bcrypt.compare(password, DUMMY_HASH);
             return res.status(401).json({ error: 'invalid credentials' });
         }
@@ -91,7 +115,9 @@ async function login(req, res) {
         const ok = await bcrypt.compare(password, user.password_hash);
         if (!ok) return res.status(401).json({ error: 'invalid credentials' });
 
-        res.json({ token: signToken(user), user: safeUser(user) });
+        const token = signToken(user);
+        const tokenExpiry = setTokenCookie(res, token);
+        res.json({ user: safeUser(user), tokenExpiry });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -100,17 +126,27 @@ async function login(req, res) {
 // ── GET /api/auth/me ─────────────────────────────────────────────────────────
 
 function me(req, res) {
-    // req.user injected by authMiddleware
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'user not found' });
     res.json({ user: safeUser(user) });
 }
 
+// ── POST /api/auth/logout ────────────────────────────────────────────────────
+
+function logout(req, res) {
+    clearTokenCookie(res);
+    res.json({ ok: true });
+}
+
 // ── middleware ───────────────────────────────────────────────────────────────
 
 function authMiddleware(req, res, next) {
-    const header = req.headers.authorization || '';
-    const token  = header.startsWith('Bearer ') ? header.slice(7) : null;
+    // Accept token from httpOnly cookie (preferred) or Authorization header (legacy / API clients)
+    const cookieToken = req.cookies?.[COOKIE_NAME];
+    const headerValue = req.headers.authorization || '';
+    const headerToken = headerValue.startsWith('Bearer ') ? headerValue.slice(7) : null;
+    const token = cookieToken || headerToken;
+
     if (!token) return res.status(401).json({ error: 'authentication required' });
 
     try {
@@ -126,27 +162,30 @@ function adminMiddleware(req, res, next) {
     next();
 }
 
-// Only superadmin (liawboy) may manage other users' admin status.
 function superAdminMiddleware(req, res, next) {
     if (!req.user?.is_superadmin) return res.status(403).json({ error: 'superadmin required' });
     next();
 }
 
 // ── POST /api/auth/refresh ───────────────────────────────────────────────────
-// Issues a new 7-day JWT if the current token is valid (regardless of remaining TTL).
-// Frontend calls this when token has < 3 days left, keeping active users logged in.
+// Re-issues a fresh 7-day JWT. Called by the frontend when token has < 3 days left.
 async function refresh(req, res) {
-    const header = req.headers.authorization || '';
-    const token  = header.startsWith('Bearer ') ? header.slice(7) : null;
+    const cookieToken = req.cookies?.[COOKIE_NAME];
+    const headerValue = req.headers.authorization || '';
+    const headerToken = headerValue.startsWith('Bearer ') ? headerValue.slice(7) : null;
+    const token = cookieToken || headerToken;
+
     if (!token) return res.status(401).json({ error: 'no token' });
     try {
         const payload = jwt.verify(token, getJwtSecret());
         const user    = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
         if (!user) return res.status(401).json({ error: 'user not found' });
-        return res.json({ token: signToken(user), user: safeUser(user) });
+        const newToken = signToken(user);
+        const tokenExpiry = setTokenCookie(res, newToken);
+        return res.json({ user: safeUser(user), tokenExpiry });
     } catch {
         return res.status(401).json({ error: 'invalid or expired token' });
     }
 }
 
-module.exports = { register, login, me, refresh, authMiddleware, adminMiddleware, superAdminMiddleware };
+module.exports = { register, login, me, logout, refresh, authMiddleware, adminMiddleware, superAdminMiddleware };

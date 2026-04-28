@@ -23,9 +23,8 @@ function RadialGauge({ pct = 0, color = 'var(--accent)', size = 58, label }) {
     );
 }
 
-function authHeader() {
-    const token = authStore.getToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
+function authFetch(url, options = {}) {
+    return fetch(url, { ...options, credentials: 'include' });
 }
 
 // ── Users Tab ────────────────────────────────────────────────────────────────
@@ -38,7 +37,7 @@ function UsersTab() {
     const load = useCallback(async () => {
         setLoading(true); setError(null);
         try {
-            const r = await fetch('/api/admin/users', { headers: authHeader() });
+            const r = await authFetch('/api/admin/users');
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             const { users: list } = await r.json();
             setUsers(list);
@@ -66,7 +65,7 @@ function UsersTab() {
             confirmLabel: '確認刪除',
         });
         if (!ok) return;
-        const r = await fetch(`/api/admin/users/${id}`, { method: 'DELETE', headers: authHeader() });
+        const r = await authFetch(`/api/admin/users/${id}`, { method: 'DELETE' });
         const j = await r.json();
         if (j.ok) setUsers(u => u.filter(x => x.id !== id));
         else setError('刪除失敗：' + (j.error || 'unknown'));
@@ -88,7 +87,7 @@ function UsersTab() {
             }
         );
         if (!ok) return;
-        const r = await fetch(`/api/admin/users/${id}/admin`, { method: 'PUT', headers: authHeader() });
+        const r = await authFetch(`/api/admin/users/${id}/admin`, { method: 'PUT' });
         const j = await r.json();
         if (j.ok) setUsers(u => u.map(x => x.id === id ? { ...x, is_admin: j.is_admin } : x));
         else setError('操作失敗：' + (j.error || 'unknown'));
@@ -195,10 +194,9 @@ function MonitorTab() {
     const load = useCallback(async () => {
         setLoading(true); setError(null);
         try {
-            const hdrs = authHeader();
             const [hr, sr] = await Promise.all([
-                fetch('/api/health', { headers: hdrs }),
-                fetch('/api/stats',  { headers: hdrs }),
+                authFetch('/api/health'),
+                authFetch('/api/stats'),
             ]);
             if (!hr.ok || !sr.ok) throw new Error(`HTTP ${hr.status}/${sr.status}`);
             const [h, s] = await Promise.all([hr.json(), sr.json()]);

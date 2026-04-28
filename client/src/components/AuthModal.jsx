@@ -51,8 +51,9 @@ function useOAuthRedirect(onSuccess) {
 
         if (success) {
             try {
-                const { token, user } = JSON.parse(atob(success));
-                authStore._set(token, typeof user === 'string' ? JSON.parse(user) : user);
+                const { user, tokenExpiry } = JSON.parse(atob(success));
+                const parsedUser = typeof user === 'string' ? JSON.parse(user) : user;
+                authStore._set(parsedUser, tokenExpiry || null);
                 // Clean URL
                 window.history.replaceState({}, '', window.location.pathname);
                 onSuccess?.();
