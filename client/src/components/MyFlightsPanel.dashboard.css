@@ -1,0 +1,246 @@
+/* ══════════════════════════════════════════════════════════════
+   9. STATS DASHBOARD
+   ══════════════════════════════════════════════════════════════ */
+.sd-wrap {
+    padding: clamp(24px, 4vw, 44px) clamp(20px, 3.5vw, 40px) clamp(40px, 6vw, 64px);
+    display: flex;
+    flex-direction: column;
+    gap: clamp(28px, 4vw, 44px);
+    color: var(--c-text);
+}
+.sd-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--ff-body);
+    font-size: var(--fz-small);
+    font-weight: 500;
+    color: var(--c-gold);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    transition: opacity 0.15s ease;
+    align-self: flex-start;
+}
+.sd-back:hover { opacity: 0.75; }
+.sd-hero {
+    font-family: var(--ff-display);
+    font-size: var(--fz-hero);
+    font-weight: 400;
+    line-height: 0.95;
+    letter-spacing: -3px;
+    color: var(--c-text);
+    margin: 0;
+    font-style: italic;
+    font-variation-settings: 'opsz' 144, 'SOFT' 30;
+    text-transform: none;
+}
+.sd-hero-gold {
+    color: var(--c-gold);
+    font-variation-settings: 'opsz' 144, 'SOFT' 80;
+}
+
+/* Big 3 summary — fluid grid */
+.sd-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: clamp(12px, 2vw, 18px);
+}
+.sd-card {
+    background: var(--c-card);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-lg);
+    padding: clamp(20px, 3vw, 28px) clamp(20px, 3vw, 26px);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 150px;
+    justify-content: flex-end;
+    transition: border-color 0.25s ease, transform 0.18s ease;
+}
+.sd-card:hover {
+    border-color: rgba(214, 178, 117, 0.3);
+    transform: translateY(-2px);
+}
+.sd-card-num {
+    position: absolute;
+    top: 14px;
+    right: 18px;
+    font-family: var(--ff-display);
+    font-size: clamp(48px, 4vw, 72px);
+    font-weight: 400;
+    font-style: italic;
+    font-variation-settings: 'opsz' 144, 'SOFT' 80;
+    color: rgba(214, 178, 117, 0.07);
+    line-height: 1;
+    user-select: none;
+    letter-spacing: -2px;
+}
+.sd-card-label {
+    font-family: var(--ff-body);
+    font-size: var(--fz-eyebrow);
+    font-weight: 500;
+    letter-spacing: 2.4px;
+    text-transform: uppercase;
+    color: var(--c-text-3);
+}
+.sd-card-big {
+    font-family: var(--ff-display);
+    font-size: clamp(36px, 1.8rem + 2.5vw, 56px);
+    font-weight: 400;
+    font-style: italic;
+    font-variation-settings: 'opsz' 144, 'SOFT' 60;
+    color: var(--c-gold);
+    line-height: 0.95;
+    letter-spacing: -2px;
+}
+
+/* Bar charts grid — adaptive */
+.sd-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: clamp(28px, 4vw, 44px);
+}
+@media (min-width: 768px) {
+    .sd-grid { grid-template-columns: 1.3fr 1fr; }
+}
+.sd-col { display: flex; flex-direction: column; gap: clamp(24px, 3.5vw, 36px); }
+.sd-section { display: flex; flex-direction: column; gap: 14px; }
+.sd-section-title {
+    font-family: var(--ff-body);
+    font-size: var(--fz-eyebrow);
+    font-weight: 500;
+    letter-spacing: 2.6px;
+    text-transform: uppercase;
+    color: var(--c-text-2);
+    border-bottom: 1px solid var(--c-line);
+    padding-bottom: 10px;
+    margin-bottom: 4px;
+}
+.sd-bar-row {
+    display: grid;
+    grid-template-columns: 96px 1fr 36px;
+    align-items: center;
+    gap: 14px;
+}
+.sd-route-row { grid-template-columns: 130px 1fr 36px; }
+.sd-bar-label {
+    font-family: var(--ff-body);
+    font-size: var(--fz-small);
+    font-weight: 500;
+    color: var(--c-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.sd-arrow { color: var(--c-gold); flex-shrink: 0; }
+.sd-bar-track {
+    height: 5px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.sd-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--c-gold-2), var(--c-gold));
+    border-radius: 3px;
+    min-width: 4px;
+    transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sd-bar-count {
+    font-family: var(--ff-mono);
+    font-size: var(--fz-small);
+    font-weight: 500;
+    color: var(--c-gold-2);
+    text-align: right;
+}
+
+/* Recent flights */
+.sd-recent-list {
+    background: var(--c-card);
+    border: 1px solid var(--c-line);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+}
+.sd-recent-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 14px clamp(14px, 2vw, 20px);
+    border-bottom: 1px solid var(--c-line);
+    transition: background 0.18s ease;
+}
+.sd-recent-row:last-child { border-bottom: none; }
+.sd-recent-row:hover { background: rgba(214, 178, 117, 0.04); }
+.sd-recent-route {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+.sd-recent-iata {
+    font-family: var(--ff-display);
+    font-size: var(--fz-md);
+    font-weight: 400;
+    font-style: italic;
+    font-variation-settings: 'opsz' 36, 'SOFT' 60;
+    color: var(--c-text);
+    letter-spacing: -0.3px;
+}
+.sd-recent-plane { color: var(--c-gold); opacity: 0.7; align-self: center; }
+.sd-recent-tag {
+    font-family: var(--ff-mono);
+    font-size: var(--fz-mini);
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    color: var(--c-gold);
+    background: var(--c-gold-3);
+    border: 1px solid rgba(214, 178, 117, 0.18);
+    border-radius: 4px;
+    padding: 3px 8px;
+    white-space: nowrap;
+}
+.sd-recent-date {
+    font-family: var(--ff-mono);
+    font-size: var(--fz-mini);
+    color: var(--c-text-3);
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   10. TOAST
+   ══════════════════════════════════════════════════════════════ */
+.mfp-toast {
+    position: fixed;
+    bottom: clamp(16px, 4vw, 28px);
+    left: 50%;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    background: var(--c-card);
+    border: 1px solid var(--c-gold-2);
+    border-radius: var(--r-md);
+    color: var(--c-gold);
+    font-family: var(--ff-body);
+    font-size: var(--fz-small);
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    z-index: 99999;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+    animation: toastIn 0.22s ease;
+    text-transform: none;
+}
+@keyframes toastIn {
+    from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+}
+

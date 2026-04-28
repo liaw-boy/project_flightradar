@@ -1,0 +1,92 @@
+/* ══════════════════════════════════════════════════════════════
+   AEROSTRAT — FLIGHT LOG  v5  (Editorial × Aviation)
+   Design references: Flighty · Cathay editorial · NYT travel
+   - Fluid typography via clamp()
+   - Fraunces variable serif for display (soft, optical, italic)
+   - Inter for body / UI
+   - Mixed case by default; uppercase reserved for small labels
+   - Mobile-first responsive (320 → ultrawide)
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Local tokens (scoped to component roots; bridge to global) ── */
+.mfp-overlay, .mfp-page, .mfp-fullpage,
+.mfp-panel, .fc-card, .bf-wrap, .sd-wrap {
+    /* Fonts — bridge to global system (dark + light auto) */
+    --ff-display: var(--font-display, 'Fraunces', 'Cormorant Garamond', Georgia, serif);
+    --ff-body:    var(--font-main, 'Inter', 'PingFang TC', -apple-system, sans-serif);
+    --ff-mono:    var(--font-mono-soft, 'JetBrains Mono', 'SF Mono', Menlo, monospace);
+
+    /* Dark palette (default) */
+    --c-bg:       #0c1220;
+    --c-card:     #131a2a;
+    --c-card-2:   #182033;
+    --c-surf:     #1a2335;
+    --c-hi:       #232c42;
+
+    --c-text:     #ecedf2;
+    --c-text-2:   #a8aebf;
+    --c-text-3:   #6f7585;
+    --c-line:     rgba(168, 174, 191, 0.12);
+    --c-line-2:   rgba(168, 174, 191, 0.22);
+
+    /* Brass-gold — bridges to global --accent-warm (auto light-flip) */
+    --c-gold:     var(--accent-warm, #d6b275);
+    --c-gold-2:   var(--accent-warm-2, #b89456);
+    --c-gold-3:   var(--accent-warm-dim, rgba(214, 178, 117, 0.15));
+
+    /* Fluid type scale — anchored 14px @ 320vw, scales gently */
+    --fz-eyebrow: 10.5px;
+    --fz-mini:    11.5px;
+    --fz-small:   13px;
+    --fz-base:    clamp(14px, 0.85rem + 0.15vw, 15.5px);
+    --fz-md:      clamp(15px, 0.9rem + 0.25vw, 17px);
+    --fz-lg:      clamp(18px, 1rem + 0.6vw, 22px);
+    --fz-xl:      clamp(22px, 1.1rem + 1vw, 28px);
+    --fz-num:     clamp(36px, 1.8rem + 3vw, 56px);   /* IATA / big stat */
+    --fz-hero:    clamp(40px, 2rem + 4vw, 78px);     /* page hero */
+
+    /* Spacing — generous */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 24px;
+    --sp-6: 32px;
+    --sp-7: 48px;
+    --sp-pad: clamp(16px, 3vw, 32px);
+
+    /* Radii */
+    --r-sm: 6px;
+    --r-md: 10px;
+    --r-lg: 14px;
+    --r-xl: 18px;
+}
+
+/* ── Light theme override (bridges into global [data-theme="light"]) ── */
+:root[data-theme="light"] .mfp-overlay,
+:root[data-theme="light"] .mfp-page,
+:root[data-theme="light"] .mfp-fullpage,
+:root[data-theme="light"] .mfp-panel,
+:root[data-theme="light"] .fc-card,
+:root[data-theme="light"] .bf-wrap,
+:root[data-theme="light"] .sd-wrap {
+    --c-bg:       #f7f5f0;       /* warm cream — not stark white */
+    --c-card:     #ffffff;
+    --c-card-2:   #f3eee5;
+    --c-surf:     #faf7f1;
+    --c-hi:       #ede7da;
+
+    --c-text:     #1a1206;
+    --c-text-2:   #5d5a52;
+    --c-text-3:   #8a847a;
+    --c-line:     rgba(26, 18, 6, 0.08);
+    --c-line-2:   rgba(26, 18, 6, 0.15);
+}
+:root[data-theme="light"] .mfp-overlay { background: rgba(247, 245, 240, 0.55); }
+:root[data-theme="light"] .mfp-page-topbar,
+:root[data-theme="light"] .mfp-fp-bar { background: rgba(247, 245, 240, 0.92); }
+:root[data-theme="light"] .mfp-log-btn,
+:root[data-theme="light"] .bf-btn-submit { color: #fff; background: var(--c-gold-2); }
+:root[data-theme="light"] .mfp-log-btn:hover,
+:root[data-theme="light"] .bf-btn-submit:hover { background: #8a6d35; }
+
