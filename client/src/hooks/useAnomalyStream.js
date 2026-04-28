@@ -2,25 +2,36 @@ import { useEffect, useRef, useState } from 'react';
 
 /**
  * Manages the SSE /api/events connection for planes-updated triggers and anomaly alerts.
- * Returns { sseStale } — true when the connection is down and data may be outdated.
+ * Returns { sseStale } — true when the connection has been down for >8s (ignores brief reconnects).
  */
 export function useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkAlert }) {
     const seenAlertKeys = useRef(new Set());
     const [sseStale, setSseStale] = useState(false);
+    const staleTimerRef = useRef(null);
 
     useEffect(() => {
         const es = new EventSource('/api/events');
 
-        es.onopen = () => setSseStale(false);
+        const clearStaleTimer = () => {
+            if (staleTimerRef.current) {
+                clearTimeout(staleTimerRef.current);
+                staleTimerRef.current = null;
+            }
+        };
+
+        es.onopen = () => {
+            clearStaleTimer();
+            setSseStale(false);
+        };
 
         es.onmessage = (e) => {
+            clearStaleTimer();
             setSseStale(false);
             try {
                 const data = JSON.parse(e.data);
                 if (data.type === 'planes-updated') {
                     fetchPlanesRef.current?.();
                 } else if (data.type === 'anomalies' && data.alerts?.length > 0) {
-                    // Prune to prevent unbounded Set growth over long sessions
                     if (seenAlertKeys.current.size > 500) seenAlertKeys.current.clear();
 
                     const newAlerts = data.alerts.filter(a => {
@@ -44,12 +55,21 @@ export function useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkA
         };
 
         es.onerror = () => {
-            setSseStale(true);
+            // Only show stale warning after 8s of sustained disconnection.
+            // Browser auto-reconnect fires onerror briefly — this debounce avoids false positives.
+            if (!staleTimerRef.current) {
+                staleTimerRef.current = setTimeout(() => {
+                    setSseStale(true);
+                    staleTimerRef.current = null;
+                }, 8000);
+            }
         };
 
-        return () => es.close();
+        return () => {
+            clearStaleTimer();
+            es.close();
+        };
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
-    // fetchPlanesRef, setAnomalyAlerts, playSquawkAlert are all stable refs/stable setters
 
     return { sseStale };
 }
