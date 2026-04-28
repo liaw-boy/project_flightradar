@@ -5285,4 +5285,25 @@ async function startServer() {
     });
 }
 
-startServer();
+startServer().catch(err => {
+    console.error('[FATAL] startServer() threw:', err);
+    process.exit(1);
+});
+
+// ── Process-level stability handlers ─────────────────────────────────────────
+
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error('PROCESS', `Unhandled promise rejection: ${reason}`);
+    // Do not exit — log and continue; PM2 will restart if truly unrecoverable
+});
+
+process.on('uncaughtException', (err) => {
+    logger.error('PROCESS', `Uncaught exception: ${err.message}\n${err.stack}`);
+    process.exit(1); // Uncaught exceptions leave the process in an unknown state
+});
+
+process.on('SIGTERM', () => {
+    logger.info('PROCESS', 'SIGTERM received — graceful shutdown initiated');
+    // Allow in-flight requests to complete; PM2 will wait up to kill_timeout
+    process.exit(0);
+});

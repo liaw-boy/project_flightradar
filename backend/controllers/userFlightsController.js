@@ -65,6 +65,16 @@ function create(req, res) {
 
     if (!flight_date) return res.status(400).json({ error: 'flight_date required' });
 
+    // Guard against oversized payloads on text fields
+    if (flight_number  && flight_number.length  > 20)  return res.status(400).json({ error: 'flight_number too long' });
+    if (callsign       && callsign.length        > 10)  return res.status(400).json({ error: 'callsign too long' });
+    if (aircraft_type  && aircraft_type.length   > 10)  return res.status(400).json({ error: 'aircraft_type too long' });
+    if (registration   && registration.length    > 15)  return res.status(400).json({ error: 'registration too long' });
+    if (dep_icao       && dep_icao.length        > 5)   return res.status(400).json({ error: 'dep_icao too long' });
+    if (arr_icao       && arr_icao.length        > 5)   return res.status(400).json({ error: 'arr_icao too long' });
+    if (seat_number    && seat_number.length     > 10)  return res.status(400).json({ error: 'seat_number too long' });
+    if (notes          && notes.length           > 1000) return res.status(400).json({ error: 'notes too long (max 1000 chars)' });
+
     const info = db.prepare(`
         INSERT INTO user_flights
             (user_id, flight_date, flight_number, callsign, icao24, aircraft_type,
@@ -103,6 +113,12 @@ function update(req, res) {
     }
     if (Object.keys(updates).length === 0)
         return res.status(400).json({ error: 'nothing to update' });
+
+    const LIMITS = { flight_number: 20, callsign: 10, aircraft_type: 10, registration: 15, dep_icao: 5, arr_icao: 5, seat_number: 10, notes: 1000 };
+    for (const [k, max] of Object.entries(LIMITS)) {
+        if (updates[k] && String(updates[k]).length > max)
+            return res.status(400).json({ error: `${k} too long (max ${max} chars)` });
+    }
 
     updates.updated_at = Math.floor(Date.now() / 1000);
     const sets = Object.keys(updates).map(k => `${k} = ?`).join(', ');
