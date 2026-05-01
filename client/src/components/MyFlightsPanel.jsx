@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import AeroIcon from './AeroIcon';
 import {
     X, Plus, Pencil, Trash2, Plane,
-    ChevronLeft, ChevronRight, AlertCircle, CheckCircle, Loader, ArrowRight
+    ChevronLeft, ChevronRight, AlertCircle, CheckCircle, Loader, ArrowRight, CalendarDays
 } from 'lucide-react';
 import {
     apiListFlights, apiCreateFlight, apiUpdateFlight,
@@ -21,7 +21,12 @@ const EMPTY_FORM = {
     aircraft_type: '', registration: '', dep_icao: '', arr_icao: '',
     dep_time: '', arr_time: '', seat_number: '', seat_class: '', notes: '',
 };
-const SEAT_CLASSES = ['經濟艙', '豪華經濟艙', '商務艙', '頭等艙'];
+const SEAT_CLASSES = [
+    { value: 'economy',         label: '經濟艙' },
+    { value: 'premium_economy', label: '豪華經濟艙' },
+    { value: 'business',        label: '商務艙' },
+    { value: 'first',           label: '頭等艙' },
+];
 const CLASS_MAP = {
     '頭等艙': 'FIRST', '商務艙': 'BUSINESS', '豪華經濟艙': 'PREM ECO', '經濟艙': 'ECONOMY',
     'first': 'FIRST', 'business': 'BUSINESS', 'premium_economy': 'PREM ECO', 'economy': 'ECONOMY',
@@ -124,92 +129,66 @@ function StatsDashboard({ stats, onBack }) {
     );
 }
 
-// ── 航班列表卡（登機證 v4 — Stitch design）────────────────────────────────────
+// ── 航班列表卡 v5 — vertical stack ────────────────────────────────────────────
+function formatTime(str) {
+    if (!str) return null;
+    const m = String(str).match(/(\d{2}:\d{2})/);
+    return m ? m[1] : null;
+}
+
 function FlightRow({ flight, onEdit, onDelete }) {
     const classLabel = CLASS_MAP[flight.seat_class] || (flight.seat_class ? flight.seat_class.toUpperCase() : null);
-    const hasDetails = flight.aircraft_type || classLabel || flight.seat_number || flight.registration;
+    const depTime = formatTime(flight.dep_time);
+    const arrTime = formatTime(flight.arr_time);
     return (
         <div className="fc-card">
-            {/* Top bar */}
-            <div className="fc-top">
-                <div className="fc-brand">
-                    <AeroIcon size={12} bg={false} />
-                    AEROSTRAT
-                </div>
-                {flight.flight_number && <div className="fc-fn">{flight.flight_number}</div>}
-                <div className="fc-date">{flight.flight_date}</div>
-                <div className="fc-actions">
-                    <button className="fc-btn" onClick={() => onEdit(flight)} title="Edit">
-                        <Pencil size={12} />
-                    </button>
-                    <button className="fc-btn fc-btn-del" onClick={() => onDelete(flight.id)} title="Delete">
-                        <Trash2 size={12} />
-                    </button>
-                </div>
+            <div className="fc-header">
+                <span className="fc-brand">AEROSTRAT</span>
+                <span className="fc-flight-meta">
+                    {flight.flight_number && <span className="fc-fn">{flight.flight_number}</span>}
+                    <span className="fc-date">{flight.flight_date}</span>
+                </span>
             </div>
 
-            {/* Route */}
             <div className="fc-route">
-                <div className="fc-apt">
-                    <div className="fc-iata">{flight.dep_icao || '——'}</div>
-                    {flight.dep_time && <div className="fc-time">{flight.dep_time} · Depart</div>}
+                <div className="fc-airport">
+                    <div className="fc-iata">{flight.dep_icao || '—'}</div>
+                    {depTime && <div className="fc-time">{depTime}</div>}
                 </div>
-                <div className="fc-mid">
-                    <div className="fc-mid-line" />
-                    <div className="fc-mid-plane">
-                        <Plane size={20} style={{ transform: 'rotate(90deg)', color: '#e6c27c' }} />
+                <div className="fc-arrow">
+                    <div className="fc-arrow-line" />
+                    <Plane size={14} />
+                    <div className="fc-arrow-line" />
+                </div>
+                <div className="fc-airport fc-airport--r">
+                    <div className="fc-iata">{flight.arr_icao || '—'}</div>
+                    {arrTime && <div className="fc-time">{arrTime}</div>}
+                </div>
+            </div>
+
+            <div className="fc-sep" />
+
+            <div className="fc-body">
+                {(classLabel || flight.seat_number || flight.aircraft_type || flight.registration) && (
+                    <div className="fc-chips">
+                        {classLabel && <div className="fc-chip"><span className="fc-chip-label">Class</span><span className="fc-chip-value">{classLabel}</span></div>}
+                        {flight.seat_number && <div className="fc-chip"><span className="fc-chip-label">Seat</span><span className="fc-chip-value">{flight.seat_number}</span></div>}
+                        {flight.aircraft_type && <div className="fc-chip"><span className="fc-chip-label">Aircraft</span><span className="fc-chip-value">{flight.aircraft_type}</span></div>}
+                        {flight.registration && <div className="fc-chip"><span className="fc-chip-label">Reg</span><span className="fc-chip-value">{flight.registration}</span></div>}
                     </div>
-                    <div className="fc-mid-line" />
-                </div>
-                <div className="fc-apt fc-apt-r">
-                    <div className="fc-iata">{flight.arr_icao || '——'}</div>
-                    {flight.arr_time && <div className="fc-time fc-time-r">{flight.arr_time} · Arrive</div>}
+                )}
+                {flight.notes && <div className="fc-notes">{flight.notes}</div>}
+                <div className="fc-actions">
+                    <button className="fc-btn" onClick={() => onEdit(flight)} title="Edit"><Pencil size={13} /></button>
+                    <button className="fc-btn fc-btn--del" onClick={() => onDelete(flight.id)} title="Delete"><Trash2 size={13} /></button>
                 </div>
             </div>
-
-            {/* Tear line */}
-            <div className="fc-tear">
-                <div className="fc-notch fc-notch-l" />
-                <div className="fc-tear-line" />
-                <div className="fc-notch fc-notch-r" />
-            </div>
-
-            {/* Details */}
-            {hasDetails && (
-                <div className="fc-details">
-                    {flight.aircraft_type && (
-                        <div className="fc-detail">
-                            <div className="fc-dl">Aircraft</div>
-                            <div className="fc-dv">{flight.aircraft_type}</div>
-                        </div>
-                    )}
-                    {classLabel && (
-                        <div className="fc-detail">
-                            <div className="fc-dl">Class</div>
-                            <div className="fc-dv">{classLabel}</div>
-                        </div>
-                    )}
-                    {flight.seat_number && (
-                        <div className="fc-detail">
-                            <div className="fc-dl">Seat</div>
-                            <div className="fc-dv fc-dv-seat">{flight.seat_number}</div>
-                        </div>
-                    )}
-                    {flight.registration && (
-                        <div className="fc-detail">
-                            <div className="fc-dl">Registration</div>
-                            <div className="fc-dv">{flight.registration}</div>
-                        </div>
-                    )}
-                </div>
-            )}
-            {flight.notes && <div className="fc-notes">{flight.notes}</div>}
         </div>
     );
 }
 
 // ── 新增 / 編輯表單（橫向登機證 — Stitch design）────────────────────────────
-function FlightForm({ initial, prefill, onSave, onCancel }) {
+function FlightForm({ initial, prefill, onSave, onCancel, pageMode = false }) {
     const [form, setForm] = useState(() => ({
         ...EMPTY_FORM,
         ...(initial || {}),
@@ -222,7 +201,9 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
     const [enriching, setEnriching] = useState(false);
     const [depHint, setDepHint] = useState('');
     const [arrHint, setArrHint] = useState('');
+    const [airlineHint, setAirlineHint] = useState('');
     const csTimerRef = useRef(null);
+    const dateInputRef = useRef(null);
 
     const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -256,27 +237,46 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
         return () => { cancelled = true; };
     }, [prefillKey, initial?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    function handleFlightNumberChange(val) {
-        set('flight_number', val);
+    function handleFlightNumberChange(rawVal) {
+        // Only allow letters + digits, uppercase, max 7 chars (e.g. IT211, CI1234A)
+        const sanitized = rawVal.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 7);
+        set('flight_number', sanitized);
         if (csTimerRef.current) clearTimeout(csTimerRef.current);
-        const cs = val.toUpperCase().trim();
-        if (cs.length < 3) return;
+        if (sanitized.length < 2) { setAirlineHint(''); return; }
+
         csTimerRef.current = setTimeout(async () => {
+            // Lookup airline name from 2-letter prefix (e.g. IT → Tiger Air Taiwan)
+            const prefix = sanitized.slice(0, 2);
+            if (/^[A-Z]{2}$/.test(prefix)) {
+                fetch(`/api/airline/${encodeURIComponent(sanitized)}`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(d => {
+                        const name = d?.name || d?.airline?.name || '';
+                        setAirlineHint(name);
+                    })
+                    .catch(() => {});
+            }
+
+            if (sanitized.length < 3) return;
             setCsLooking(true);
-            const r = await apiLookupCallsign(cs);
+            setEnriching(true);
+            const r = await apiLookupCallsign(sanitized);
             setCsLooking(false);
-            if (!r.found) return;
+            setEnriching(false);
+            if (!r.found && !r.registration && !r.typecode) return;
             setForm(f => ({
                 ...f,
-                dep_icao: f.dep_icao || r.dep_iata || '',
-                arr_icao: f.arr_icao || r.arr_iata || '',
-                dep_time: f.dep_time || r.dep_time || '',
-                arr_time: f.arr_time || r.arr_time || '',
-                callsign: f.callsign || cs || '',
+                dep_icao:      f.dep_icao      || r.dep_iata    || '',
+                arr_icao:      f.arr_icao      || r.arr_iata    || '',
+                dep_time:      f.dep_time      || r.dep_time    || '',
+                arr_time:      f.arr_time      || r.arr_time    || '',
+                callsign:      f.callsign      || sanitized     || '',
+                registration:  f.registration  || r.registration || '',
+                aircraft_type: f.aircraft_type || r.typecode    || '',
             }));
             if (r.dep_name) setDepHint(r.dep_name);
             if (r.arr_name) setArrHint(r.arr_name);
-        }, 600);
+        }, 500);
     }
 
     async function handleAirportBlur(field, val) {
@@ -304,7 +304,7 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
 
     const passengerName = authStore.getUser?.()?.username?.toUpperCase() || '—';
 
-    return (
+    const formContent = (
         <div className="bf-wrap">
             <form className="bf-card" onSubmit={handleSubmit}>
 
@@ -350,10 +350,8 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
                                 onChange={e => { set('dep_icao', e.target.value.toUpperCase()); setDepHint(''); }}
                                 onBlur={e => handleAirportBlur('dep', e.target.value)}
                             />
-                            {depHint
-                                ? <div className="bf-apt-hint">{depHint}</div>
-                                : <input type="time" className="bf-time" value={form.dep_time} onChange={e => set('dep_time', e.target.value)} />
-                            }
+                            {depHint && <div className="bf-apt-hint" title={depHint}>{depHint}</div>}
+                            <input type="time" className="bf-time" value={form.dep_time} onChange={e => set('dep_time', e.target.value)} />
                         </div>
                         <div className="bf-route-mid">
                             <div className="bf-route-line-wrap">
@@ -366,12 +364,16 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
                             <div className="bf-fn-wrap">
                                 <input
                                     className="bf-fn"
-                                    placeholder="CI101"
+                                    placeholder="IT211"
+                                    maxLength={7}
                                     value={form.flight_number}
                                     onChange={e => handleFlightNumberChange(e.target.value)}
                                 />
                                 {csLooking && <Loader size={10} className="bf-spin" />}
                             </div>
+                            {airlineHint && (
+                                <div className="bf-airline-hint">{airlineHint}</div>
+                            )}
                         </div>
                         <div className="bf-apt-col bf-apt-col-r">
                             <div className="bf-apt-lbl bf-apt-lbl-r">To</div>
@@ -383,10 +385,8 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
                                 onChange={e => { set('arr_icao', e.target.value.toUpperCase()); setArrHint(''); }}
                                 onBlur={e => handleAirportBlur('arr', e.target.value)}
                             />
-                            {arrHint
-                                ? <div className="bf-apt-hint bf-apt-hint-r">{arrHint}</div>
-                                : <input type="time" className="bf-time bf-time-r" value={form.arr_time} onChange={e => set('arr_time', e.target.value)} />
-                            }
+                            {arrHint && <div className="bf-apt-hint bf-apt-hint-r" title={arrHint}>{arrHint}</div>}
+                            <input type="time" className="bf-time bf-time-r" value={form.arr_time} onChange={e => set('arr_time', e.target.value)} />
                         </div>
                     </div>
 
@@ -394,22 +394,39 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
                     <div className="bf-grid">
                         <div className="bf-cell">
                             <div className="bf-cl">Date</div>
-                            <input type="date" className="bf-cv" required value={form.flight_date} onChange={e => set('flight_date', e.target.value)} />
+                            <div className="bf-date-wrap">
+                                <input
+                                    ref={dateInputRef}
+                                    type="date"
+                                    className="bf-cv"
+                                    required
+                                    value={form.flight_date}
+                                    onChange={e => set('flight_date', e.target.value)}
+                                />
+                                <button
+                                    type="button"
+                                    className="bf-date-icon"
+                                    tabIndex={-1}
+                                    onClick={() => dateInputRef.current?.showPicker?.()}
+                                >
+                                    <CalendarDays size={14} />
+                                </button>
+                            </div>
                         </div>
                         <div className="bf-cell">
-                            <div className="bf-cl">Aircraft</div>
-                            <input className="bf-cv" placeholder="A350" value={form.aircraft_type} onChange={e => set('aircraft_type', e.target.value.toUpperCase())} />
+                            <div className="bf-cl">Aircraft {enriching && <Loader size={9} className="bf-spin" style={{marginLeft:4}} />}</div>
+                            <input className="bf-cv" placeholder={enriching ? '查詢中…' : 'A350'} value={form.aircraft_type} onChange={e => set('aircraft_type', e.target.value.toUpperCase())} />
                         </div>
                         <div className="bf-cell">
                             <div className="bf-cl">Class</div>
                             <select className="bf-cv" value={form.seat_class} onChange={e => set('seat_class', e.target.value)}>
                                 <option value="">—</option>
-                                {SEAT_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                                {SEAT_CLASSES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                             </select>
                         </div>
                         <div className="bf-cell">
-                            <div className="bf-cl">Registration</div>
-                            <input className="bf-cv" placeholder="B-18805" value={form.registration} onChange={e => set('registration', e.target.value.toUpperCase())} />
+                            <div className="bf-cl">Registration {enriching && <Loader size={9} className="bf-spin" style={{marginLeft:4}} />}</div>
+                            <input className="bf-cv" placeholder={enriching ? '查詢中…' : '選填 / 自動帶入'} value={form.registration} onChange={e => set('registration', e.target.value.toUpperCase())} />
                         </div>
                         <div className="bf-cell">
                             <div className="bf-cl">Seat</div>
@@ -477,6 +494,28 @@ function FlightForm({ initial, prefill, onSave, onCancel }) {
             </form>
         </div>
     );
+
+    if (pageMode) {
+        return (
+            <div className="mfp-fullpage">
+                <div className="mfp-fp-bar">
+                    <button className="mfp-fp-back" onClick={onCancel}>
+                        <ChevronLeft size={15} /> 返回
+                    </button>
+                    <div className="mfp-fp-title">
+                        <AeroIcon size={18} bg={true} />
+                        AEROSTRAT · Flight Log
+                    </div>
+                    <div className="mfp-fp-spacer" />
+                </div>
+                <div className="mfp-fp-body">
+                    {formContent}
+                </div>
+            </div>
+        );
+    }
+
+    return formContent;
 }
 
 // ── 主元件 ────────────────────────────────────────────────────────────────────
@@ -520,14 +559,21 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
         loadStats();
     }
 
-    async function confirmDelete() {
-        if (!deleteTarget) return;
+    function confirmDelete() {
+        console.log('[DELETE] confirmDelete called, deleteTarget=', deleteTarget);
+        if (!deleteTarget) { console.warn('[DELETE] no deleteTarget, abort'); return; }
         const id = deleteTarget;
         setDeleteTarget(null);
-        await apiDeleteFlight(id);
+        setFlights(prev => prev.filter(f => f.id !== id));
+        setTotal(prev => Math.max(0, prev - 1));
         showToast('已刪除');
-        loadFlights(page);
-        loadStats();
+        apiDeleteFlight(id)
+            .then(() => { console.log('[DELETE] API ok, id=', id); loadFlights(page); loadStats(); })
+            .catch(e => {
+                console.error('[DELETE] API failed:', e);
+                showToast('刪除失敗，重新載入中…');
+                loadFlights(page);
+            });
     }
 
     const totalPages = Math.max(1, Math.ceil(total / LIMIT));
@@ -535,12 +581,25 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
 
     // ── 全頁表單 ──────────────────────────────────────────────────────────────
     if (view === 'form') {
+        if (mode === 'page') {
+            return (
+                <>
+                    <FlightForm
+                        initial={editTarget}
+                        onSave={handleSave}
+                        onCancel={onClose}
+                        pageMode={true}
+                    />
+                    {toast && <div className="mfp-toast"><CheckCircle size={11} /> {toast}</div>}
+                </>
+            );
+        }
         return (
             <>
                 <div className="mfp-fullpage">
                     <div className="mfp-fp-bar">
                         <button className="mfp-fp-back" onClick={goBack}>
-                            <ChevronLeft size={15} /> BACK
+                            <ChevronLeft size={15} /> 返回
                         </button>
                         <div className="mfp-fp-title">
                             <Plane size={14} />
@@ -551,7 +610,6 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
                     <div className="mfp-fp-body">
                         <FlightForm
                             initial={editTarget}
-                            prefill={!editTarget && prefillFromPlane ? prefillFromPlane : undefined}
                             onSave={handleSave}
                             onCancel={goBack}
                         />
@@ -590,12 +648,6 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
     // ── 共用：list content ────────────────────────────────────────────────────
     const listContent = (
         <>
-            {prefillFromPlane && view === 'list' && (
-                <div className="mfp-prefill" onClick={() => { setEditTarget(null); setView('form'); }}>
-                    <CheckCircle size={13} />
-                    點此記錄當前選取的飛機 <strong>{prefillFromPlane.callsign || prefillFromPlane.icao24}</strong>
-                </div>
-            )}
             {view === 'stats' ? (
                 <StatsDashboard stats={stats} onBack={goBack} />
             ) : (
@@ -638,6 +690,7 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
     // ── 全頁模式 ───────────────────────────────────────────────────────────────
     if (mode === 'page') {
         return (
+            <>
             <div className="mfp-page">
                 <div className="mfp-page-topbar">
                     <button className="mfp-page-back" onClick={onClose}>
@@ -666,6 +719,16 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
                     </div>
                 </div>
             </div>
+            {deleteTarget && (
+                <ConfirmDialog
+                    title="刪除航班記錄"
+                    message="確定刪除這筆航班記錄？此操作無法復原。"
+                    confirmLabel="刪除"
+                    onConfirm={confirmDelete}
+                    onCancel={() => setDeleteTarget(null)}
+                />
+            )}
+            </>
         );
     }
 

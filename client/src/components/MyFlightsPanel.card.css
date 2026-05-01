@@ -1,218 +1,193 @@
 /* ══════════════════════════════════════════════════════════════
-   5. FLIGHT CARD (FlightRow — editorial v5)
-   No more boarding-pass cosplay. Single elegant surface.
+   FLIGHT CARD  v5 — vertical stack
+   No border, no notch, no overflow clipping.
    ══════════════════════════════════════════════════════════════ */
+
+/* ── Card ────────────────────────────────────────────────────── */
 .fc-card {
     background: var(--c-card);
-    border: 1px solid var(--c-line);
     border-radius: var(--r-lg);
-    overflow: hidden;
-    transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.18s ease;
-    position: relative;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 6px 24px rgba(0,0,0,0.3);
+    transition: box-shadow 0.2s ease, transform 0.18s ease;
     font-family: var(--ff-body);
+    overflow: visible;
 }
 .fc-card:hover {
-    border-color: rgba(214, 178, 117, 0.32);
-    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(214, 178, 117, 0.1);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5), 0 10px 32px rgba(0,0,0,0.4);
     transform: translateY(-2px);
 }
-.fc-card:hover .fc-actions { opacity: 1; }
 
-/* Top bar — quiet metadata */
-.fc-top {
+/* ── Header band ─────────────────────────────────────────────── */
+.fc-header {
     display: flex;
     align-items: center;
-    gap: clamp(8px, 1.5vw, 14px);
-    padding: clamp(12px, 1.8vw, 16px) clamp(18px, 3vw, 26px);
-    border-bottom: 1px solid var(--c-line);
-    background: rgba(255, 255, 255, 0.015);
-    flex-wrap: wrap;
+    justify-content: space-between;
+    padding: 10px 20px;
+    background: linear-gradient(90deg, rgba(214,178,117,0.18) 0%, rgba(214,178,117,0.04) 100%);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    border-bottom: 1px solid rgba(214,178,117,0.15);
 }
 .fc-brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-family: var(--ff-body);
-    font-size: var(--fz-eyebrow);
-    font-weight: 500;
-    letter-spacing: 2.5px;
-    color: var(--c-gold-2);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 3px;
     text-transform: uppercase;
-    flex: 1;
-    min-width: 0;
+    color: var(--c-gold);
 }
-.fc-brand svg { opacity: 0.7; }
+.fc-flight-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
 .fc-fn {
     font-family: var(--ff-mono);
-    font-size: var(--fz-small);
-    font-weight: 500;
-    letter-spacing: 0.6px;
+    font-size: 11px;
+    font-weight: 700;
     color: var(--c-gold);
-    flex-shrink: 0;
+    background: rgba(214,178,117,0.1);
+    padding: 2px 7px;
+    border-radius: 4px;
 }
 .fc-date {
-    font-family: var(--ff-body);
-    font-size: var(--fz-small);
+    font-size: 11px;
     color: var(--c-text-3);
-    flex-shrink: 0;
     white-space: nowrap;
 }
+
+/* ── Route block ─────────────────────────────────────────────── */
+.fc-route {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 20px 22px 16px;
+}
+.fc-airport {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.fc-airport--r {
+    align-items: flex-end;
+    text-align: right;
+}
+.fc-iata {
+    font-family: var(--ff-display);
+    font-size: clamp(32px, 3vw + 18px, 48px);
+    font-weight: 400;
+    font-style: italic;
+    font-variation-settings: 'opsz' 72, 'SOFT' 40;
+    color: var(--c-text);
+    letter-spacing: -0.5px;
+    line-height: 1.25;
+    padding-top: 2px;
+    white-space: nowrap;
+}
+.fc-time {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--c-gold);
+    letter-spacing: 0.5px;
+}
+.fc-arrow {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--c-gold);
+    opacity: 0.5;
+    min-width: 20px;
+}
+.fc-arrow-line {
+    flex: 1;
+    height: 1px;
+    border-top: 1px dashed rgba(214,178,117,0.4);
+}
+
+/* ── Separator ───────────────────────────────────────────────── */
+.fc-sep {
+    margin: 0 20px;
+    border-top: 1px dashed rgba(148,163,184,0.2);
+}
+
+/* ── Body: chips + notes + actions ──────────────────────────── */
+.fc-body {
+    padding: 14px 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Meta chips */
+.fc-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+}
+.fc-chip {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.fc-chip-label {
+    font-size: 8.5px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--c-text-3);
+}
+.fc-chip-value {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--c-text-2);
+}
+
+/* Notes */
+.fc-notes {
+    font-family: var(--ff-display);
+    font-style: italic;
+    font-size: 12px;
+    color: var(--c-text-3);
+    border-left: 2px solid rgba(214,178,117,0.3);
+    padding-left: 8px;
+    line-height: 1.5;
+}
+
+/* Actions */
 .fc-actions {
     display: flex;
+    justify-content: flex-end;
     gap: 6px;
-    opacity: 0;
-    transition: opacity 0.2s ease;
-    flex-shrink: 0;
 }
-@media (hover: none) { .fc-actions { opacity: 1; } }
 .fc-btn {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 32px; height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
     background: transparent;
     border: 1px solid var(--c-line-2);
     border-radius: var(--r-sm);
     color: var(--c-text-2);
     cursor: pointer;
-    transition: all 0.18s ease;
+    transition: all 0.15s ease;
 }
 .fc-btn:hover {
     border-color: var(--c-gold-2);
     color: var(--c-gold);
     background: var(--c-gold-3);
 }
-.fc-btn-del:hover {
-    border-color: rgba(239, 68, 68, 0.4);
+.fc-btn--del:hover {
+    border-color: rgba(239,68,68,0.4);
     color: #ef6464;
-    background: rgba(239, 68, 68, 0.07);
+    background: rgba(239,68,68,0.07);
 }
 
-/* Route — IATA in elegant Fraunces italic */
-.fc-route {
-    display: flex;
-    align-items: center;
-    padding: clamp(20px, 3.2vw, 32px) clamp(20px, 3.2vw, 30px);
-    gap: clamp(12px, 2.5vw, 24px);
-    flex-wrap: wrap;
+/* ── Mobile ──────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+    .fc-route { padding: 16px 16px 12px; gap: 8px; }
+    .fc-body  { padding: 12px 16px 14px; }
+    .fc-header { padding: 8px 16px; }
+    .fc-sep  { margin: 0 16px; }
+    .fc-iata { font-size: clamp(28px, 8vw, 38px); }
 }
-.fc-apt {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-    flex: 0 1 auto;
-}
-.fc-apt-r { align-items: flex-end; text-align: right; }
-.fc-iata {
-    font-family: var(--ff-display);
-    font-size: var(--fz-num);
-    font-weight: 400;
-    font-style: italic;
-    font-variation-settings: 'opsz' 96, 'SOFT' 50;
-    color: var(--c-text);
-    letter-spacing: -2px;
-    line-height: 0.95;
-}
-.fc-time {
-    font-family: var(--ff-body);
-    font-size: var(--fz-mini);
-    font-weight: 500;
-    letter-spacing: 0.5px;
-    color: var(--c-text-3);
-    text-transform: lowercase;
-    margin-top: 4px;
-}
-.fc-time::first-letter { text-transform: uppercase; }
-
-.fc-mid {
-    flex: 1 1 80px;
-    display: flex;
-    align-items: center;
-    position: relative;
-    min-width: 60px;
-}
-.fc-mid-line {
-    flex: 1;
-    height: 1px;
-    border-top: 1px dashed rgba(214, 178, 117, 0.35);
-}
-.fc-mid-plane {
-    background: var(--c-card);
-    padding: 0 10px;
-    z-index: 1;
-    flex-shrink: 0;
-    color: var(--c-gold);
-    display: inline-flex;
-    align-items: center;
-}
-
-/* Soft inner divider — replaces the boarding-pass tear cliché */
-.fc-tear {
-    height: 1px;
-    margin: 0 clamp(20px, 3.2vw, 30px);
-    background: var(--c-line);
-    position: relative;
-}
-.fc-tear-line { display: none; }
-.fc-notch { display: none; } /* drop the cliché circles */
-
-/* Details — fluid auto-fit grid */
-.fc-details {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: clamp(14px, 2vw, 20px) clamp(20px, 3vw, 28px);
-    padding: clamp(16px, 2.4vw, 22px) clamp(20px, 3.2vw, 30px) clamp(18px, 2.4vw, 24px);
-}
-.fc-detail {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    min-width: 0;
-    border: none;
-    padding: 0;
-    margin: 0;
-}
-.fc-dl {
-    font-family: var(--ff-body);
-    font-size: var(--fz-eyebrow);
-    font-weight: 500;
-    letter-spacing: 1.6px;
-    text-transform: uppercase;
-    color: var(--c-text-3);
-}
-.fc-dv {
-    font-family: var(--ff-body);
-    font-size: var(--fz-base);
-    font-weight: 500;
-    color: var(--c-text);
-    letter-spacing: 0.1px;
-    word-break: break-word;
-    line-height: 1.3;
-}
-.fc-dv-seat {
-    font-family: var(--ff-display);
-    font-size: clamp(22px, 1.2rem + 0.8vw, 28px);
-    font-weight: 400;
-    font-style: italic;
-    font-variation-settings: 'opsz' 60, 'SOFT' 80;
-    color: var(--c-gold);
-    letter-spacing: -0.5px;
-    line-height: 1;
-}
-
-/* Notes — quiet pull-quote */
-.fc-notes {
-    margin: 0 clamp(20px, 3.2vw, 30px) clamp(18px, 2.4vw, 24px);
-    padding: 12px 16px;
-    background: rgba(255, 255, 255, 0.018);
-    border-left: 2px solid var(--c-gold-2);
-    border-radius: 0 var(--r-sm) var(--r-sm) 0;
-    font-family: var(--ff-display);
-    font-size: var(--fz-base);
-    font-weight: 400;
-    font-style: italic;
-    font-variation-settings: 'opsz' 24, 'SOFT' 50;
-    color: var(--c-text-2);
-    line-height: 1.55;
-    letter-spacing: 0.1px;
-}
-

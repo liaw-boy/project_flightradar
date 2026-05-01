@@ -263,7 +263,7 @@ export default function Sidebar({
                     </h2>
                     <div className="sb-subtitle" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {logoUrl && <img src={logoUrl} className="sb-airline-logo-mini" alt="" onError={(e) => { e.target.style.display = 'none'; }} />}
-                        {(aircraft.airline && aircraft.airline !== 'Unknown') ? aircraft.airline : (airlineName || '')}
+                        {airlineName || ''}
                     </div>
 
                 </div>
@@ -545,9 +545,7 @@ export default function Sidebar({
                         <DataRow label={t('type')} value={typecode} />
                         {aircraftModel && <DataRow label="Model" value={aircraftModel} />}
                         {operatorName && <DataRow label="Operator" value={operatorName} />}
-                        <DataRow label={t('airline')} value={
-                            (aircraft.airline && aircraft.airline !== 'Unknown') ? aircraft.airline : (airlineName || '--')
-                        } />
+                        <DataRow label={t('airline')} value={airlineName || '--'} />
                     </div>
                 )}
 

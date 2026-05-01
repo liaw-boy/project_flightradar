@@ -23,6 +23,7 @@ const MictronicsDb  = require('./db/mictronicsDb');
 const VrsDb         = require('./db/vrsDb');
 const { syncMictronics } = require('./scripts/syncMictronics');
 const { syncVrsRoutes } = require('./scripts/syncVrsRoutes');
+const syncLog = require('./db/syncLogger');
 const FlightSession = require('./db/sessionStore');
 const TrackPoint    = require('./db/trackStore');
 const staticMaps    = require('./db/staticMaps');
@@ -461,34 +462,85 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
     // If user passed IATA airline prefix (e.g. CI101), also try the ICAO form (CAL101)
     const csIcao = toIcaoCallsign(cs);
 
-    // Layer 1: VRS SQLite (fast, local)
-    const vrsRoute = VrsDb.lookup(cs) || (csIcao ? VrsDb.lookup(csIcao) : null);
-    const vrsDep = vrsRoute?.from ? VrsDb.lookupAirport(vrsRoute.from) : null;
-    const vrsArr = vrsRoute?.to   ? VrsDb.lookupAirport(vrsRoute.to)   : null;
+    // Layer 0: Live planes cache — get registration + typecode for this callsign
+    const livePlane = globalPlanesCache.states.find(p =>
+        p.callsign && (p.callsign.toUpperCase() === cs || (csIcao && p.callsign.toUpperCase() === csIcao))
+    );
+    const liveRegistration = livePlane?.registration || null;
+    const liveTypecode     = livePlane?.typecode     || null;
 
-    // Layer 2: Route cache (try IATA callsign first, then ICAO form)
+    // Layer 1: Route cache (today's real data — highest trust)
     let dbRoute = null;
     try {
         dbRoute = await Route.findOne({ callsign: cs }) ||
                   (csIcao ? await Route.findOne({ callsign: csIcao }) : null);
+        // Reject stale spatial_inference entries — they're position guesses, not schedules
+        if (dbRoute?.source === 'spatial_inference') dbRoute = null;
     } catch (_) {}
 
-    const raw_dep = dbRoute?.origin_icao || dbRoute?.departureAirport || vrsRoute?.from || null;
-    const raw_arr = dbRoute?.destination_icao || dbRoute?.arrivalAirport || vrsRoute?.to || null;
+    const liveExtra = { registration: liveRegistration, typecode: liveTypecode };
 
-    if (raw_dep || raw_arr) {
+    if (dbRoute?.departureAirport && dbRoute?.arrivalAirport) {
         return res.json({
-            found:     true,
-            dep_iata:  toIata(raw_dep),
-            arr_iata:  toIata(raw_arr),
-            dep_name:  dbRoute?.origin_name      || vrsDep?.name || null,
-            arr_name:  dbRoute?.destination_name || vrsArr?.name || null,
-            dep_time:  dbRoute?.departure_time   || null,
-            arr_time:  dbRoute?.arrival_time     || null,
+            found:    true,
+            dep_iata: toIata(dbRoute.departureAirport),
+            arr_iata: toIata(dbRoute.arrivalAirport),
+            dep_name: dbRoute.origin_name      || null,
+            arr_name: dbRoute.destination_name || null,
+            dep_time: dbRoute.departure_time   || null,
+            arr_time: dbRoute.arrival_time     || null,
+            ...liveExtra,
         });
     }
 
-    // Layer 3: AeroDataBox live lookup
+    // Layer 2: adsbdb.com — community-sourced, no quota, returns current scheduled route
+    try {
+        const adsbdbRes = await fetch(`https://api.adsbdb.com/v0/callsign/${cs}`, {
+            headers: { 'User-Agent': 'AEROSTRAT/12.0' },
+            signal: AbortSignal.timeout(4000),
+        });
+        if (adsbdbRes.ok) {
+            const adsbdbData = await adsbdbRes.json();
+            const fl = adsbdbData?.response?.flightroute;
+            if (fl?.origin?.icao_code && fl?.destination?.icao_code) {
+                Route.findOneAndUpdate(
+                    { callsign: cs },
+                    { $set: { departureAirport: fl.origin.icao_code, arrivalAirport: fl.destination.icao_code, source: 'adsbdb', lastUpdated: new Date() } },
+                    { upsert: true }
+                ).catch(() => null);
+                return res.json({
+                    found:    true,
+                    dep_iata: fl.origin.iata_code  || toIata(fl.origin.icao_code),
+                    arr_iata: fl.destination.iata_code || toIata(fl.destination.icao_code),
+                    dep_name: fl.origin.name       || null,
+                    arr_name: fl.destination.name  || null,
+                    dep_time: null,
+                    arr_time: null,
+                    ...liveExtra,
+                });
+            }
+        }
+    } catch (_) { /* timeout — continue */ }
+
+    // Layer 3: VRS SQLite (static, fast; multi-leg entries already filtered in vrsDb.lookup)
+    const vrsRoute = VrsDb.lookup(cs) || (csIcao ? VrsDb.lookup(csIcao) : null);
+    const vrsDep = vrsRoute?.from ? VrsDb.lookupAirport(vrsRoute.from) : null;
+    const vrsArr = vrsRoute?.to   ? VrsDb.lookupAirport(vrsRoute.to)   : null;
+
+    if (vrsRoute?.from || vrsRoute?.to) {
+        return res.json({
+            found:    true,
+            dep_iata: toIata(vrsRoute.from),
+            arr_iata: toIata(vrsRoute.to),
+            dep_name: vrsDep?.name || null,
+            arr_name: vrsArr?.name || null,
+            dep_time: null,
+            arr_time: null,
+            ...liveExtra,
+        });
+    }
+
+    // Layer 4: AeroDataBox live lookup
     const adData = await fetchRouteData(cs);
     if (adData && (adData.origin_iata || adData.destination_iata)) {
         return res.json({
@@ -499,7 +551,29 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
             arr_name: adData.destination_name || null,
             dep_time: adData.departure_time   || null,
             arr_time: adData.arrival_time     || null,
+            ...liveExtra,
         });
+    }
+
+    // Layer 5: OpenFlights (exact callsign match from schedules_global.json)
+    const ofExact = openflightsGlobalDB[cs] || (csIcao ? openflightsGlobalDB[csIcao] : null);
+    if (ofExact?.dep && ofExact?.arr) {
+        return res.json({
+            found:    true,
+            dep_iata: ofExact.dep,
+            arr_iata: ofExact.arr,
+            dep_name: null,
+            arr_name: null,
+            dep_time: null,
+            arr_time: null,
+            source:   'openflights',
+            ...liveExtra,
+        });
+    }
+
+    // No route found — still return live aircraft info if available
+    if (liveRegistration || liveTypecode) {
+        return res.json({ found: false, ...liveExtra });
     }
 
     return res.json({ found: false });
@@ -677,10 +751,11 @@ app.get('/api/flight-details/:hex/:callsign', async (req, res) => {
     const photoData = photoRes?.photos?.[0] || {};
     const localInfo = localRes || {};
 
-    // VRS fallback: if AeroDataBox has no route, try local VRS SQLite
+    // VRS fallback: if AeroDataBox has no route, try local VRS SQLite (skip multi-leg entries)
     const vrsRoute = VrsDb.lookup(callsign);
-    const originIata  = routeInfo.departure?.airport?.iata  || vrsRoute?.from || 'N/A';
-    const destIata    = routeInfo.arrival?.airport?.iata    || vrsRoute?.to   || '---';
+    const vrsIsMultiLeg = vrsRoute?.raw ? (vrsRoute.raw.match(/-/g) || []).length > 1 : false;
+    const originIata  = routeInfo.departure?.airport?.iata  || (!vrsIsMultiLeg && vrsRoute?.from) || 'N/A';
+    const destIata    = routeInfo.arrival?.airport?.iata    || (!vrsIsMultiLeg && vrsRoute?.to)   || '---';
 
     const mergedData = {
         hex,
@@ -807,18 +882,21 @@ async function restoreActiveSessions() {
             // 找出最後一筆軌跡點 (SQLite)
             const lastPoint = await TrackPoint.findOne({ sessionId: session.sessionId });
 
-            if (lastPoint && (now - lastPoint.timestamp.getTime() < STALE_THRESHOLD)) {
+            // SQLite stores timestamps as integers (unix ms); wrap if not a Date
+            const tsToMs = (v) => v instanceof Date ? v.getTime() : Number(v);
+            const lastTs = lastPoint ? tsToMs(lastPoint.timestamp) : 0;
+            const startTs = session.startTime ? tsToMs(session.startTime) : null;
+            if (lastPoint && (now - lastTs < STALE_THRESHOLD)) {
                 activeSessions.set(session.icao24, {
                     sessionId: session.sessionId,
                     callsign: session.callsign || 'N/A',
-                    lastSeen: lastPoint.timestamp.getTime(),
-                    // Restore startTime so fetchTracksInternal can use the full session boundary
-                    startTime: session.startTime ? Math.floor(session.startTime.getTime() / 1000) : null,
+                    lastSeen: lastTs,
+                    startTime: startTs ? Math.floor(startTs / 1000) : null,
                     onGround: !!lastPoint.onGround
                 });
                 restoredCount++;
             } else {
-                const endTime = lastPoint ? lastPoint.timestamp : new Date();
+                const endTime = lastPoint ? new Date(tsToMs(lastPoint.timestamp)) : new Date();
                 await FlightSession.bulkWrite([{
                     updateOne: { filter: { sessionId: session.sessionId }, update: { $set: { status: 'COMPLETED', endTime } } }
                 }]);
@@ -1083,17 +1161,17 @@ function getMonitorHtml() {
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#171821;
-  --panel:#21222d;
-  --panel2:#2a2b3d;
-  --border:rgba(255,255,255,0.07);
-  --teal:#a9dfd8;
-  --amber:#fcb859;
+  --bg:#020617;
+  --panel:#0f172a;
+  --panel2:#1e293b;
+  --border:rgba(148,163,184,0.15);
+  --teal:#22d3ee;
+  --amber:#f59e0b;
   --red:#ef4444;
-  --green:#34d399;
-  --t:#ffffff;
-  --tm:#a0a0a0;
-  --td:#87888c;
+  --green:#10b981;
+  --t:#f8fafc;
+  --tm:#94a3b8;
+  --td:#64748b;
   --font:'Inter',sans-serif;
 }
 html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--font);font-size:14px;overflow:hidden}
@@ -1112,8 +1190,8 @@ a:hover{opacity:.75}
 .sb-nav{padding:16px 12px;flex:1;display:flex;flex-direction:column;gap:2px}
 .sb-nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;font-size:12px;font-weight:500;color:var(--td);cursor:pointer;transition:all .18s;text-decoration:none;border:none;background:none;width:100%;text-align:left}
 .sb-nav-item:hover{color:var(--t);background:rgba(255,255,255,0.05)}
-.sb-nav-item.active{background:var(--teal);color:#171821;font-weight:600}
-.sb-nav-item.active .sb-nav-icon{color:#171821}
+.sb-nav-item.active{background:var(--teal);color:#020617;font-weight:600}
+.sb-nav-item.active .sb-nav-icon{color:#020617}
 .sb-nav-icon{width:14px;height:14px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .sb-nav-icon svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .sb-divider{height:1px;background:var(--border);margin:8px 12px}
@@ -1955,15 +2033,19 @@ function isMonitorAuthed(req) {
 }
 
 function requireMonitorAuth(req, res, next) {
-    if (!isMonitorAuthed(req)) return res.status(401).json({ error: 'Unauthorized' });
+    if (!isAdminAuthed(req)) return res.status(401).json({ error: 'Unauthorized' });
     next();
 }
 
-// Accepts EITHER monitor session OR JWT admin token
+// Accepts monitor session cookie, httpOnly JWT cookie, or Bearer JWT header
 function requireAdminAccess(req, res, next) {
     if (isMonitorAuthed(req)) return next();
+    // Read JWT from httpOnly cookie (browser) or Authorization header (API clients)
+    const COOKIE_NAME = 'aerostrat_token';
+    const cookieToken = req.cookies?.[COOKIE_NAME];
     const header = req.headers.authorization || '';
-    const token  = header.startsWith('Bearer ') ? header.slice(7) : null;
+    const headerToken = header.startsWith('Bearer ') ? header.slice(7) : null;
+    const token = cookieToken || headerToken;
     if (token) {
         try {
             const payload = require('jsonwebtoken').verify(token, process.env.JWT_SECRET);
@@ -2012,8 +2094,23 @@ function getLoginHtml(error) {
 </html>`;
 }
 
+// Helper: check monitor session OR JWT admin cookie
+function isAdminAuthed(req) {
+    if (isMonitorAuthed(req)) return true;
+    const COOKIE_NAME = 'aerostrat_token';
+    const cookieToken = req.cookies?.[COOKIE_NAME];
+    const header = req.headers.authorization || '';
+    const headerToken = header.startsWith('Bearer ') ? header.slice(7) : null;
+    const token = cookieToken || headerToken;
+    if (!token) return false;
+    try {
+        const payload = require('jsonwebtoken').verify(token, process.env.JWT_SECRET);
+        return !!payload.is_admin;
+    } catch { return false; }
+}
+
 app.get('/monitor', (req, res) => {
-    if (!isMonitorAuthed(req)) {
+    if (!isAdminAuthed(req)) {
         return res.status(401).send(getLoginHtml());
     }
     res.send(getMonitorHtml());
@@ -2103,6 +2200,8 @@ app.get('/monitor/api/db-status', requireMonitorAuth, (req, res) => {
         sync: {
             vrs:        { ...dbSyncStatus.vrs,        gitCommit: vrsGitCommit },
             mictronics: { ...dbSyncStatus.mictronics, lastSyncUnix: mictLastSync },
+            schedules:  { ...dbSyncStatus.schedules },
+            _all:       syncLog.getAll(),
         },
     });
 });
@@ -2135,6 +2234,38 @@ app.put('/monitor/api/users/:id/admin', requireMonitorAuth, (req, res) => {
 
 // Public ping — no auth required, used by health checks and tests
 app.get('/api/ping', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+
+// Data freshness — public, used by frontend to show persistent stale badges
+// A job is "stale" if it has never succeeded, or last success was >THRESHOLD ago
+app.get('/api/data-freshness', (req, res) => {
+    const THRESHOLDS = {
+        mictronics: 9 * 24 * 3600 * 1000,   // 9 days (weekly job)
+        vrs:        2 * 24 * 3600 * 1000,   // 2 days (daily job)
+        tdx:        25 * 3600 * 1000,        // 25 hours (daily at 4am)
+        metar:      2 * 3600 * 1000,        // 2 hours (runs every 1 hour)
+    };
+    const all  = syncLog.getAll();
+    const now  = Date.now();
+    const jobs = {};
+    let   anyStale = false;
+
+    for (const [job, threshold] of Object.entries(THRESHOLDS)) {
+        const entry   = all[job] || {};
+        const lastOk  = entry.lastSuccess ? new Date(entry.lastSuccess).getTime() : null;
+        const ageMs   = lastOk ? now - lastOk : null;
+        const stale   = ageMs === null || ageMs > threshold;
+        if (stale) anyStale = true;
+        jobs[job] = {
+            stale,
+            lastSuccess: entry.lastSuccess || null,
+            ageDays:     ageMs !== null ? Math.floor(ageMs / 86400000) : null,
+            error:       entry.error || null,
+            consecutiveFails: entry.consecutiveFails || 0,
+        };
+    }
+
+    res.json({ anyStale, jobs });
+});
 
 app.get('/api/health', requireAdminAccess, (req, res) => {
     const dbPath = path.join(__dirname, 'data', 'aerostrat.db');
@@ -3576,9 +3707,16 @@ app.get('/api/metadata/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
     if (!isValidIcao24(icao24)) return res.status(400).json({ error: 'Invalid ICAO24 format' });
 
+    // helper: attach OpenAP performance data if type code is known
+    function attachOpenAP(data) {
+        const tc = (data?.typecode || data?.type_code || '').toUpperCase();
+        if (!tc || !openapPerfDB[tc]) return data;
+        return { ...data, performance: openapPerfDB[tc] };
+    }
+
     // 1. 優先檢查靜態字典 (Static First)
     if (aircraftStaticDB[icao24]) {
-        return res.json({ ...aircraftStaticDB[icao24], fromStatic: true });
+        return res.json(attachOpenAP({ ...aircraftStaticDB[icao24], fromStatic: true }));
     }
 
     try {
@@ -3598,7 +3736,7 @@ app.get('/api/metadata/:icao24', async (req, res) => {
             if (!dbAircraft.owner && dbAircraft.operator) {
                 dbAircraft.owner = dbAircraft.operator;
             }
-            return res.json(dbAircraft);
+            return res.json(attachOpenAP(dbAircraft));
         }
 
         // 3. 抓取外部 API
@@ -3749,15 +3887,21 @@ app.post('/api/metadata/batch', async function (req, res) {
 // 實作: 固定航班航線字典 (Flight Route Database)
 // ==========================================
 const LOCAL_ROUTES_FILE = path.join(__dirname, 'data', 'local_routes.json');
-const SCHEDULES_STATIC_FILE = path.join(__dirname, 'data', 'schedules_static.json');
-const GLOBAL_AIRPORTS_FILE = path.join(__dirname, 'data', 'processed', 'airports_global.json');
-const GLOBAL_AIRLINES_FILE = path.join(__dirname, 'data', 'processed', 'airlines.json');
+const SCHEDULES_STATIC_FILE   = path.join(__dirname, 'data', 'schedules_static.json');
+const GLOBAL_AIRPORTS_FILE    = path.join(__dirname, 'data', 'processed', 'airports_global.json');
+const GLOBAL_AIRLINES_FILE    = path.join(__dirname, 'data', 'processed', 'airlines.json');
+const OPENFLIGHTS_GLOBAL_FILE = path.join(__dirname, 'data', 'processed', 'schedules_global.json');
+const OPENFLIGHTS_PREFIX_FILE = path.join(__dirname, 'data', 'processed', 'airline_prefixes.json');
+const OPENAP_PERF_FILE        = path.join(__dirname, 'data', 'openap', 'aircraft_perf.json');
 
 let routesDatabase = {};
 let localRoutesDB = {};
 let schedulesStaticDB = {};
 let globalAirportsDB = {};
 let globalAirlinesDB = {};
+let openflightsGlobalDB = {};   // callsign → {dep, arr}
+let openflightsPrefixDB = {};   // airline IATA prefix → [{dep,arr}]
+let openapPerfDB = {};          // ICAO type code → performance params
 
 function loadGlobalData() {
     try {
@@ -3768,6 +3912,18 @@ function loadGlobalData() {
         if (fs.existsSync(GLOBAL_AIRLINES_FILE)) {
             globalAirlinesDB = JSON.parse(fs.readFileSync(GLOBAL_AIRLINES_FILE, 'utf8'));
             console.log(`✈️ [GLOBAL] Loaded ${Object.keys(globalAirlinesDB).length} airline aliases.`);
+        }
+        if (fs.existsSync(OPENFLIGHTS_GLOBAL_FILE)) {
+            openflightsGlobalDB = JSON.parse(fs.readFileSync(OPENFLIGHTS_GLOBAL_FILE, 'utf8'));
+            console.log(`🌍 [OPENFLIGHTS] Loaded ${Object.keys(openflightsGlobalDB).length} exact callsign routes`);
+        }
+        if (fs.existsSync(OPENFLIGHTS_PREFIX_FILE)) {
+            openflightsPrefixDB = JSON.parse(fs.readFileSync(OPENFLIGHTS_PREFIX_FILE, 'utf8'));
+            console.log(`🌍 [OPENFLIGHTS] Loaded ${Object.keys(openflightsPrefixDB).length} airline prefix networks`);
+        }
+        if (fs.existsSync(OPENAP_PERF_FILE)) {
+            openapPerfDB = JSON.parse(fs.readFileSync(OPENAP_PERF_FILE, 'utf8'));
+            console.log(`✈️ [OPENAP] Loaded ${Object.keys(openapPerfDB).length} aircraft performance profiles`);
         }
     } catch (e) {
         console.error('❌ [GLOBAL DATA ERROR] Failed to load global JSON files:', e.message);
@@ -4249,6 +4405,11 @@ app.get('/api/route/:icao24', async (req, res, next) => {
             matchSource = 'local_dict';
             break;
         }
+        if (openflightsGlobalDB[cs]) {
+            route = { dep: openflightsGlobalDB[cs].dep, arr: openflightsGlobalDB[cs].arr };
+            matchSource = 'openflights';
+            break;
+        }
 
         // Route store cache — skip spatial_inference entries (they are position-guesses, not real routes)
         const dbRoute = await Route.findOne({ callsign: cs });
@@ -4273,14 +4434,75 @@ app.get('/api/route/:icao24', async (req, res, next) => {
         });
     }
 
-    // 2. In-memory short-term cache
+    // 2. In-memory short-term cache (noData results use shorter TTL so they retry sooner)
     const cached = routeCache.get(icao24);
-    if (cached && (Date.now() - cached.timestamp < ROUTE_CACHE_TTL)) {
-        return res.json(cached.data);
+    if (cached) {
+        const ttl = cached.data?.noData ? 120000 : ROUTE_CACHE_TTL; // noData: 2 min, good: 30 min
+        if (Date.now() - cached.timestamp < ttl) {
+            return res.json(cached.data);
+        }
     }
 
     try {
-        // --- Layer 3: AeroDataBox real-time route lookup ---
+        // --- Layer 3a: adsbdb.com (free, no quota) ---
+        if (cleanCallsign) {
+            try {
+                const adsbdbRes = await fetch(`https://api.adsbdb.com/v0/callsign/${cleanCallsign}`, {
+                    headers: { 'User-Agent': 'AEROSTRAT/12.0' },
+                    signal: AbortSignal.timeout(4000),
+                });
+                if (adsbdbRes.ok) {
+                    const adsbdbData = await adsbdbRes.json();
+                    const fl = adsbdbData?.response?.flightroute;
+                    if (fl?.origin?.icao_code && fl?.destination?.icao_code) {
+                        console.log(`✅ [ADSBDB] Route for ${cleanCallsign}: ${fl.origin.icao_code} → ${fl.destination.icao_code}`);
+                        const result = {
+                            icao24, callsign: cleanCallsign,
+                            departureAirport: fl.origin.icao_code,
+                            arrivalAirport: fl.destination.icao_code,
+                            source: 'adsbdb',
+                        };
+                        routeCache.set(icao24, { data: result, timestamp: Date.now() });
+                        Route.findOneAndUpdate(
+                            { callsign: cleanCallsign },
+                            { $set: { departureAirport: fl.origin.icao_code, arrivalAirport: fl.destination.icao_code, source: 'adsbdb', lastUpdated: new Date() } },
+                            { upsert: true }
+                        ).catch(() => null);
+                        return res.json(result);
+                    }
+                }
+            } catch (_) { /* adsbdb timeout — continue */ }
+        }
+
+        // --- Layer 3b: AirLabs Routes DB (1000 req/month free) ---
+        const AIRLABS_KEY = process.env.AIRLABS_API_KEY;
+        if (cleanCallsign && AIRLABS_KEY) {
+            try {
+                const alRes = await fetch(
+                    `https://airlabs.co/api/v9/flights?flight_icao=${cleanCallsign}&api_key=${AIRLABS_KEY}`,
+                    { signal: AbortSignal.timeout(5000) }
+                );
+                if (alRes.ok) {
+                    const alData = await alRes.json();
+                    const fl = alData?.response?.[0];
+                    const dep = fl?.dep_icao || fl?.dep_iata;
+                    const arr = fl?.arr_icao || fl?.arr_iata;
+                    if (dep && arr) {
+                        console.log(`✅ [AIRLABS] Route for ${cleanCallsign}: ${dep} → ${arr}`);
+                        const result = { icao24, callsign: cleanCallsign, departureAirport: dep, arrivalAirport: arr, source: 'airlabs' };
+                        routeCache.set(icao24, { data: result, timestamp: Date.now() });
+                        Route.findOneAndUpdate(
+                            { callsign: cleanCallsign },
+                            { $set: { departureAirport: dep, arrivalAirport: arr, source: 'airlabs', lastUpdated: new Date() } },
+                            { upsert: true }
+                        ).catch(() => null);
+                        return res.json(result);
+                    }
+                }
+            } catch (_) { /* airlabs timeout — continue */ }
+        }
+
+        // --- Layer 3c: AeroDataBox real-time route lookup ---
         // Must come before spatial inference — provides the actual flight plan, not a position guess.
         if (cleanCallsign) {
             const externalRoute = await fetchRouteData(cleanCallsign);
@@ -4394,28 +4616,21 @@ app.get('/api/route/external', async (req, res) => {
             }
         }
 
-        // --- Layer 3: Smart Mock Fallback ---
+        // --- Layer 3: adsbdb.com fallback (free, community-sourced) ---
         if (!externalData) {
-            const MOCK_DB = {
-                'JAL33': { dep: 'RJTT', arr: 'VTBS' },
-                'JAL727': { dep: 'RJAA', arr: 'RPLL' },
-                'APZ622': { dep: 'RKSI', arr: 'VTBS' },
-                'CPA880': { dep: 'VHHH', arr: 'KLAX' },
-                'JJA2104': { dep: 'RKSI', arr: 'RCTP' },
-                'TTW603': { dep: 'RCTP', arr: 'ROAH' },
-                'TGW875': { dep: 'RCTP', arr: 'WSSS' },
-                'CAL6871': { dep: 'RCTP', arr: 'VHHH' },
-                'AAR756': { dep: 'RPLL', arr: 'RKSI' },
-                'CES739': { dep: 'ZSPD', arr: 'VTBS' },
-                'HKE623': { dep: 'VHHH', arr: 'RCTP' },
-            };
-            if (MOCK_DB[callsign]) {
-                externalData = {
-                    dep: MOCK_DB[callsign].dep,
-                    arr: MOCK_DB[callsign].arr,
-                    source: 'smart_mock'
-                };
-            }
+            try {
+                const adsbdbRes = await fetch(`https://api.adsbdb.com/v0/callsign/${callsign}`, {
+                    headers: { 'User-Agent': 'AEROSTRAT/12.0' },
+                    signal: AbortSignal.timeout(4000),
+                });
+                if (adsbdbRes.ok) {
+                    const adsbdbData = await adsbdbRes.json();
+                    const fl = adsbdbData?.response?.flightroute;
+                    if (fl?.origin?.icao_code && fl?.destination?.icao_code) {
+                        externalData = { dep: fl.origin.icao_code, arr: fl.destination.icao_code, source: 'adsbdb' };
+                    }
+                }
+            } catch (_) { /* timeout — skip */ }
         }
 
         if (externalData) {
@@ -4820,48 +5035,40 @@ const METAR_AIRPORTS = [
 ];
 
 async function fetchMetarData() {
-    
-
+    syncLog.start('metar');
     try {
         const ids = METAR_AIRPORTS.join(',');
         const url = `https://aviationweather.gov/api/data/metar?ids=${ids}&format=json`;
-        console.log(`📡 [METAR] Fetching weather for ${METAR_AIRPORTS.length} airports...`);
+        logger.info('METAR', `Fetching weather for ${METAR_AIRPORTS.length} airports`);
 
         const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
-        if (!response.ok) throw new Error(`METAR API error: ${response.status}`);
+        if (!response.ok) throw new Error(`METAR API HTTP ${response.status}`);
 
         const data = await response.json();
 
-        // 批次更新 MongoDB
-        const operations = data.map(info => {
-            const lng = parseFloat(info.lon);
-            const lat = parseFloat(info.lat);
-
-            return {
-                updateOne: {
-                    filter: { icaoId: info.icaoId.toUpperCase() },
-                    update: {
-                        $set: {
-                            ...info,
-                            location: {
-                                type: 'Point',
-                                coordinates: [lng, lat]
-                            },
-                            lastUpdated: new Date()
-                        }
-                    },
-                    upsert: true
-                }
-            };
-        });
+        const operations = data.map(info => ({
+            updateOne: {
+                filter: { icaoId: info.icaoId.toUpperCase() },
+                update: {
+                    $set: {
+                        ...info,
+                        location: { type: 'Point', coordinates: [parseFloat(info.lon), parseFloat(info.lat)] },
+                        lastUpdated: new Date()
+                    }
+                },
+                upsert: true
+            }
+        }));
 
         if (operations.length > 0) {
             await Metar.bulkWrite(operations, { ordered: false });
         }
 
-        console.log(`📡 [METAR] Updated ${data.length} airport weather records`);
+        logger.info('METAR', `Updated ${data.length} airport weather records`);
+        syncLog.success('metar', `${data.length} airports`);
     } catch (error) {
-        console.error('❌ [METAR] Fetch error:', error.message);
+        logger.error('METAR', `Fetch error: ${error.message}`);
+        syncLog.fail('metar', error.message);
     }
 }
 
@@ -4899,15 +5106,25 @@ app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
         if (cached) return res.json({ ...cached, source: 'memory_cache' });
 
         // 2. [DB READ-THROUGH] Local Knowledge Base
-        let [dbAircraft, dbRoute] = await Promise.all([
-            Aircraft.findOne({ $or: [{ icao24: hex }, { hex: hex }] }) .catch(() => null),
-            Route.findOne({ callsign }) .catch(() => null)
-        ]);
-        
+        // Aircraft: SQLite mictronics_aircraft (sync, weekly refresh, ~400k records)
+        // Route:    MongoDB Route (still needed — no SQLite route table)
+        const micRec  = MictronicsDb.lookup(hex);
+        const dbAircraft = micRec ? {
+            icao24: micRec.icao24, hex: micRec.icao24,
+            registration: micRec.registration,
+            type: micRec.typecode, typecode: micRec.typecode,
+            model: micRec.model,
+            operator: micRec.operator,
+            airline: null, manufacturer: null, photo_url: null,
+            _syncedAt: micRec.synced_at   // unix seconds
+        } : null;
+        const dbRoute = await Route.findOne({ callsign }).catch(() => null);
+
         const AIRCRAFT_TTL = 30 * 24 * 60 * 60 * 1000; // 30 Days
         const ROUTE_TTL = 4 * 60 * 60 * 1000;         // 4 Hours — cargo/charter airlines swap legs frequently
 
-        const isAircraftFresh = dbAircraft && (Date.now() - new Date(dbAircraft.lastUpdated).getTime() < AIRCRAFT_TTL);
+        // SQLite uses synced_at (unix seconds); no lastUpdated date object
+        const isAircraftFresh = dbAircraft && (Date.now() - (dbAircraft._syncedAt ?? 0) * 1000 < AIRCRAFT_TTL);
         const isRouteFresh = dbRoute && (Date.now() - new Date(dbRoute.lastUpdated).getTime() < ROUTE_TTL);
 
         // --- Step 2: Live state from in-memory cache (no extra API call) ---
@@ -4936,7 +5153,7 @@ app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
 
         // Local DB has full data — skip all external enrichment API calls
         const hasLocalAircraftData = isAircraftFresh && dbAircraft?.registration && dbAircraft.registration !== 'N/A'
-            && (dbAircraft.typecode || dbAircraft.type_code);
+            && dbAircraft.typecode;
         if (hasLocalAircraftData && isRouteTrusted) {
             console.log(`🎯 [DB HIT] Serving cached knowledge for ${hex}/${callsign}`);
             const fused = await finalizeProfile(dbAircraft, dbRoute, liveState);
@@ -4993,15 +5210,16 @@ app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
         };
         const updatedAircraft = await Aircraft.findOneAndUpdate({ $or: [{ icao24: hex }, { hex: hex }] }, { $set: aircraftUpdate }, { upsert: true, returnDocument: 'after' });
  
-        // Flight Route Info (VRS standing-data as final fallback)
+        // Flight Route Info (VRS standing-data as final fallback, skip multi-leg entries)
         const vrsRoute = VrsDb.lookup(callsign);
+        const vrsIsMultiLeg = vrsRoute?.raw ? (vrsRoute.raw.match(/-/g) || []).length > 1 : false;
         const validIata = (v) => v && v !== 'N/A' && v !== '---' ? v : null;
         const routeUpdate = {
             callsign,
-            origin_iata:         validIata(routeRes?.origin_iata) || validIata(dbRoute?.origin_iata) || vrsRoute?.from || 'N/A',
+            origin_iata:         validIata(routeRes?.origin_iata) || validIata(dbRoute?.origin_iata) || (!vrsIsMultiLeg && vrsRoute?.from) || 'N/A',
             origin_name:         routeRes?.origin_name         || dbRoute?.origin_name         || null,
             origin_city:         routeRes?.origin_city         || dbRoute?.origin_city         || null,
-            destination_iata:    validIata(routeRes?.destination_iata) || validIata(dbRoute?.destination_iata) || vrsRoute?.to || '---',
+            destination_iata:    validIata(routeRes?.destination_iata) || validIata(dbRoute?.destination_iata) || (!vrsIsMultiLeg && vrsRoute?.to) || '---',
             destination_icao:    routeRes?.destination_icao    || dbRoute?.destination_icao    || null,
             destination_name:    routeRes?.destination_name    || dbRoute?.destination_name    || null,
             destination_city:    routeRes?.destination_city    || dbRoute?.destination_city    || null,
@@ -5125,109 +5343,143 @@ app.use('/api', (req, res) => {
 // 自動化資料庫引擎 (Background Auto-Sync)
 // ==========================================
 async function syncSchedulesDatabase() {
-    console.log('⚙️ [AUTO-SYNC] Starting daily database synchronization...');
+    const JOB = 'schedules';
+    logger.info('SCHEDULES', 'Daily sync starting...');
+    syncLog.start(JOB);
     try {
-        // [數據獲取] 這裡使用的是一個開源的、定期更新的航班班表來源範例
-        // 實際部署時使用者可以根據需要修改此 URL
         const SCHEDULES_URL = 'https://raw.githubusercontent.com/LiaoCho/flight-data-source/main/schedules_latest.json';
+        logger.info('SCHEDULES', `Downloading from ${SCHEDULES_URL}`);
 
-        console.log(`📡 [AUTO-SYNC] Downloading latest data from ${SCHEDULES_URL}...`);
-
-        // 設定較短的逾時，避免阻塞事件循環
         const response = await fetch(SCHEDULES_URL, { signal: AbortSignal.timeout(60000) });
 
         if (!response.ok) {
-            console.warn(`⚠️ [AUTO-SYNC] Failed to download schedules: ${response.status}. Using existing local data.`);
+            const msg = `HTTP ${response.status} — source URL may be invalid or unavailable`;
+            logger.error('SCHEDULES', `Sync failed: ${msg}`);
+            syncLog.fail(JOB, msg);
             return;
         }
 
         const newData = await response.json();
-        // [OPT 4.3] 修復路徑：使用與 loadGlobalData 相同的路徑 (data/schedules_static.json)
-        const SCHEDULE_FILE = SCHEDULES_STATIC_FILE;
-
-        // 寫入修正後的路徑 (async — 避免阻塞事件循環)
-        await fs.promises.writeFile(SCHEDULE_FILE, JSON.stringify(newData, null, 2));
-
-        // 同步完成後更新記憶體中的變數
+        await fs.promises.writeFile(SCHEDULES_STATIC_FILE, JSON.stringify(newData, null, 2));
         schedulesStaticDB = newData;
 
-        console.log(`✅ [AUTO-SYNC] Successfully synced ${Object.keys(newData).length} flights. Schedules updated.`);
+        const count = Object.keys(newData).length;
+        logger.info('SCHEDULES', `Sync OK — ${count} routes`);
+        syncLog.success(JOB, `${count} routes`);
     } catch (error) {
-        console.error('❌ [AUTO-SYNC] Critical synchronization error:', error.message);
+        logger.error('SCHEDULES', `Sync error: ${error.message}`);
+        syncLog.fail(JOB, error.message);
     }
 }
 
-// 設定每日凌晨 3 點 (伺服器離峰時間) 執行任務
-cron.schedule('0 3 * * *', () => {
-    syncSchedulesDatabase();
-}, {
-    timezone: "Asia/Taipei"
-});
+// schedules cron disabled — source URL (LiaoCho/flight-data-source) returns 404.
+// schedules_static.json contains 34 hand-curated Taiwan routes; edit locally as needed.
+// syncSchedulesDatabase() kept for future use when a valid source URL is available.
 
-// 每 15 分鐘抓取一次 TDX 進出港資料 (Real-time Schedules)
-crawlFlightSchedules(); // 啟動時立即執行一次，填充 route cache
-cron.schedule('*/15 * * * *', () => {
+// TDX 進出港資料：每日凌晨 4 點同步一次（10 機場 × 2 endpoint = 20 req/次，每月 620 req ≈ 0.02 點）
+// 主要路由來源已改為 adsbdb.com（免費無限額），TDX 僅作台灣本地班次補充
+cron.schedule('0 4 * * *', () => {
     crawlFlightSchedules();
 }, {
     timezone: "Asia/Taipei"
 });
 
-// ── DB sync timestamps (in-memory, for monitor page) ─────────────────────────
+// ── DB sync timestamps — backed by syncLog (persistent across restarts) ──────
 const dbSyncStatus = {
-    vrs:       { lastSync: null, status: 'unknown', rows: {} },
-    mictronics:{ lastSync: null, status: 'unknown', rows: {} },
+    get vrs()        { return syncLog.get('vrs')        || { status: 'unknown' }; },
+    get mictronics() { return syncLog.get('mictronics') || { status: 'unknown' }; },
+    get schedules()  { return syncLog.get('schedules')  || { status: 'unknown' }; },
 };
 
 // ── VRS Routes Database (daily sync, 03:42 Taiwan time) ──
 cron.schedule('42 3 * * *', () => {
     logger.info('VRS', 'Daily sync starting...');
-    dbSyncStatus.vrs.status = 'syncing';
+    syncLog.start('vrs');
     syncVrsRoutes(msg => logger.info('VRS', msg))
         .then(r => {
             if (r.success) {
                 VrsDb.reload();
-                dbSyncStatus.vrs.lastSync = new Date().toISOString();
-                dbSyncStatus.vrs.status   = 'ok';
+                syncLog.success('vrs', `routes updated`);
             } else {
-                dbSyncStatus.vrs.status = 'error';
+                syncLog.fail('vrs', r.error || 'sync returned success=false');
             }
         })
         .catch(e => {
             logger.error('VRS', `Daily sync failed: ${e.message}`);
-            dbSyncStatus.vrs.status = 'error';
+            syncLog.fail('vrs', e.message);
         });
 }, { timezone: 'Asia/Taipei' });
 
 // ── Mictronics Aircraft Registry (weekly sync, every Sunday 03:17 Taiwan time) ──
+// force:true ensures aircraft_types cache is refreshed and existing data is re-synced
 cron.schedule('17 3 * * 0', () => {
     logger.info('MICT', 'Weekly sync starting...');
-    dbSyncStatus.mictronics.status = 'syncing';
-    syncMictronics(msg => logger.info('MICT', msg))
+    syncLog.start('mictronics');
+    syncMictronics(msg => logger.info('MICT', msg), { force: true })
         .then(r => {
-            dbSyncStatus.mictronics.lastSync = new Date().toISOString();
-            dbSyncStatus.mictronics.status   = r.success ? 'ok' : 'error';
+            if (r.skipped) {
+                logger.warn('MICT', 'Sync skipped unexpectedly');
+                syncLog.fail('mictronics', 'skipped unexpectedly');
+            } else {
+                logger.info('MICT', `Sync OK — ${r.total || 0} aircraft`);
+                syncLog.success('mictronics', `${r.total || 0} aircraft`);
+            }
         })
         .catch(e => {
             logger.error('MICT', `Weekly sync failed: ${e.message}`);
-            dbSyncStatus.mictronics.status = 'error';
+            syncLog.fail('mictronics', e.message);
         });
 }, { timezone: 'Asia/Taipei' });
 
-// On startup: sync Mictronics if table is empty
+// On startup: mark schedules_static as always ok (static file, loaded at boot)
+(function markSchedulesOk() {
+    const s = syncLog.get('schedules');
+    if (!s || !s.lastSuccess) {
+        syncLog.success('schedules', 'static file loaded');
+    }
+})();
+
+// On startup: sync Mictronics if table is empty; if data exists, mark syncLog ok
 (async () => {
     try {
-        const existing = MictronicsDb.count();
-        if (existing < 10000) {
-            console.log(`🛫 [Mictronics] Table empty (${existing} rows) — running initial sync...`);
-            await syncMictronics(msg => console.log(msg));
-        } else {
+        const existing  = MictronicsDb.count();
+        const lastEntry = syncLog.get('mictronics');
+        if (existing >= 10000) {
+            // Data is present — mark as ok if syncLog has no record (e.g. after fresh restart)
+            if (!lastEntry?.lastSuccess) {
+                syncLog.success('mictronics', `${existing} aircraft (existing DB)`);
+            }
             const lastSync = MictronicsDb.lastSyncTime();
             const ageDays  = lastSync ? ((Date.now() / 1000 - lastSync) / 86400).toFixed(1) : '?';
             console.log(`✅ [Mictronics] ${existing.toLocaleString()} aircraft in DB (last sync: ${ageDays}d ago)`);
+        } else {
+            console.log(`🛫 [Mictronics] Table empty (${existing} rows) — running initial sync...`);
+            syncLog.start('mictronics');
+            const r = await syncMictronics(msg => console.log(msg));
+            syncLog.success('mictronics', `${r?.total || r?.count || 0} aircraft`);
         }
     } catch (e) {
         console.error(`❌ [Mictronics] Startup check failed: ${e.message}`);
+        syncLog.fail('mictronics', e.message);
     }
+})();
+
+// On startup: if VRS routes.db has data but syncLog never recorded success, mark as ok
+(function checkVrsOnStartup() {
+    const lastEntry = syncLog.get('vrs');
+    if (lastEntry?.lastSuccess) return;
+    try {
+        const Database = require('better-sqlite3');
+        const vrsDbPath = path.join(__dirname, 'data', 'routes.db');
+        if (!require('fs').existsSync(vrsDbPath)) return;
+        const db = new Database(vrsDbPath, { readonly: true });
+        const row = db.prepare('SELECT COUNT(*) as c FROM routes').get();
+        db.close();
+        if (row.c > 0) {
+            syncLog.success('vrs', `${row.c} routes (existing DB)`);
+            logger.info('VRS', `Startup: marked ok — ${row.c} routes already in DB`);
+        }
+    } catch (_) {}
 })();
 
 // ==========================================

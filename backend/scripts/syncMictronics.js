@@ -52,8 +52,8 @@ function downloadFile(url, dest) {
 }
 
 // ── Load aircraft_types from ZIP or cached JSON ───────────────────────────────
-function loadAircraftTypes(zipPath, logger) {
-    if (fs.existsSync(TYPE_CACHE)) {
+function loadAircraftTypes(zipPath, logger, forceRefresh = false) {
+    if (!forceRefresh && fs.existsSync(TYPE_CACHE)) {
         try {
             const cached = JSON.parse(fs.readFileSync(TYPE_CACHE, 'utf8'));
             if (Object.keys(cached).length > 0) {
@@ -61,6 +61,10 @@ function loadAircraftTypes(zipPath, logger) {
                 return cached;
             }
         } catch (_) {}
+    }
+
+    if (forceRefresh && fs.existsSync(TYPE_CACHE)) {
+        try { fs.unlinkSync(TYPE_CACHE); } catch (_) {}
     }
 
     try {
@@ -154,10 +158,11 @@ function importAircraftDb(zipPath, typesMap, logger) {
 }
 
 // ── Main sync function ────────────────────────────────────────────────────────
-async function syncMictronics(logFn) {
+// opts.force = true → skip existing-data check + force-refresh aircraft_types cache
+async function syncMictronics(logFn, opts = {}) {
     const logger = logFn || (msg => console.log(msg));
 
-    const forceResync = process.env.FORCE_RESYNC === 'true';
+    const forceResync = opts.force === true || process.env.FORCE_RESYNC === 'true';
 
     if (!forceResync) {
         const MictronicsDb = require('../db/mictronicsDb');
@@ -180,7 +185,7 @@ async function syncMictronics(logFn) {
     } catch (err) {
         logger(`[Mictronics] WARN: Failed to download aircraft_types: ${err.message}`);
     }
-    const typesMap = loadAircraftTypes(TEMP_TYPE_ZIP, logger);
+    const typesMap = loadAircraftTypes(TEMP_TYPE_ZIP, logger, forceResync);
 
     // Step 2: Download aircraft_db (~4.6 MB ZIP)
     logger(`[Mictronics] Downloading aircraft_db (~4.6 MB)...`);

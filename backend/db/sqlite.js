@@ -167,7 +167,7 @@ function pruneOldTrackPoints() {
 
 // ── Periodic WAL checkpoint — every 5 minutes (PASSIVE: non-blocking) ───────
 // If WAL exceeds 2GB, escalate to TRUNCATE to prevent unbounded growth.
-const WAL_SIZE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
+const WAL_SIZE_LIMIT_BYTES = 512 * 1024 * 1024; // 512MB — TRUNCATE to reclaim disk space
 function walCheckpoint() {
     try {
         const { statSync } = require('fs');
@@ -177,7 +177,7 @@ function walCheckpoint() {
 
         if (walSize > WAL_SIZE_LIMIT_BYTES) {
             const sizeMB = Math.round(walSize / 1024 / 1024);
-            console.warn(`[SQLite] WAL ${sizeMB}MB exceeds 2GB limit — running TRUNCATE`);
+            console.warn(`[SQLite] WAL ${sizeMB}MB exceeds 512MB limit — running TRUNCATE`);
             const result = db.pragma('wal_checkpoint(TRUNCATE)');
             const r = result[0];
             let sizeAfter = 0;

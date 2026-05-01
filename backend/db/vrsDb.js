@@ -57,7 +57,9 @@ init();
 /**
  * Look up departure/arrival airports by callsign.
  * Returns { from, to, raw, airline_icao } or null.
- * Handles leading zeros: EVA026 → EVA26
+ * Handles leading zeros: EVA026 → EVA26.
+ * Multi-leg routes (raw contains >1 hyphen, e.g. KATL-KDFW-KLAX-VHHH) are
+ * silently rejected — taking their first/last airport produces wrong routes.
  */
 function lookup(callsign) {
     if (!db || !stmtRoute || !callsign) return null;
@@ -69,6 +71,8 @@ function lookup(callsign) {
             if (m) row = stmtRoute.get(m[1] + m[2]);
         }
         if (!row) return null;
+        // Reject multi-leg entries — they corrupt dep/arr by giving wrong endpoints
+        if ((row.airports.match(/-/g) || []).length > 1) return null;
         const parts = row.airports.split('-');
         return {
             from:         parts[0] || null,

@@ -156,6 +156,7 @@ function wLog(level, msg) {
 
 // ── Selected plane state (persisted across reconnects) ───────────────────────
 let selectedIcao24 = null;
+let storedBaseUrl = null; // retained for FORCE_RECONNECT
 
 // ── WebSocket Connection ─────────────────────────────────────────────────────
 function connectWebSocket(baseUrl) {
@@ -210,6 +211,7 @@ self.onmessage = (event) => {
 
     switch (type) {
         case 'INIT':
+            storedBaseUrl = payload.baseUrl;
             connectWebSocket(payload.baseUrl);
             break;
         case 'SET_VIEWPORT':
@@ -222,6 +224,13 @@ self.onmessage = (event) => {
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(encode({ type: 'SELECT_PLANE', icao24: selectedIcao24 }));
             }
+            break;
+        case 'FORCE_RECONNECT':
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            if (ws) { ws.onclose = null; ws.close(); ws = null; }
+            planesMap.clear();
+            reconnectDelay = 1000;
+            if (storedBaseUrl) connectWebSocket(storedBaseUrl);
             break;
         case 'DISCONNECT':
             if (flushTimer !== null) { clearTimeout(flushTimer); flushTimer = null; }

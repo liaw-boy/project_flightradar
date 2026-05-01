@@ -37,6 +37,7 @@ export default function TopBar({
     const [time, setTime] = useState('--:--:--');
     const [showSettings, setShowSettings] = useState(false);
     const [showMobileSearch, setShowMobileSearch] = useState(false);
+    const [dataFreshness, setDataFreshness] = useState(null);
     const currentUser = authUser ?? null;
     const [showUserMenu, setShowUserMenu] = useState(false);
     const settingsRef = useRef(null);
@@ -61,6 +62,13 @@ export default function TopBar({
     }, []);
 
     useEffect(() => {
+        fetch('/api/data-freshness')
+            .then(r => r.json())
+            .then(setDataFreshness)
+            .catch(() => {});
+    }, []);
+
+    useEffect(() => {
         if (!showSettings) return;
         const handleClickOutside = (e) => {
             if (settingsRef.current && !settingsRef.current.contains(e.target)) {
@@ -79,12 +87,6 @@ export default function TopBar({
                     <AeroIcon size={28} bg={false} />
                     <h2>AEROSTRAT RADAR</h2>
                 </div>
-                {sseStale && (
-                    <div className="tb-stale-badge" title="即時資料連線中斷，顯示的資料可能已過時">
-                        資料可能已過時
-                    </div>
-                )}
-
             </div>
 
 
@@ -180,7 +182,7 @@ export default function TopBar({
                                         <Route size={14} /> {showUserRoutes ? '隱藏我的航線' : '顯示我的航線'}
                                     </button>
                                 )}
-                                {!!currentUser?.is_admin && (
+                                {!!currentUser?.is_superadmin && (
                                     <>
                                         <div className="user-menu-divider" />
                                         <button className="user-menu-item admin" onClick={() => { setShowUserMenu(false); onOpenAdmin?.(); }}>

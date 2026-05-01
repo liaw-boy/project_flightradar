@@ -1,20 +1,32 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from 'react-leaflet';
 
-// ─── Quadratic bezier arc (visual only, no geodesic math) ────────────────────
+// ─── Shortest-path longitude adjustment (antimeridian-aware) ─────────────────
+// Returns a possibly-unwrapped lng2 so that |adjLng2 - lng1| ≤ 180.
+// e.g. US (-100°) → Japan (140°):  raw dLng = +240 → adjLng2 = 140-360 = -220
+//      arc goes westward through the Pacific (correct).
+function shortestLng(lng1, lng2) {
+    const d = lng2 - lng1;
+    if (d > 180)  return lng2 - 360;
+    if (d < -180) return lng2 + 360;
+    return lng2;
+}
+
+// ─── Quadratic bezier arc (antimeridian-aware, shortest-path) ─────────────────
 export function curvePts(lat1, lng1, lat2, lng2, n = 40) {
+    const adjLng2 = shortestLng(lng1, lng2);
     const dLat = lat2 - lat1;
-    const dLng = lng2 - lng1;
+    const dLng = adjLng2 - lng1;
     const dist = Math.sqrt(dLat * dLat + dLng * dLng);
-    if (dist < 0.01) return [[lat1, lng1], [lat2, lng2]];
+    if (dist < 0.01) return [[lat1, lng1], [lat2, adjLng2]];
     const lift = dist * 0.2;
     const ctrlLat = (lat1 + lat2) / 2 - (dLng / dist) * lift;
-    const ctrlLng = (lng1 + lng2) / 2 + (dLat / dist) * lift;
+    const ctrlLng = (lng1 + adjLng2) / 2 + (dLat / dist) * lift;
     return Array.from({ length: n + 1 }, (_, i) => {
         const t = i / n, mt = 1 - t;
         return [
             mt * mt * lat1 + 2 * mt * t * ctrlLat + t * t * lat2,
-            mt * mt * lng1 + 2 * mt * t * ctrlLng + t * t * lng2,
+            mt * mt * lng1 + 2 * mt * t * ctrlLng + t * t * adjLng2,
         ];
     });
 }
@@ -56,19 +68,24 @@ const MiniRouteMap = React.memo(function MiniRouteMap({ depInfo, arrInfo }) {
     const isDark = useIsDark();
     if (!depInfo?.lat || !depInfo?.lng || !arrInfo?.lat || !arrInfo?.lng) return null;
 
+    // adjLng2: arrival longitude adjusted for shortest path (may exceed ±180)
+    const adjArrLng = useMemo(() =>
+        shortestLng(depInfo.lng, arrInfo.lng),
+    [depInfo.lng, arrInfo.lng]);
+
     const arcPoints = useMemo(() =>
         curvePts(depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng),
     [depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng]);
 
     const mapInit = useMemo(() => ({
-        center: [(depInfo.lat + arrInfo.lat) / 2, (depInfo.lng + arrInfo.lng) / 2],
+        center: [(depInfo.lat + arrInfo.lat) / 2, (depInfo.lng + adjArrLng) / 2],
         zoom: 2,
-    }), [depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng]);
+    }), [depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng, adjArrLng]);
 
     const mapBounds = useMemo(() => [
         [depInfo.lat, depInfo.lng],
-        [arrInfo.lat, arrInfo.lng],
-    ], [depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng]);
+        [arrInfo.lat, adjArrLng],
+    ], [depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng, adjArrLng]);
 
     const tileUrl = isDark
         ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'

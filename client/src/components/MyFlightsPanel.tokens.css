@@ -10,24 +10,24 @@
 
 /* ── Local tokens (scoped to component roots; bridge to global) ── */
 .mfp-overlay, .mfp-page, .mfp-fullpage,
-.mfp-panel, .fc-card, .bf-wrap, .sd-wrap {
+.mfp-panel, .fc-card, .bp-card, .bf-wrap, .sd-wrap {
     /* Fonts — bridge to global system (dark + light auto) */
     --ff-display: var(--font-display, 'Fraunces', 'Cormorant Garamond', Georgia, serif);
     --ff-body:    var(--font-main, 'Inter', 'PingFang TC', -apple-system, sans-serif);
     --ff-mono:    var(--font-mono-soft, 'JetBrains Mono', 'SF Mono', Menlo, monospace);
 
-    /* Dark palette (default) */
-    --c-bg:       #0c1220;
-    --c-card:     #131a2a;
-    --c-card-2:   #182033;
-    --c-surf:     #1a2335;
-    --c-hi:       #232c42;
+    /* Dark palette — bridged to global theme tokens */
+    --c-bg:       var(--bg, #020617);
+    --c-card:     var(--surface-solid, #0f172a);
+    --c-card-2:   #0d1629;
+    --c-surf:     #111d30;
+    --c-hi:       #1a2840;
 
-    --c-text:     #ecedf2;
-    --c-text-2:   #a8aebf;
-    --c-text-3:   #6f7585;
-    --c-line:     rgba(168, 174, 191, 0.12);
-    --c-line-2:   rgba(168, 174, 191, 0.22);
+    --c-text:     var(--text, #f8fafc);
+    --c-text-2:   var(--text-2, #94a3b8);
+    --c-text-3:   var(--text-3, #64748b);
+    --c-line:     var(--border, rgba(148, 163, 184, 0.15));
+    --c-line-2:   var(--border-strong, rgba(148, 163, 184, 0.25));
 
     /* Brass-gold — bridges to global --accent-warm (auto light-flip) */
     --c-gold:     var(--accent-warm, #d6b275);
@@ -70,21 +70,21 @@
 :root[data-theme="light"] .fc-card,
 :root[data-theme="light"] .bf-wrap,
 :root[data-theme="light"] .sd-wrap {
-    --c-bg:       #f7f5f0;       /* warm cream — not stark white */
-    --c-card:     #ffffff;
-    --c-card-2:   #f3eee5;
-    --c-surf:     #faf7f1;
-    --c-hi:       #ede7da;
+    --c-bg:       var(--bg, #e8edf3);
+    --c-card:     var(--surface-solid, #f5f7fa);
+    --c-card-2:   var(--surface-raised, #f5f7fa);
+    --c-surf:     var(--surface-hover, #edf0f5);
+    --c-hi:       #e4e9f0;
 
-    --c-text:     #1a1206;
-    --c-text-2:   #5d5a52;
-    --c-text-3:   #8a847a;
-    --c-line:     rgba(26, 18, 6, 0.08);
-    --c-line-2:   rgba(26, 18, 6, 0.15);
+    --c-text:     var(--text, #0f172a);
+    --c-text-2:   var(--text-2, #374151);
+    --c-text-3:   var(--text-3, #4b5563);
+    --c-line:     var(--border, #d1d9e4);
+    --c-line-2:   var(--border-strong, #b8c4d4);
 }
-:root[data-theme="light"] .mfp-overlay { background: rgba(247, 245, 240, 0.55); }
+:root[data-theme="light"] .mfp-overlay { background: rgba(232, 237, 243, 0.6); }
 :root[data-theme="light"] .mfp-page-topbar,
-:root[data-theme="light"] .mfp-fp-bar { background: rgba(247, 245, 240, 0.92); }
+:root[data-theme="light"] .mfp-fp-bar { background: var(--topbar-bg, #ffffff); border-bottom-color: var(--topbar-border, #e2e8f0); }
 :root[data-theme="light"] .mfp-log-btn,
 :root[data-theme="light"] .bf-btn-submit { color: #fff; background: var(--c-gold-2); }
 :root[data-theme="light"] .mfp-log-btn:hover,

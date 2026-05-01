@@ -8,7 +8,14 @@
     "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan.bold,magenta.bold\" \"node server.js\" \"cd client && npm run dev\"",
     "seed-shapes": "node scripts/seedAircraftShapes.js",
     "sync-mictronics": "node scripts/syncMictronics.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest --forceExit --testTimeout=15000",
+    "test:watch": "jest --watch --forceExit",
+    "test:coverage": "jest --coverage --forceExit"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": ["**/__tests__/**/*.test.js"],
+    "testTimeout": 15000
   },
   "keywords": [],
   "author": "",
@@ -37,6 +44,8 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "jest": "^30.3.0",
+    "supertest": "^7.2.2"
   }
 }

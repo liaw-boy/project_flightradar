@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getAirlineLogoUrl, getAirlineBannerUrl, normalizeLongitude, predictPosition, getAltitudeColor, initAirportDatabase } from '../utils/flightUtils';
+import { getAirlineLogoUrl, getAirlineBannerUrl, normalizeLongitude, wrapLngToMap, predictPosition, getAltitudeColor, initAirportDatabase } from '../utils/flightUtils';
 import { processTrailPath } from '../utils/trailSpline';
 import { getAircraftScale, getDrawSize, getDynamicImage, prewarmExactSvg, ICON_SCALE_VERSION } from '../utils/aircraftIcons';
 import { dataManager } from '../services/dataManager';
@@ -207,7 +207,7 @@ export default function MapView({
         const map = L.map(mapContainerRef.current, {
             zoomControl: false,
             minZoom: 3,
-            worldCopyJump: true,
+            worldCopyJump: false,
             dragging: true,
             tap: false,
             inertia: true,
@@ -253,7 +253,7 @@ export default function MapView({
                 if (!p.renderLat || !p.renderLng) continue;
                 if (!shouldShowPlaneRef.current(p, 1.0)) continue;
 
-                const pt = map.latLngToContainerPoint([p.renderLat, normalizeLongitude(p.renderLng)]);
+                const pt = map.latLngToContainerPoint([p.renderLat, wrapLngToMap(p.renderLng, map.getCenter().lng)]);
                 const dist = Math.hypot(pt.x - clickPt.x, pt.y - clickPt.y);
 
                 const hitRadius = getDrawSize(p, map.getZoom(), getAircraftScale(p)) / 2 + 8;
@@ -371,7 +371,7 @@ export default function MapView({
                 if (!p.renderLat || !p.renderLng) continue;
                 if (!shouldShowPlaneRef.current(p, 1.0)) continue;
 
-                const pt = map.latLngToContainerPoint([p.renderLat, normalizeLongitude(p.renderLng)]);
+                const pt = map.latLngToContainerPoint([p.renderLat, wrapLngToMap(p.renderLng, map.getCenter().lng)]);
                 const dist = Math.hypot(pt.x - mousePt.x, pt.y - mousePt.y);
                 const hoverRadius = getDrawSize(p, map.getZoom(), getAircraftScale(p)) / 2 + 4;
                 if (dist < hoverRadius) {
@@ -682,7 +682,7 @@ export default function MapView({
             if (!icao) return;
             const plane = planesDictRef.current?.[icao];
             if (!plane?.renderLat || !plane?.renderLng) return;
-            const pt = map.latLngToContainerPoint([plane.renderLat, normalizeLongitude(plane.renderLng)]);
+            const pt = map.latLngToContainerPoint([plane.renderLat, wrapLngToMap(plane.renderLng, map.getCenter().lng)]);
             setSelectedScreenPos({ x: pt.x, y: pt.y });
         };
         updatePos();
@@ -1039,15 +1039,36 @@ export default function MapView({
                     //       → loop removal. Gaps are preserved across sub-paths.
                     const trimmedPath = processTrailPath(rawTrimmedPath);
 
+                    // Unwrap trail longitudes to be continuous across the antimeridian.
+                    // Instead of breaking the path at ±180°, each point is adjusted so its
+                    // longitude stays within 180° of the previous one. The extended values
+                    // (e.g. 190°, -190°) are valid Leaflet coords and render correctly in
+                    // any world copy without a visual jump.
+                    const mapCenterLng = map.getCenter().lng;
+                    const unwrappedPath = [];
+                    for (let i = 0; i < trimmedPath.length; i++) {
+                        const copy = trimmedPath[i].slice();
+                        if (i === 0) {
+                            copy[2] = wrapLngToMap(copy[2], mapCenterLng);
+                        } else {
+                            const prevLng = unwrappedPath[i - 1][2];
+                            let lng = normalizeLongitude(copy[2]);
+                            while (lng - prevLng > 180)  lng -= 360;
+                            while (lng - prevLng < -180) lng += 360;
+                            copy[2] = lng;
+                        }
+                        unwrappedPath.push(copy);
+                    }
+
                     // ── Draw estimated departure segment (dotted line) ──────────
                     // If we have departure airport coords and the first track point
                     // is airborne (alt > 200m), draw a dotted line from the airport
                     // to the first known ADS-B point.
-                    const firstPt = trimmedPath[0];
+                    const firstPt = unwrappedPath[0];
                     const firstAlt = firstPt?.[3] ?? 0;
                     if (depCoords && firstPt && firstAlt > 200) {
-                        const depPx = map.latLngToContainerPoint([depCoords.lat, normalizeLongitude(depCoords.lng)]);
-                        const firstPx = map.latLngToContainerPoint([firstPt[1], normalizeLongitude(firstPt[2])]);
+                        const depPx = map.latLngToContainerPoint([depCoords.lat, wrapLngToMap(depCoords.lng, mapCenterLng)]);
+                        const firstPx = map.latLngToContainerPoint([firstPt[1], firstPt[2]]);
                         ctx.save();
                         ctx.beginPath();
                         ctx.setLineDash([6, 8]);
@@ -1066,51 +1087,47 @@ export default function MapView({
                     }
 
                     const segments = [];
-                    for (let pi = 0; pi < trimmedPath.length; pi++) {
-                        const seg = trimmedPath[pi];
-                        const isLastPoint = pi === trimmedPath.length - 1;
-                        const isLive = isLastPoint && !!seg[6]; // _isLiveExtension flag
-                        const pt = map.latLngToContainerPoint([seg[1], normalizeLongitude(seg[2])]);
+                    for (let pi = 0; pi < unwrappedPath.length; pi++) {
+                        const seg = unwrappedPath[pi];
+                        const rawSeg = trimmedPath[pi]; // keep raw for haversine (needs real lat/lng)
+                        const isLastPoint = pi === unwrappedPath.length - 1;
+                        const isLive = isLastPoint && !!trimmedPath[pi][6]; // _isLiveExtension flag
+                        const pt = map.latLngToContainerPoint([seg[1], seg[2]]);
                         let stale  = false;
                         let gap    = false;
                         let bridge = false;
 
                         if (pi > 0) {
-                            const prevSeg = trimmedPath[pi - 1];
+                            const prevSeg = unwrappedPath[pi - 1];
+                            const rawPrev = trimmedPath[pi - 1];
                             const timeDeltaSec = seg[0] && prevSeg[0] ? seg[0] - prevSeg[0] : 0;
-                            const dist = haversineKm(prevSeg[1], prevSeg[2], seg[1], seg[2]);
-                            // Use geographic longitude diff to detect antimeridian crossing.
-                            // Pixel-distance check breaks at high zoom levels where even short
-                            // track segments span more than half the canvas width.
-                            const lngA = normalizeLongitude(prevSeg[2]);
-                            const lngB = normalizeLongitude(seg[2]);
-                            const lngDiff = Math.abs(lngB - lngA);
-                            const isAntimeridian = lngDiff > 180;
+                            const dist = haversineKm(rawPrev[1], rawPrev[2], rawSeg[1], rawSeg[2]);
 
-                            // Gap detection — three tiers (Tangram-inspired):
+                            // Gap detection — three tiers:
                             // 1. Impossible teleport (>50km in <60s >2000km/h) → true break
-                            // 2. Antimeridian crossing → true break
-                            // 3. Time gap > 1800s → bridge (gray dashed, estimated path)
-                            // 4. Time gap 300–1800s → stale (gray dashed, weak coverage)
-                            // 5. < 300s → solid (normal ADS-B polling interval)
+                            // 2. Time gap > 1800s → bridge (gray dashed, estimated path)
+                            // 3. Time gap 300–1800s → stale (gray dashed, weak coverage)
+                            // Antimeridian is no longer a break — handled by longitude unwrapping above.
                             const impliedSpeedKph = timeDeltaSec > 0 ? (dist / timeDeltaSec) * 3600 : 0;
                             const isImpossibleJump = dist > 50 && timeDeltaSec < 60 && impliedSpeedKph > 2000;
-                            if (isAntimeridian || (isImpossibleJump && !isLive)) {
+                            if (isImpossibleJump && !isLive) {
                                 gap = true;
                             } else if (timeDeltaSec > 1800 && !isLive) {
-                                bridge = true; // long oceanic / ground-stop gap — gray bridge
+                                bridge = true;
                             } else if (timeDeltaSec > 300 && !isLive) {
-                                stale = true; // short ADS-B coverage gap — gray dashed
+                                stale = true;
                             }
 
                             // Great circle arc expansion for long non-gap segments
                             if (!gap && dist > GC_THRESHOLD_KM) {
-                                const gcPts = greatCirclePoints(prevSeg[1], prevSeg[2], seg[1], seg[2], dist);
-                                // Insert intermediate points (skip first — already in segments, skip last — will be added below)
+                                const gcPts = greatCirclePoints(rawPrev[1], rawPrev[2], rawSeg[1], rawSeg[2], dist);
                                 for (let gi = 1; gi < gcPts.length - 1; gi++) {
-                                    const [gLat, gLng] = gcPts[gi];
-                                    const gPt = map.latLngToContainerPoint([gLat, normalizeLongitude(gLng)]);
-                                    // Interpolate altitude linearly for intermediate points
+                                    const [gLat, gLngRaw] = gcPts[gi];
+                                    // Unwrap gc point longitude to stay continuous with prev
+                                    let gLng = normalizeLongitude(gLngRaw);
+                                    while (gLng - prevSeg[2] > 180)  gLng -= 360;
+                                    while (gLng - prevSeg[2] < -180) gLng += 360;
+                                    const gPt = map.latLngToContainerPoint([gLat, gLng]);
                                     const t = gi / (gcPts.length - 1);
                                     const iAlt = (prevSeg[3] || 0) + t * ((seg[3] || 0) - (prevSeg[3] || 0));
                                     segments.push({ pt: gPt, seg: [null, gLat, gLng, iAlt, seg[4], seg[5]], stale, gap: false, isLive: false });

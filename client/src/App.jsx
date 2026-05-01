@@ -43,8 +43,9 @@ function setUrlPanel(panel) {
     const params = new URLSearchParams(window.location.search);
     if (panel) params.set('panel', panel);
     else params.delete('panel');
+    params.delete('icao'); // panel 和 icao 互斥
     const qs = params.toString();
-    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+    window.history.pushState({ panel: panel || null }, '', qs ? `?${qs}` : window.location.pathname);
 }
 
 function setUrlStats(on) {
@@ -256,6 +257,7 @@ export default function App() {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
+
     // 初始化飛機形狀 (從 MongoDB 載入 SVG 輪廓)
     useEffect(() => {
         dataManager.getAircraftShapes().then(shapes => {
@@ -389,18 +391,17 @@ export default function App() {
                     setSelectedRoute({ noData: true });
                 });
 
-            // Update URL — skip if another panel/page is active
+            // Update URL with pushState so back button works
             const url = new URL(window.location);
-            if (!url.searchParams.has('panel')) {
-                url.searchParams.set('icao', icao24);
-                window.history.replaceState({}, '', url);
-            }
+            url.searchParams.delete('panel'); // icao view replaces any panel
+            url.searchParams.set('icao', icao24);
+            window.history.pushState({ icao: icao24 }, '', url);
         },
-        [fetchTrack]
+        [fetchTrack, isMobile, sendWorkerMessage]
     );
 
-    // 取消選擇
-    const handleDeselectPlane = useCallback(() => {
+    // UI-only deselect — clears state without touching history (used by popstate handler)
+    const clearPlaneState = useCallback(() => {
         trailOwnerRef.current = null;
         sendWorkerMessage({ type: 'SELECT_PLANE', payload: { icao24: null } });
         setSelectedIcao24(null);
@@ -408,18 +409,20 @@ export default function App() {
         setSelectedMetadata(null);
         setSelectedRoute(null);
         setDepCoords(null);
-        setTrackMode(false); // 取消追蹤模式
-        setPlaybackTime(null); // [v3.1] clear playback on deselect
+        setTrackMode(false);
+        setPlaybackTime(null);
         setShowSidebar(false);
-
-        // [v11.0] Deactivate High-Res Buffer
         trackStore.setSelected(null);
+    }, [sendWorkerMessage]);
 
-        // Remove ICAO from URL
+    // 取消選擇 — clears state AND pushes history entry
+    const handleDeselectPlane = useCallback(() => {
+        clearPlaneState();
         const url = new URL(window.location);
         url.searchParams.delete('icao');
-        window.history.replaceState({}, '', url);
-    }, []);
+        url.searchParams.delete('panel');
+        window.history.pushState({ icao: null }, '', url);
+    }, [clearPlaneState]);
 
     // Fetch departure airport coords when a plane is selected.
     // Result is also stored in flightDetailsCache so Sidebar can reuse it without a second request.
@@ -473,6 +476,40 @@ export default function App() {
     const planesDictRef = useRef(planesDict);
     useEffect(() => { planesDictRef.current = planesDict; }, [planesDict]);
 
+    // Browser Back / Forward — wired here so planesDictRef is already declared
+    useEffect(() => {
+        const handlePopState = () => {
+            const { icao, panel } = parseUrlParams();
+            const user = authStore.getUser();
+
+            if (panel === 'admin' && user?.is_superadmin) {
+                setShowAdmin(true); setShowMyFlights(false); setShowAuthModal(false);
+            } else if (panel === 'my-flights' && user) {
+                setMyFlightsInitialView('list'); setMyFlightsMode('page');
+                setShowMyFlights(true); setShowAdmin(false); setShowAuthModal(false);
+            } else if (panel === 'new-flight' && user) {
+                setMyFlightsInitialView('form'); setMyFlightsMode('modal');
+                setShowMyFlights(true); setShowAdmin(false); setShowAuthModal(false);
+            } else if (panel === 'auth') {
+                setShowAuthModal(true);
+            } else {
+                setShowAdmin(false); setShowMyFlights(false); setShowAuthModal(false);
+            }
+
+            if (icao) {
+                const plane = planesDictRef.current?.[icao];
+                if (plane) handleSelectPlane(icao, plane);
+                else setSelectedIcao24(icao); // auto-select when plane loads into view
+            } else {
+                // No icao — clear plane UI without pushing another history entry
+                clearPlaneState();
+            }
+        };
+
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, [handleSelectPlane, clearPlaneState]);
+
     // [URL ?icao=] Wait for plane to enter planesDict (after map pans to it),
     // then auto-select it. handleMapReady initiates the pan.
     const urlAutoSelectDoneRef = useRef(false);
@@ -510,6 +547,31 @@ export default function App() {
 
     if (showAdmin) {
         return <AdminPanel onClose={() => { setShowAdmin(false); setUrlPanel(null); }} />;
+    }
+
+    // New flight form → standalone full page, no map bleedthrough
+    if (showMyFlights && myFlightsInitialView === 'form') {
+        return (
+            <div className="app app--new-flight">
+                <MyFlightsPanel
+                    initialView="form"
+                    mode="page"
+                    onClose={() => {
+                        setShowMyFlights(false);
+                        setUrlPanel(null);
+                        if (authUser) {
+                            apiFlightMapData().then(d => setUserRoutes(d.routes || [])).catch(() => {});
+                        }
+                    }}
+                    prefillFromPlane={selectedPlane ? {
+                        icao24:        selectedPlane.icao24,
+                        callsign:      selectedPlane.callsign || '',
+                        aircraft_type: selectedPlane.type_code || selectedPlane.aircraft_type || '',
+                        registration:  selectedPlane.registration || '',
+                    } : null}
+                />
+            </div>
+        );
     }
 
     return (
@@ -560,7 +622,7 @@ export default function App() {
                 onOpenMyFlights={() => { setMyFlightsInitialView('list'); setMyFlightsMode('page');  setShowMyFlights(true); setUrlPanel('my-flights'); }}
                 onOpenNewFlight={() => { setMyFlightsInitialView('form'); setMyFlightsMode('modal'); setShowMyFlights(true); setUrlPanel('new-flight'); }}
 
-                onOpenAdmin={() => { setShowAdmin(true); setUrlPanel('admin'); }}
+                onOpenAdmin={() => { if (authUser?.is_superadmin) { setShowAdmin(true); setUrlPanel('admin'); } }}
                 authUser={authUser}
                 showUserRoutes={showUserRoutes}
                 onToggleUserRoutes={() => setShowUserRoutes(v => !v)}
@@ -610,7 +672,7 @@ export default function App() {
                         <div
                             key={`${alert.icao24}-${alert.type}`}
                             className={`anomaly-item anomaly-${alert.severity}`}
-                            onClick={() => handleSelectPlane(alert.icao24, planesDict[alert.icao24])}
+                            onClick={() => { const p = planesDict[alert.icao24]; if (p) handleSelectPlane(alert.icao24, p); }}
                         >
                             <span className="anomaly-callsign">{alert.callsign || alert.icao24}</span>
                             <span className="anomaly-msg">{alert.message}</span>

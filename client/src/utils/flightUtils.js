@@ -11,6 +11,19 @@ export function normalizeLongitude(lng) {
     return ((lng + 180) % 360 + 360) % 360 - 180;
 }
 
+/**
+ * Wrap a longitude to the world copy nearest to the current map center.
+ * Enables infinite horizontal scrolling without a date-line jump.
+ * e.g. centerLng=200, lng=150  → 150 (same copy)
+ *      centerLng=200, lng=-170 → 190 (right-side world copy)
+ */
+export function wrapLngToMap(lng, centerLng) {
+    if (!isFinite(lng) || !isFinite(centerLng)) return normalizeLongitude(lng);
+    const norm = normalizeLongitude(lng);
+    const offset = Math.round((centerLng - norm) / 360) * 360;
+    return norm + offset;
+}
+
 // ==========================================
 // 全球主要機場資料庫 (現在由伺服器動態提供)
 // ==========================================

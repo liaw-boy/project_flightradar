@@ -26,7 +26,7 @@
     display: flex;
     flex-direction: column;
     gap: clamp(20px, 2.8vw, 28px);
-    padding: clamp(24px, 4vw, 40px) clamp(20px, 4vw, 40px) clamp(20px, 3vw, 28px);
+    padding: clamp(24px, 4vw, 40px) clamp(24px, 5vw, 44px) clamp(20px, 3vw, 28px);
     background: var(--c-card);
     border: none;
     border-top: 3px solid var(--c-gold);
@@ -46,11 +46,11 @@
 }
 .bf-logo {
     display: inline-flex;
-    align-items: baseline;
+    align-items: center;
     gap: 10px;
     color: var(--c-text);
 }
-.bf-logo svg { color: var(--c-gold); align-self: center; }
+.bf-logo svg { color: var(--c-gold); }
 .bf-logo-name {
     font-family: var(--ff-display);
     font-size: var(--fz-lg);
@@ -135,7 +135,7 @@
     padding: clamp(8px, 1.5vw, 16px) 0;
 }
 .bf-apt-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.bf-apt-col-r { align-items: flex-end; text-align: right; }
+.bf-apt-col-r { align-items: flex-end; text-align: right; padding-right: 6px; }
 .bf-apt-lbl {
     font-family: var(--ff-body);
     font-size: var(--fz-eyebrow);
@@ -159,12 +159,12 @@
     outline: none;
     width: 100%;
     max-width: 200px;
-    padding: 0 0 4px;
+    padding: 0 0.2em 4px 0;
     line-height: 0.95;
     text-transform: uppercase;
     transition: border-color 0.18s ease;
 }
-.bf-iata-r { text-align: right; }
+.bf-iata-r { text-align: right; padding-left: 0.2em; padding-right: 0; }
 .bf-iata::placeholder { color: var(--c-text-3); opacity: 0.55; }
 .bf-iata:focus { border-bottom-color: var(--c-gold); }
 .bf-time {
@@ -187,11 +187,11 @@
     font-family: var(--ff-body);
     font-size: var(--fz-mini);
     color: var(--c-text-3);
-    max-width: 180px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    line-height: 1.4;
+    line-height: 1.35;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    align-self: stretch;
+    min-width: 0;
 }
 .bf-apt-hint-r { text-align: right; }
 
@@ -200,8 +200,10 @@
     flex-direction: column;
     align-items: center;
     gap: 10px;
-    padding: 0 10px;
-    min-width: 80px;
+    padding: 0 8px;
+    min-width: 90px;
+    max-width: 160px;
+    width: 100%;
 }
 .bf-route-line-wrap {
     display: flex;
@@ -243,13 +245,27 @@
     border-bottom: 1px solid rgba(214, 178, 117, 0.3);
     outline: none;
     text-align: center;
-    width: 100px;
+    width: 130px;
+    min-width: 0;
     padding: 4px 0;
     text-transform: uppercase;
     transition: border-color 0.18s ease;
 }
 .bf-fn:focus { border-bottom-color: var(--c-gold); }
 .bf-fn::placeholder { color: var(--c-text-3); opacity: 0.55; }
+.bf-airline-hint {
+    font-family: var(--ff-body);
+    font-size: 10px;
+    color: var(--c-gold);
+    opacity: 0.72;
+    text-align: center;
+    letter-spacing: 0.3px;
+    margin-top: -4px;
+    max-width: 130px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
 /* Detail grid — 6 fields, auto-fit */
 .bf-grid {
@@ -295,6 +311,31 @@
 .bf-cv:focus { border-bottom-color: var(--c-gold); }
 .bf-cv option { background: var(--c-card); color: var(--c-text); }
 
+/* Date field with calendar icon */
+.bf-date-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.bf-date-wrap .bf-cv {
+    padding-right: 24px;
+}
+.bf-date-icon {
+    position: absolute;
+    right: 2px;
+    bottom: 5px;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: var(--c-text-3);
+    display: inline-flex;
+    align-items: center;
+    transition: color 0.15s;
+    line-height: 1;
+}
+.bf-date-icon:hover { color: var(--c-gold); }
+
 /* Vertical tear / right stub — collapsed into footer area */
 .bf-vtear { display: none; }
 .bf-vnotch { display: none; }
@@ -302,7 +343,7 @@
     width: 100%;
     background: var(--c-card-2);
     border-top: 1px solid var(--c-line);
-    padding: clamp(20px, 3vw, 28px) clamp(20px, 4vw, 40px) clamp(22px, 3vw, 30px);
+    padding: clamp(20px, 3vw, 28px) clamp(24px, 5vw, 44px) clamp(22px, 3vw, 30px);
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: clamp(16px, 2.5vw, 28px);
@@ -464,8 +505,9 @@
     height: clamp(56px, 7vw, 68px);
     padding: 0 clamp(16px, 3vw, 32px);
     border-bottom: 1px solid var(--c-line);
-    background: rgba(12, 18, 32, 0.92);
+    background: var(--topbar-bg, rgba(10, 15, 30, 0.88));
     backdrop-filter: blur(12px);
+    border-bottom-color: var(--topbar-border, rgba(148, 163, 184, 0.1));
     flex-shrink: 0;
     gap: clamp(8px, 2vw, 16px);
     position: sticky;
@@ -558,8 +600,9 @@
     height: clamp(56px, 7vw, 68px);
     padding: 0 clamp(16px, 3vw, 32px);
     border-bottom: 1px solid var(--c-line);
-    background: rgba(12, 18, 32, 0.92);
+    background: var(--topbar-bg, rgba(10, 15, 30, 0.88));
     backdrop-filter: blur(12px);
+    border-bottom-color: var(--topbar-border, rgba(148, 163, 184, 0.1));
     flex-shrink: 0;
     gap: clamp(8px, 2vw, 16px);
     position: sticky;
@@ -597,6 +640,7 @@
     color: var(--c-text);
 }
 .mfp-fp-title svg { color: var(--c-gold); }
+.mfp-fp-title img { flex-shrink: 0; }
 .mfp-fp-spacer { width: 100px; flex-shrink: 0; }
 .mfp-fp-body {
     flex: 1;
@@ -604,7 +648,7 @@
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    padding: clamp(20px, 4vw, 40px) clamp(16px, 3vw, 32px) clamp(40px, 6vw, 64px);
+    padding: clamp(20px, 4vw, 40px) clamp(20px, 4vw, 36px) clamp(40px, 6vw, 64px);
     background: var(--c-bg);
     scrollbar-width: thin;
     scrollbar-color: var(--c-line-2) transparent;

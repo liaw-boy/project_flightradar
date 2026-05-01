@@ -269,15 +269,18 @@ export function useFlightData(mapRef) {
                     // Always interpolate between two confirmed positions.
                     // Impossible jumps (MLAT noise / stale-then-teleport) → snap directly.
                     const now = Date.now();
-                    const prevUpdateTime = existing._dataArrivedAt ?? now;
-                    const observedDurMs  = Math.max(3000, Math.min(30000, now - prevUpdateTime));
+                    const rawDurMs = now - (existing._dataArrivedAt ?? now);
+                    const observedDurMs  = Math.max(3000, Math.min(30000, rawDurMs));
+                    // Long idle (>60s): always snap + discard stale trail
+                    const isStaleAfterIdle = rawDurMs > 60000;
 
                     // Current render position is the most accurate "from" reference
                     const curRenderLat = existing.renderLat ?? existing._interpToLat ?? existing.lat;
                     const curRenderLng = existing.renderLng ?? existing._interpToLng ?? existing.lng;
 
-                    // Impossible jump → snap to new position, reset interpolation
-                    if (_isImpossibleJump(curRenderLat, curRenderLng, pData.lat, pData.lng, observedDurMs)) {
+                    // Long idle or impossible jump → snap to new position, reset interpolation
+                    if (isStaleAfterIdle || _isImpossibleJump(curRenderLat, curRenderLng, pData.lat, pData.lng, observedDurMs)) {
+                        if (isStaleAfterIdle) trackStore.clearTrack(icao24);
                         next[icao24] = {
                             ...existing,
                             ...pData,
@@ -632,15 +635,17 @@ export function useFlightData(mapRef) {
                     p._emaLng = emaLng;
 
                     // [Snapshot Interpolation v2.1 — WS path — Buffered + Jump Guard]
-                    const wsPrevUpdate = p._dataArrivedAt ?? now;
-                    const wsDurMs = Math.max(3000, Math.min(30000, now - wsPrevUpdate));
+                    const wsRawDurMs = now - (p._dataArrivedAt ?? now);
+                    const wsDurMs = Math.max(3000, Math.min(30000, wsRawDurMs));
+                    // Long idle (>60s): always snap + discard stale trail
+                    const wsIsStale = wsRawDurMs > 60000;
 
                     const wsRenderLat = p.renderLat ?? p._interpToLat ?? emaLat;
                     const wsRenderLng = p.renderLng ?? p._interpToLng ?? emaLng;
 
-                    if (_isImpossibleJump(wsRenderLat, wsRenderLng, wp.lat, wp.lng, wsDurMs)) {
-                        // Impossible jump → snap, reset interpolation state
-                        // Impossible jump → snap to EMA position
+                    if (wsIsStale || _isImpossibleJump(wsRenderLat, wsRenderLng, wp.lat, wp.lng, wsDurMs)) {
+                        // Stale idle or impossible jump → snap directly, clear stale track
+                        if (wsIsStale) trackStore.clearTrack(id);
                         p._interpFromLat = emaLat;
                         p._interpFromLng = emaLng;
                         p._interpToLat   = emaLat;
@@ -702,7 +707,18 @@ export function useFlightData(mapRef) {
         const currentUrl = window.location.origin;
         worker.postMessage({ type: 'INIT', payload: { baseUrl: currentUrl } });
 
+        // Page Visibility API — force reconnect when tab comes back into focus
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                logger.info('VIS', 'Page visible — forcing reconnect');
+                worker.postMessage({ type: 'FORCE_RECONNECT' });
+                setTimeout(() => fetchPlanes(false), 800);
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
         return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
             worker.postMessage({ type: 'DISCONNECT' });
             worker.terminate();
         };
