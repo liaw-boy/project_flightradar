@@ -77,7 +77,7 @@ export default function PlaneList({ planesDict, bounds, onSelectPlane, selectedI
                         onClick={() => { setIsOpen(true); onTabChange?.(true); }}
                     >
                         <BarChart2 size={13} />
-                        LIVE STATS
+                        {t('liveStats')}
                     </button>
                 </div>
                 <div className="plt-collapse" onClick={() => setIsOpen(!isOpen)}>

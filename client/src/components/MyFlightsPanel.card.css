@@ -1,45 +1,73 @@
 /* ══════════════════════════════════════════════════════════════
-   FLIGHT CARD  v5 — vertical stack
-   No border, no notch, no overflow clipping.
+   BOARDING PASS  v6 — Horizontal · Dark Luxury · No border tricks
    ══════════════════════════════════════════════════════════════ */
 
-/* ── Card ────────────────────────────────────────────────────── */
-.fc-card {
+/* ── Card shell ───────────────────────────────────────────────── */
+.bp6-card {
+    display: flex;
+    align-items: stretch;
+    border-radius: 12px;
     background: var(--c-card);
-    border-radius: var(--r-lg);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 6px 24px rgba(0,0,0,0.3);
-    transition: box-shadow 0.2s ease, transform 0.18s ease;
+    /* Left gold accent strip */
+    border-left: 3px solid var(--c-gold);
+    /* Depth via shadow only — NO outline border */
+    box-shadow:
+        0 1px 3px rgba(0,0,0,0.45),
+        0 6px 20px rgba(0,0,0,0.35),
+        0 0 0 0.5px rgba(214,178,117,0.08) inset;
+    transition: box-shadow 0.22s ease, transform 0.18s ease;
     font-family: var(--ff-body);
-    overflow: visible;
+    position: relative;
 }
-.fc-card:hover {
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5), 0 10px 32px rgba(0,0,0,0.4);
+.bp6-card:hover {
+    box-shadow:
+        0 2px 6px rgba(0,0,0,0.5),
+        0 10px 32px rgba(0,0,0,0.45),
+        0 0 0 0.5px rgba(214,178,117,0.18) inset;
     transform: translateY(-2px);
 }
 
-/* ── Header band ─────────────────────────────────────────────── */
-.fc-header {
+/* ── Main section ─────────────────────────────────────────────── */
+.bp6-main {
+    flex: 1;
+    min-width: 0;
+    padding: 16px 20px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Top bar */
+.bp6-topbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 20px;
-    background: linear-gradient(90deg, rgba(214,178,117,0.18) 0%, rgba(214,178,117,0.04) 100%);
-    border-radius: var(--r-lg) var(--r-lg) 0 0;
-    border-bottom: 1px solid rgba(214,178,117,0.15);
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--c-line);
 }
-.fc-brand {
+.bp6-brand {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.bp6-brand-diamond {
+    font-size: 10px;
+    color: var(--c-gold);
+    opacity: 0.8;
+}
+.bp6-brand-name {
     font-size: 10px;
     font-weight: 800;
-    letter-spacing: 3px;
+    letter-spacing: 3.5px;
     text-transform: uppercase;
     color: var(--c-gold);
 }
-.fc-flight-meta {
+.bp6-topbar-right {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
 }
-.fc-fn {
+.bp6-fn {
     font-family: var(--ff-mono);
     font-size: 11px;
     font-weight: 700;
@@ -47,147 +75,279 @@
     background: rgba(214,178,117,0.1);
     padding: 2px 7px;
     border-radius: 4px;
+    letter-spacing: 0.5px;
 }
-.fc-date {
+.bp6-date {
     font-size: 11px;
     color: var(--c-text-3);
     white-space: nowrap;
+    letter-spacing: 0.3px;
 }
 
-/* ── Route block ─────────────────────────────────────────────── */
-.fc-route {
+/* Route hero */
+.bp6-route {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 20px 22px 16px;
+    gap: 10px;
+    padding: 4px 0 2px;
 }
-.fc-airport {
+.bp6-airport {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    min-width: 0;
+    gap: 3px;
+    flex-shrink: 0;
 }
-.fc-airport--r {
+.bp6-airport--arr {
     align-items: flex-end;
     text-align: right;
 }
-.fc-iata {
+.bp6-iata {
     font-family: var(--ff-display);
-    font-size: clamp(32px, 3vw + 18px, 48px);
+    font-size: clamp(30px, 2.4vw + 16px, 46px);
     font-weight: 400;
     font-style: italic;
     font-variation-settings: 'opsz' 72, 'SOFT' 40;
     color: var(--c-text);
-    letter-spacing: -0.5px;
-    line-height: 1.25;
+    letter-spacing: -1px;
+    line-height: 1.2;
     padding-top: 2px;
     white-space: nowrap;
 }
-.fc-time {
-    font-size: 12px;
+.bp6-time {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
     font-weight: 600;
     color: var(--c-gold);
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
 }
-.fc-arrow {
+.bp6-time--empty { color: var(--c-text-3); opacity: 0.5; }
+.bp6-time-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--c-gold);
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+/* Flight path */
+.bp6-path {
     flex: 1;
     display: flex;
     align-items: center;
     gap: 6px;
-    color: var(--c-gold);
-    opacity: 0.5;
-    min-width: 20px;
+    min-width: 24px;
+    color: rgba(214,178,117,0.45);
 }
-.fc-arrow-line {
+.bp6-path-line {
     flex: 1;
     height: 1px;
-    border-top: 1px dashed rgba(214,178,117,0.4);
+    background: repeating-linear-gradient(
+        to right,
+        rgba(214,178,117,0.35) 0px,
+        rgba(214,178,117,0.35) 4px,
+        transparent 4px,
+        transparent 8px
+    );
 }
-
-/* ── Separator ───────────────────────────────────────────────── */
-.fc-sep {
-    margin: 0 20px;
-    border-top: 1px dashed rgba(148,163,184,0.2);
-}
-
-/* ── Body: chips + notes + actions ──────────────────────────── */
-.fc-body {
-    padding: 14px 20px 16px;
+.bp6-path-plane {
+    flex-shrink: 0;
     display: flex;
-    flex-direction: column;
-    gap: 10px;
+    align-items: center;
 }
 
-/* Meta chips */
-.fc-chips {
+/* Meta row */
+.bp6-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 12px;
+    gap: 4px 14px;
+    padding-top: 2px;
 }
-.fc-chip {
+.bp6-meta-item {
     display: flex;
     flex-direction: column;
     gap: 1px;
 }
-.fc-chip-label {
-    font-size: 8.5px;
+.bp6-meta-label {
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: var(--c-text-3);
+}
+.bp6-meta-val {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--c-text-2);
+    letter-spacing: 0.2px;
+}
+
+/* Notes */
+.bp6-notes {
+    font-family: var(--ff-display);
+    font-style: italic;
+    font-size: 11.5px;
+    color: var(--c-text-3);
+    border-left: 2px solid rgba(214,178,117,0.25);
+    padding-left: 8px;
+    line-height: 1.5;
+    margin-top: 2px;
+}
+
+/* ── Perforation divider ──────────────────────────────────────── */
+/*
+   No overflow:hidden needed. The semicircle "punches" use the
+   page background colour — works as long as card sits on that bg.
+*/
+.bp6-perf {
+    width: 1px;
+    flex-shrink: 0;
+    margin: 0 10px;
+    position: relative;
+    background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 4px,
+        rgba(148,163,184,0.22) 4px,
+        rgba(148,163,184,0.22) 8px
+    );
+}
+.bp6-perf::before,
+.bp6-perf::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--c-bg);
+    box-shadow: 0 0 0 1px rgba(148,163,184,0.1);
+    z-index: 2;
+}
+.bp6-perf::before { top: -10px; }
+.bp6-perf::after  { bottom: -10px; }
+
+/* ── Stub ─────────────────────────────────────────────────────── */
+.bp6-stub {
+    width: clamp(90px, 16%, 130px);
+    flex-shrink: 0;
+    padding: 16px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 2px;
+}
+.bp6-stub-seat-label {
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--c-text-3);
+}
+.bp6-stub-seat {
+    font-family: var(--ff-display);
+    font-size: clamp(26px, 1.6rem + 0.5vw, 36px);
+    font-weight: 400;
+    font-style: italic;
+    font-variation-settings: 'opsz' 48, 'SOFT' 60;
+    color: var(--c-gold);
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+    padding-top: 1px;
+}
+.bp6-stub-seat--empty {
+    font-size: 20px;
+    color: var(--c-text-3);
+    font-style: normal;
+}
+.bp6-stub-class {
+    font-size: 9px;
     font-weight: 600;
     letter-spacing: 1.2px;
     text-transform: uppercase;
     color: var(--c-text-3);
+    margin-top: 2px;
 }
-.fc-chip-value {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--c-text-2);
-}
+.bp6-stub-spacer { flex: 1; }
 
-/* Notes */
-.fc-notes {
-    font-family: var(--ff-display);
-    font-style: italic;
-    font-size: 12px;
-    color: var(--c-text-3);
-    border-left: 2px solid rgba(214,178,117,0.3);
-    padding-left: 8px;
-    line-height: 1.5;
-}
-
-/* Actions */
-.fc-actions {
+/* Action buttons */
+.bp6-stub-actions {
     display: flex;
-    justify-content: flex-end;
-    gap: 6px;
+    gap: 5px;
+    margin-bottom: 6px;
 }
-.fc-btn {
+.bp6-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: 26px; height: 26px;
     background: transparent;
     border: 1px solid var(--c-line-2);
-    border-radius: var(--r-sm);
+    border-radius: 5px;
     color: var(--c-text-2);
     cursor: pointer;
     transition: all 0.15s ease;
 }
-.fc-btn:hover {
+.bp6-btn:hover {
     border-color: var(--c-gold-2);
     color: var(--c-gold);
     background: var(--c-gold-3);
 }
-.fc-btn--del:hover {
+.bp6-btn--del:hover {
     border-color: rgba(239,68,68,0.4);
     color: #ef6464;
     background: rgba(239,68,68,0.07);
 }
 
+/* Decorative barcode */
+.bp6-barcode {
+    display: flex;
+    align-items: flex-end;
+    gap: 1.5px;
+    height: 16px;
+    opacity: 0.15;
+}
+.bp6-bar {
+    background: var(--c-gold);
+    border-radius: 1px;
+    height: 100%;
+}
+.bp6-bar:nth-child(3n+1) { height: 65%; }
+.bp6-bar:nth-child(5n+2) { height: 85%; }
+.bp6-bar:nth-child(7n)   { height: 50%; }
+
 /* ── Mobile ──────────────────────────────────────────────────── */
-@media (max-width: 480px) {
-    .fc-route { padding: 16px 16px 12px; gap: 8px; }
-    .fc-body  { padding: 12px 16px 14px; }
-    .fc-header { padding: 8px 16px; }
-    .fc-sep  { margin: 0 16px; }
-    .fc-iata { font-size: clamp(28px, 8vw, 38px); }
+@media (max-width: 520px) {
+    .bp6-card {
+        flex-direction: column;
+        border-left: none;
+        border-top: 3px solid var(--c-gold);
+    }
+    .bp6-perf {
+        width: auto; height: 1px; margin: 0 12px;
+        background: repeating-linear-gradient(
+            to right,
+            transparent 0px, transparent 4px,
+            rgba(148,163,184,0.22) 4px, rgba(148,163,184,0.22) 8px
+        );
+    }
+    .bp6-perf::before { top: 50%; left: -10px; transform: translateY(-50%); }
+    .bp6-perf::after  { top: 50%; right: -10px; left: auto; transform: translateY(-50%); }
+    .bp6-stub {
+        width: auto;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-start;
+        padding: 10px 16px;
+        gap: 0 14px;
+        text-align: left;
+    }
+    .bp6-stub-seat-label,
+    .bp6-stub-class { align-self: center; }
+    .bp6-stub-spacer,
+    .bp6-barcode { display: none; }
+    .bp6-stub-actions { margin-bottom: 0; margin-left: auto; }
 }

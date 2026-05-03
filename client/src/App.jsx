@@ -293,6 +293,10 @@ export default function App() {
         if (stats) setShowStats(true);
     }, []);
 
+    const handleRecenter = useCallback(() => {
+        mapInstanceRef.current?.setView([25.17, 121.44], 9);
+    }, []);
+
     // 地圖就緒
     const handleMapReady = useCallback((map) => {
         mapInstanceRef.current = map;
@@ -629,6 +633,7 @@ export default function App() {
                 hasUserRoutes={!!(userRoutes && userRoutes.length > 0)}
                 theme={theme}
                 onToggleTheme={handleToggleTheme}
+                onRecenter={handleRecenter}
             />
 
             {/* Right Status Column */}

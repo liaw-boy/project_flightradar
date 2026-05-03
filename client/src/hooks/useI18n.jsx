@@ -132,6 +132,7 @@ const translations = {
         themeMidnight: 'Midnight',
         // StatsPanel
         liveStats: 'LIVE STATS',
+        planeList: 'AIRCRAFT LIST',
         statsOverview: 'Overview',
         statsAirlines: 'Airlines',
         statsAircraft: 'Aircraft',
@@ -240,6 +241,7 @@ const translations = {
         themeMidnight: '午夜之光',
         // StatsPanel
         liveStats: '即時統計',
+        planeList: '航班列表',
         statsOverview: '總覽',
         statsAirlines: '航空公司',
         statsAircraft: '機型',

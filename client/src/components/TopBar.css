@@ -42,12 +42,25 @@
     gap: 8px;
 }
 
+.brand-logo--clickable {
+    cursor: pointer;
+    border-radius: 8px;
+    padding: 4px 6px;
+    margin: -4px -6px;
+    transition: background 0.15s;
+}
+
+.brand-logo--clickable:hover {
+    background: var(--surface-active);
+}
+
 .brand-logo h2 {
     margin: 0;
     font-size: 17px;
     font-weight: 800;
     letter-spacing: 0.5px;
     color: var(--text);
+    white-space: nowrap;
 }
 
 .brand-subtitle {
@@ -422,6 +435,13 @@
     }
     .brand-logo h2 {
         font-size: 15px;
+    }
+    .brand-suffix {
+        display: none;
+    }
+    .tb-stale-badge {
+        font-size: 10px;
+        padding: 2px 6px;
     }
     .brand-version {
         display: none;

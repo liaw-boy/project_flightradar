@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import './SearchBar.css';
 
@@ -64,6 +64,12 @@ export default function SearchBar({ planesDict, onSelectPlane }) {
         setTimeout(() => setResults([]), 150);
     };
 
+    const handleClear = () => {
+        setQuery('');
+        setResults([]);
+        inputRef.current?.focus();
+    };
+
     return (
         <div className="search-container" style={{ position: 'relative' }}>
             <Search
@@ -88,8 +94,18 @@ export default function SearchBar({ planesDict, onSelectPlane }) {
                 onKeyDown={handleKeyDown}
                 onBlur={handleBlur}
                 autoComplete="off"
-                style={{ paddingLeft: '40px' }}
+                style={{ paddingLeft: '40px', paddingRight: query ? '36px' : '18px' }}
             />
+            {query && (
+                <button
+                    className="search-clear-btn"
+                    onMouseDown={(e) => { e.preventDefault(); handleClear(); }}
+                    tabIndex={-1}
+                    aria-label="Clear search"
+                >
+                    <X size={13} />
+                </button>
+            )}
             {results.length > 0 && (
                 <div className="search-dropdown">
                     {results.map(({ id, plane }, idx) => (

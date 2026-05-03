@@ -32,6 +32,7 @@ export default function TopBar({
     hasUserRoutes = false,
     theme,
     onToggleTheme,
+    onRecenter,
 }) {
     const { t, lang, toggleLang } = useI18n();
     const [time, setTime] = useState('--:--:--');
@@ -83,10 +84,28 @@ export default function TopBar({
         <div className={`top-bar${showMobileSearch ? ' mobile-search-open' : ''}`}>
             {/* Left: Branding & Core Stats */}
             <div className="top-bar-left">
-                <div className="brand-logo">
+                <div
+                    className={`brand-logo${onRecenter ? ' brand-logo--clickable' : ''}`}
+                    onClick={onRecenter}
+                    title={onRecenter ? '回到地圖中心' : undefined}
+                >
                     <AeroIcon size={28} bg={false} />
-                    <h2>AEROSTRAT RADAR</h2>
+                    <h2><span className="brand-name">AEROSTRAT</span><span className="brand-suffix"> RADAR</span></h2>
                 </div>
+                {(sseStale || dataFreshness?.anyStale) && (
+                    <div className="brand-subtitle">
+                        {sseStale && (
+                            <span className="tb-stale-badge" title="即時推送斷線 8 秒以上，飛機可能未即時更新">
+                                LIVE LOST
+                            </span>
+                        )}
+                        {!sseStale && dataFreshness?.anyStale && (
+                            <span className="tb-stale-badge tb-stale-db" title="背景資料更新已過期">
+                                DATA STALE
+                            </span>
+                        )}
+                    </div>
+                )}
             </div>
 
 

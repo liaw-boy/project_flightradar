@@ -10,7 +10,7 @@
 
 /* ── Local tokens (scoped to component roots; bridge to global) ── */
 .mfp-overlay, .mfp-page, .mfp-fullpage,
-.mfp-panel, .fc-card, .bp-card, .bf-wrap, .sd-wrap {
+.mfp-panel, .fc-card, .bp-card, .bp6-card, .bf-wrap, .sd-wrap {
     /* Fonts — bridge to global system (dark + light auto) */
     --ff-display: var(--font-display, 'Fraunces', 'Cormorant Garamond', Georgia, serif);
     --ff-body:    var(--font-main, 'Inter', 'PingFang TC', -apple-system, sans-serif);

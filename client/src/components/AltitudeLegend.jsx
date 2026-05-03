@@ -33,6 +33,16 @@ export default function AltitudeLegend({ colorScheme }) {
             gap: '3px',
             pointerEvents: 'none',
         }}>
+            <span style={{
+                fontSize: '9px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 700,
+                color: 'rgba(255,255,255,0.55)',
+                letterSpacing: '1.2px',
+                textShadow: '0 1px 3px rgba(0,0,0,0.9)',
+                alignSelf: 'flex-start',
+                paddingLeft: '2px',
+            }}>ALT</span>
             <div style={{
                 width: '220px',
                 height: '7px',

@@ -129,58 +129,92 @@ function StatsDashboard({ stats, onBack }) {
     );
 }
 
-// ── 航班列表卡 v5 — vertical stack ────────────────────────────────────────────
+// ── 航班列表卡 v6 — horizontal boarding pass ──────────────────────────────────
 function formatTime(str) {
     if (!str) return null;
     const m = String(str).match(/(\d{2}:\d{2})/);
     return m ? m[1] : null;
 }
 
+const BARCODE_WIDTHS = [2,1,3,1,2,1,3,2,1,2,3,1,2,1,3,2,1,3,2,1,2,3,1,2];
+
 function FlightRow({ flight, onEdit, onDelete }) {
     const classLabel = CLASS_MAP[flight.seat_class] || (flight.seat_class ? flight.seat_class.toUpperCase() : null);
     const depTime = formatTime(flight.dep_time);
     const arrTime = formatTime(flight.arr_time);
     return (
-        <div className="fc-card">
-            <div className="fc-header">
-                <span className="fc-brand">AEROSTRAT</span>
-                <span className="fc-flight-meta">
-                    {flight.flight_number && <span className="fc-fn">{flight.flight_number}</span>}
-                    <span className="fc-date">{flight.flight_date}</span>
-                </span>
-            </div>
-
-            <div className="fc-route">
-                <div className="fc-airport">
-                    <div className="fc-iata">{flight.dep_icao || '—'}</div>
-                    {depTime && <div className="fc-time">{depTime}</div>}
+        <div className="bp6-card">
+            {/* ── Main section ── */}
+            <div className="bp6-main">
+                {/* Top bar */}
+                <div className="bp6-topbar">
+                    <div className="bp6-brand">
+                        <span className="bp6-brand-diamond">◈</span>
+                        <span className="bp6-brand-name">AEROSTRAT</span>
+                    </div>
+                    <div className="bp6-topbar-right">
+                        {flight.flight_number && <span className="bp6-fn">{flight.flight_number}</span>}
+                        <span className="bp6-date">{flight.flight_date}</span>
+                    </div>
                 </div>
-                <div className="fc-arrow">
-                    <div className="fc-arrow-line" />
-                    <Plane size={14} />
-                    <div className="fc-arrow-line" />
-                </div>
-                <div className="fc-airport fc-airport--r">
-                    <div className="fc-iata">{flight.arr_icao || '—'}</div>
-                    {arrTime && <div className="fc-time">{arrTime}</div>}
-                </div>
-            </div>
 
-            <div className="fc-sep" />
+                {/* Route hero */}
+                <div className="bp6-route">
+                    <div className="bp6-airport bp6-airport--dep">
+                        <div className="bp6-iata">{flight.dep_icao || '—'}</div>
+                        {depTime
+                            ? <div className="bp6-time"><span className="bp6-time-dot" />{depTime}</div>
+                            : <div className="bp6-time bp6-time--empty">—:——</div>
+                        }
+                    </div>
 
-            <div className="fc-body">
+                    <div className="bp6-path">
+                        <div className="bp6-path-line" />
+                        <div className="bp6-path-plane"><Plane size={15} /></div>
+                        <div className="bp6-path-line" />
+                    </div>
+
+                    <div className="bp6-airport bp6-airport--arr">
+                        <div className="bp6-iata">{flight.arr_icao || '—'}</div>
+                        {arrTime
+                            ? <div className="bp6-time"><span className="bp6-time-dot" />{arrTime}</div>
+                            : <div className="bp6-time bp6-time--empty">—:——</div>
+                        }
+                    </div>
+                </div>
+
+                {/* Meta row */}
                 {(classLabel || flight.seat_number || flight.aircraft_type || flight.registration) && (
-                    <div className="fc-chips">
-                        {classLabel && <div className="fc-chip"><span className="fc-chip-label">Class</span><span className="fc-chip-value">{classLabel}</span></div>}
-                        {flight.seat_number && <div className="fc-chip"><span className="fc-chip-label">Seat</span><span className="fc-chip-value">{flight.seat_number}</span></div>}
-                        {flight.aircraft_type && <div className="fc-chip"><span className="fc-chip-label">Aircraft</span><span className="fc-chip-value">{flight.aircraft_type}</span></div>}
-                        {flight.registration && <div className="fc-chip"><span className="fc-chip-label">Reg</span><span className="fc-chip-value">{flight.registration}</span></div>}
+                    <div className="bp6-meta">
+                        {classLabel    && <div className="bp6-meta-item"><span className="bp6-meta-label">Class</span><span className="bp6-meta-val">{classLabel}</span></div>}
+                        {flight.seat_number && <div className="bp6-meta-item"><span className="bp6-meta-label">Seat</span><span className="bp6-meta-val">{flight.seat_number}</span></div>}
+                        {flight.aircraft_type && <div className="bp6-meta-item"><span className="bp6-meta-label">Aircraft</span><span className="bp6-meta-val">{flight.aircraft_type}</span></div>}
+                        {flight.registration && <div className="bp6-meta-item"><span className="bp6-meta-label">Reg</span><span className="bp6-meta-val">{flight.registration}</span></div>}
                     </div>
                 )}
-                {flight.notes && <div className="fc-notes">{flight.notes}</div>}
-                <div className="fc-actions">
-                    <button className="fc-btn" onClick={() => onEdit(flight)} title="Edit"><Pencil size={13} /></button>
-                    <button className="fc-btn fc-btn--del" onClick={() => onDelete(flight.id)} title="Delete"><Trash2 size={13} /></button>
+
+                {flight.notes && <div className="bp6-notes">{flight.notes}</div>}
+            </div>
+
+            {/* ── Perforation ── */}
+            <div className="bp6-perf" />
+
+            {/* ── Stub ── */}
+            <div className="bp6-stub">
+                <div className="bp6-stub-seat-label">SEAT</div>
+                <div className={`bp6-stub-seat${flight.seat_number ? '' : ' bp6-stub-seat--empty'}`}>
+                    {flight.seat_number || '—'}
+                </div>
+                {classLabel && <div className="bp6-stub-class">{classLabel}</div>}
+                <div className="bp6-stub-spacer" />
+                <div className="bp6-stub-actions">
+                    <button className="bp6-btn" onClick={() => onEdit(flight)} title="Edit"><Pencil size={12} /></button>
+                    <button className="bp6-btn bp6-btn--del" onClick={() => onDelete(flight.id)} title="Delete"><Trash2 size={12} /></button>
+                </div>
+                <div className="bp6-barcode">
+                    {BARCODE_WIDTHS.map((w, i) => (
+                        <div key={i} className="bp6-bar" style={{ width: w + 'px' }} />
+                    ))}
                 </div>
             </div>
         </div>
@@ -587,7 +621,7 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
                     <FlightForm
                         initial={editTarget}
                         onSave={handleSave}
-                        onCancel={onClose}
+                        onCancel={goBack}
                         pageMode={true}
                     />
                     {toast && <div className="mfp-toast"><CheckCircle size={11} /> {toast}</div>}

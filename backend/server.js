@@ -5,7 +5,7 @@ const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const compression = require('compression');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -351,7 +351,7 @@ const loginLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many login attempts, please wait a minute.' },
-    keyGenerator: (req) => req.ip,
+    keyGenerator: (req) => ipKeyGenerator(req),
 });
 
 const registerLimiter = rateLimit({
@@ -360,7 +360,7 @@ const registerLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many registration attempts, please try again later.' },
-    keyGenerator: (req) => req.ip,
+    keyGenerator: (req) => ipKeyGenerator(req),
 });
 
 const refreshLimiter = rateLimit({
@@ -369,7 +369,7 @@ const refreshLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many refresh requests.' },
-    keyGenerator: (req) => req.ip,
+    keyGenerator: (req) => ipKeyGenerator(req),
 });
 
 // ── User Auth ────────────────────────────────────────────────────────────────
