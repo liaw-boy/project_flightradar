@@ -41,16 +41,18 @@ aircraft-cache.json
 audit_report_log.txt
 audit_utf8.txt
 
-# Claude Code Agent & Tools
+# Claude Code Agent & Tools (never commit)
 .agent/
 .agents/
-.claude/skills/
-.claude/settings.local.json
+.claude/
+.claudecignore
+CLAUDE.md
 Claude-Code-Usage-Monitor/
 impeccable.md
 shadcn-ui.md
 skills-lock.json
 openspec/
+docs/legacy/everythingclaudecode.md
 
 # Playwright — all test output is ephemeral
 pw-screenshots/
