@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>AEROSTRAT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&display=swap" rel="stylesheet"/>
+<style>
+:root{--bg:#f5f7fa;--surface:#ffffff;--surface-2:#f8fafc;--surface-hover:#f1f5f9;--fg:#0f172a;--muted:#374151;--dim:#6b7280;--border:#e5e7eb;--border-strong:#d1d5db;--accent:#0066ff;--accent-2:#6366f1;--accent-dim:rgba(0,102,255,0.07);--warn:#f59e0b;--warn-dim:rgba(245,158,11,0.08);--danger:#ef4444;--danger-dim:rgba(239,68,68,0.08);--success:#10b981;--success-dim:rgba(16,185,129,0.08);--shadow:0 1px 4px rgba(0,0,0,0.06),0 0 0 1px rgba(0,0,0,0.03);--font:'Inter',-apple-system,sans-serif;--display:'Fraunces','Georgia',serif;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);min-height:100vh;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;}
+.topbar{height:52px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:14px;flex-shrink:0;}
+.brand-icon{width:28px;height:28px;background:linear-gradient(135deg,var(--accent),var(--accent-2));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;}
+.brand-name{font-size:13px;font-weight:800;letter-spacing:1.2px;}
+.breadcrumb{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);margin-left:4px;}
+.breadcrumb b{color:var(--fg);font-weight:600;}
+.topbar-sep{flex:1;}
+.back-btn{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--accent);background:var(--accent-dim);border:1px solid rgba(0,102,255,0.15);border-radius:7px;padding:6px 12px;cursor:pointer;}
+.layout{display:flex;flex:1;min-height:0;}
+.nav{width:220px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);padding:20px 12px;display:flex;flex-direction:column;gap:4px;}
+.nav-section{font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase;padding:4px 8px;margin-top:8px;margin-bottom:2px;}
+.nav-item{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:8px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;transition:all .15s;}
+.nav-item:hover{background:var(--surface-hover);color:var(--fg);}
+.nav-item.active{background:var(--accent-dim);color:var(--accent);font-weight:600;}
+.nav-icon{font-size:14px;width:18px;text-align:center;}
+.nav-badge{margin-left:auto;background:var(--danger);color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;min-width:18px;text-align:center;}
+.main{flex:1;padding:28px 32px;overflow-y:auto;}
+.page-hd{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;}
+.page-title{font-family:var(--display);font-size:24px;font-weight:700;color:var(--fg);letter-spacing:-.5px;}
+.page-sub{font-size:13px;color:var(--dim);margin-top:3px;}
+.action-btn{display:flex;align-items:center;gap:6px;font-family:var(--font);font-size:12px;font-weight:600;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 14px;cursor:pointer;color:var(--fg);transition:all .15s;}
+.action-btn:hover{background:var(--surface-hover);}
+.gauge-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px;}
+.gauge-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;}
+.gauge-wrap{display:flex;align-items:center;gap:14px;}
+.gauge{width:56px;height:56px;border-radius:50%;flex-shrink:0;background:conic-gradient(var(--gc,var(--accent)) 0% var(--gp,50%),var(--border) var(--gp,50%) 100%);display:flex;align-items:center;justify-content:center;position:relative;}
+.gauge::after{content:'';position:absolute;width:38px;height:38px;border-radius:50%;background:var(--surface);}
+.gauge-label{position:relative;z-index:1;font-size:11px;font-weight:700;color:var(--fg);}
+.gauge-info{flex:1;}
+.gauge-title{font-size:11px;font-weight:700;color:var(--fg);}
+.gauge-val{font-size:18px;font-weight:700;font-family:var(--display);margin-top:2px;}
+.gauge-sub{font-size:10px;color:var(--dim);margin-top:2px;}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:18px;overflow:hidden;}
+.card-hd{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);}
+.card-title{font-size:13px;font-weight:700;color:var(--fg);}
+.badge-count{background:var(--surface-2);border:1px solid var(--border);font-size:11px;font-weight:700;color:var(--dim);padding:3px 8px;border-radius:6px;}
+table{width:100%;border-collapse:collapse;}
+th{text-align:left;font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px;text-transform:uppercase;padding:10px 16px;background:var(--surface-2);border-bottom:1px solid var(--border);}
+td{padding:12px 16px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:var(--surface-hover);}
+.td-muted{color:var(--dim);}
+.td-bold{font-weight:600;}
+.td-sm{font-size:11px;}
+.user-cell{display:flex;align-items:center;gap:10px;}
+.avatar{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0;}
+.role{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;letter-spacing:.5px;padding:3px 8px;border-radius:5px;text-transform:uppercase;}
+.role-super{background:rgba(139,92,246,0.1);color:#7c3aed;border:1px solid rgba(139,92,246,0.2);}
+.role-admin{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,102,255,0.15);}
+.role-user{background:var(--surface-2);color:var(--dim);border:1px solid var(--border);}
+.row-actions{display:flex;gap:6px;}
+.btn{display:inline-flex;align-items:center;gap:4px;font-family:var(--font);font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;cursor:pointer;border:none;transition:all .15s;}
+.btn-danger{background:var(--danger-dim);color:var(--danger);}
+.btn-teal{background:var(--success-dim);color:var(--success);}
+.btn-warning{background:var(--warn-dim);color:var(--warn);}
+.health-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:16px 20px;}
+.health-item{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
+.health-label{font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;}
+.health-val{font-size:20px;font-weight:700;font-family:var(--display);}
+.health-sub{font-size:11px;color:var(--dim);margin-top:3px;}
+.health-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;}
+.dot-green{background:var(--success);}
+.dot-yellow{background:var(--warn);}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand-icon">✈</div>
+  <div class="brand-name">AEROSTRAT</div>
+  <div class="breadcrumb"><span>/</span><span>System</span><span>›</span><b>Admin Panel</b></div>
+  <div class="topbar-sep"></div>
+  <div class="back-btn">← Back to Radar</div>
+</div>
+<div class="layout">
+  <nav class="nav">
+    <div class="nav-section">Management</div>
+    <div class="nav-item active" onclick="showTab('users',this)"><span class="nav-icon">👥</span>User Management</div>
+    <div class="nav-item" onclick="showTab('monitor',this)"><span class="nav-icon">📡</span>System Monitor</div>
+    <div class="nav-section">Data</div>
+    <div class="nav-item" onclick="showTab('flights',this)"><span class="nav-icon">✈</span>Flight Database</div>
+    <div class="nav-item" onclick="showTab('alerts',this)"><span class="nav-icon">⚠️</span>Alerts<span class="nav-badge">3</span></div>
+    <div class="nav-section">System</div>
+    <div class="nav-item" onclick="showTab('logs',this)"><span class="nav-icon">📋</span>Server Logs</div>
+    <div class="nav-item" style="color:var(--danger);margin-top:auto;"><span class="nav-icon">🚪</span>Sign Out</div>
+  </nav>
+  <main class="main">
+    <div id="tab-users">
+      <div class="page-hd">
+        <div><div class="page-title">User Management</div><div class="page-sub">Manage all registered operator accounts</div></div>
+        <button class="action-btn">↻ Refresh</button>
+      </div>
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Account List</span><span class="badge-count">6 accounts</span></div>
+        <table>
+          <thead><tr><th>ID</th><th>Username</th><th>Email</th><th>Role</th><th>Joined</th><th>Actions</th></tr></thead>
+          <tbody>
+            <tr><td class="td-muted">1</td><td><div class="user-cell"><div class="avatar" style="background:#7c3aed">A</div><span class="td-bold">aerostrat</span></div></td><td class="td-muted">admin@aerostrat.tw</td><td><span class="role role-super">🛡 Superadmin</span></td><td class="td-muted td-sm">2024/01/15</td><td><span style="font-size:11px;color:var(--dim);">Protected</span></td></tr>
+            <tr><td class="td-muted">2</td><td><div class="user-cell"><div class="avatar" style="background:#0066ff">L</div><span class="td-bold">lbw_ops</span></div></td><td class="td-muted">lbw@ops.tw</td><td><span class="role role-admin">🛡 Admin</span></td><td class="td-muted td-sm">2024/03/22</td><td><div class="row-actions"><button class="btn btn-warning">🛡 Remove Admin</button><button class="btn btn-danger">🗑 Delete</button></div></td></tr>
+            <tr><td class="td-muted">3</td><td><div class="user-cell"><div class="avatar" style="background:#10b981">C</div><span class="td-bold">charlie_atc</span></div></td><td class="td-muted">charlie@atc.tw</td><td><span class="role role-user">User</span></td><td class="td-muted td-sm">2024/05/08</td><td><div class="row-actions"><button class="btn btn-teal">🛡 Make Admin</button><button class="btn btn-danger">🗑 Delete</button></div></td></tr>
+            <tr><td class="td-muted">4</td><td><div class="user-cell"><div class="avatar" style="background:#f59e0b">D</div><span class="td-bold">delta_watch</span></div></td><td class="td-muted">—</td><td><span class="role role-user">User</span></td><td class="td-muted td-sm">2024/08/11</td><td><div class="row-actions"><button class="btn btn-teal">🛡 Make Admin</button><button class="btn btn-danger">🗑 Delete</button></div></td></tr>
+            <tr><td class="td-muted">5</td><td><div class="user-cell"><div class="avatar" style="background:#ef4444">E</div><span class="td-bold">echo_radar</span></div></td><td class="td-muted">echo@radar.tw</td><td><span class="role role-user">User</span></td><td class="td-muted td-sm">2025/01/03</td><td><div class="row-actions"><button class="btn btn-teal">🛡 Make Admin</button><button class="btn btn-danger">🗑 Delete</button></div></td></tr>
+            <tr><td class="td-muted">6</td><td><div class="user-cell"><div class="avatar" style="background:#6366f1">F</div><span class="td-bold">foxtrot_fir</span></div></td><td class="td-muted">fir@tw.aero</td><td><span class="role role-user">User</span></td><td class="td-muted td-sm">2025/04/17</td><td><div class="row-actions"><button class="btn btn-teal">🛡 Make Admin</button><button class="btn btn-danger">🗑 Delete</button></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div id="tab-monitor" style="display:none;">
+      <div class="page-hd"><div><div class="page-title">System Monitor</div><div class="page-sub">Real-time server health &amp; performance</div></div><button class="action-btn">↻ Refresh</button></div>
+      <div class="gauge-grid">
+        <div class="gauge-card"><div class="gauge-wrap"><div class="gauge" style="--gp:62%;--gc:var(--accent);"><span class="gauge-label">62%</span></div><div class="gauge-info"><div class="gauge-title">CPU Usage</div><div class="gauge-val">62%</div><div class="gauge-sub">4 cores · Node.js</div></div></div></div>
+        <div class="gauge-card"><div class="gauge-wrap"><div class="gauge" style="--gp:38%;--gc:#10b981;"><span class="gauge-label">38%</span></div><div class="gauge-info"><div class="gauge-title">Memory</div><div class="gauge-val">612 MB</div><div class="gauge-sub">of 1.6 GB RSS</div></div></div></div>
+        <div class="gauge-card"><div class="gauge-wrap"><div class="gauge" style="--gp:24%;--gc:#f59e0b;"><span class="gauge-label">24%</span></div><div class="gauge-info"><div class="gauge-title">Disk</div><div class="gauge-val">4.2 GB</div><div class="gauge-sub">of 16.8 GB used</div></div></div></div>
+        <div class="gauge-card"><div class="gauge-wrap"><div class="gauge" style="--gp:92%;--gc:#10b981;"><span class="gauge-label">92%</span></div><div class="gauge-info"><div class="gauge-title">Uptime</div><div class="gauge-val">14 days</div><div class="gauge-sub">Since 2025-04-23</div></div></div></div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Service Health</span><span class="badge-count" style="background:rgba(16,185,129,0.1);color:var(--success);">● All Nominal</span></div>
+        <div class="health-grid">
+          <div class="health-item"><div class="health-label">ADS-B Feed</div><div class="health-val" style="color:var(--success);">Online</div><div class="health-sub"><span class="health-dot dot-green"></span>127 planes · 1.2s lag</div></div>
+          <div class="health-item"><div class="health-label">WebSocket Clients</div><div class="health-val">14</div><div class="health-sub">Active connections</div></div>
+          <div class="health-item"><div class="health-label">SQLite Database</div><div class="health-val" style="color:var(--success);">Online</div><div class="health-sub"><span class="health-dot dot-green"></span>4,218 records</div></div>
+          <div class="health-item"><div class="health-label">API Latency (p95)</div><div class="health-val">48 ms</div><div class="health-sub"><span class="health-dot dot-green"></span>Healthy</div></div>
+          <div class="health-item"><div class="health-label">SSE Streams</div><div class="health-val">8</div><div class="health-sub">Active streams</div></div>
+          <div class="health-item"><div class="health-label">Anomaly Engine</div><div class="health-val" style="color:var(--warn);">3 Active</div><div class="health-sub"><span class="health-dot dot-yellow"></span>Monitoring</div></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+function showTab(id,el){document.querySelectorAll('[id^="tab-"]').forEach(t=>t.style.display='none');document.getElementById('tab-'+id).style.display='';document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));el.classList.add('active');}
+</script>
+</body>
+</html>

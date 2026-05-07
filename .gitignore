@@ -11,6 +11,7 @@ dist/
 build/
 /public/
 /public-react/
+!public-react/page-*.html
 backend/public/logs/
 database_backup/
 
@@ -78,6 +79,7 @@ assets/AircraftShapesSVG/
 client/src/assets/AircraftShapesSVG/
 client/public/shapes/
 *.html
+!client/public/page-*.html
 *.log
 
 # Garbage & Duplicates

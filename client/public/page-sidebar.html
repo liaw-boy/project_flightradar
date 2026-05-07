@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>AEROSTRAT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&display=swap" rel="stylesheet"/>
+<style>
+:root{--bg:#f5f7fa;--surface:#ffffff;--surface-2:#f8fafc;--surface-hover:#f1f5f9;--fg:#0f172a;--muted:#374151;--dim:#6b7280;--border:#e5e7eb;--border-strong:#d1d5db;--accent:#0066ff;--accent-2:#6366f1;--accent-dim:rgba(0,102,255,0.07);--warn:#f59e0b;--danger:#ef4444;--success:#10b981;--shadow:0 1px 4px rgba(0,0,0,0.06),0 0 0 1px rgba(0,0,0,0.03);--font:'Inter',-apple-system,sans-serif;--display:'Fraunces','Georgia',serif;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);min-height:100vh;-webkit-font-smoothing:antialiased;display:flex;align-items:stretch;}
+.topbar{position:fixed;top:0;left:0;right:0;height:52px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:14px;z-index:100;}
+.brand-icon{width:28px;height:28px;background:linear-gradient(135deg,var(--accent),var(--accent-2));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;}
+.brand-name{font-size:13px;font-weight:800;letter-spacing:1.2px;color:var(--fg);}
+.breadcrumb{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);margin-left:4px;}
+.breadcrumb b{color:var(--fg);font-weight:600;}
+.topbar-sep{flex:1;}
+.close-btn{width:30px;height:30px;border-radius:7px;background:var(--surface-2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--dim);transition:all .15s;}
+.close-btn:hover{background:var(--surface-hover);color:var(--fg);}
+.map-area{flex:1;background:linear-gradient(160deg,#0f172a 0%,#1e3a5f 60%,#0f172a 100%);position:relative;overflow:hidden;margin-top:52px;}
+.map-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.04) 1px,transparent 1px);background-size:40px 40px;}
+.map-plane{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:48px;height:48px;background:var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 0 0 8px rgba(0,102,255,0.2),0 0 0 18px rgba(0,102,255,0.08);}
+.map-trail{position:absolute;top:calc(50% - 1px);left:20%;right:50%;height:2px;background:linear-gradient(to right,transparent,rgba(0,102,255,0.5));}
+.map-label{position:absolute;bottom:20px;left:20px;font-size:10px;color:rgba(255,255,255,0.35);letter-spacing:1.5px;text-transform:uppercase;}
+.route-apt{position:absolute;display:flex;flex-direction:column;align-items:center;gap:3px;}
+.route-apt.dep{left:16%;top:40%;}
+.route-apt.arr{right:16%;top:45%;}
+.apt-dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.6);}
+.apt-lbl{font-size:10px;color:rgba(255,255,255,0.5);letter-spacing:1px;}
+.sidebar{width:360px;flex-shrink:0;background:var(--surface);border-left:1px solid var(--border);margin-top:52px;overflow-y:auto;}
+.airline-banner{height:80px;background:linear-gradient(135deg,#0f172a,#1e3a5f);position:relative;overflow:hidden;display:flex;align-items:flex-end;padding:12px 20px;}
+.airline-banner::before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(-45deg,transparent,transparent 20px,rgba(255,255,255,0.02) 20px,rgba(255,255,255,0.02) 21px);}
+.airline-logo-area{position:relative;z-index:1;display:flex;align-items:center;gap:10px;}
+.airline-logo{width:34px;height:34px;border-radius:8px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;}
+.airline-name{font-size:13px;font-weight:700;color:#fff;letter-spacing:.3px;}
+.airline-sub{font-size:10px;color:rgba(255,255,255,0.5);margin-top:2px;letter-spacing:.5px;}
+.identity{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between;}
+.callsign{font-family:var(--display);font-size:32px;font-weight:700;color:var(--fg);letter-spacing:-1px;line-height:1;}
+.reg{font-size:12px;color:var(--dim);margin-top:4px;letter-spacing:.3px;}
+.type-badge{display:flex;align-items:center;gap:5px;background:var(--accent-dim);color:var(--accent);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;letter-spacing:.5px;border:1px solid rgba(0,102,255,0.15);}
+.progress-strip{padding:14px 20px;border-bottom:1px solid var(--border);}
+.progress-airports{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px;}
+.prog-apt{text-align:center;}
+.prog-iata{font-family:var(--display);font-size:20px;font-weight:700;color:var(--fg);letter-spacing:-1px;}
+.prog-city{font-size:10px;color:var(--dim);letter-spacing:.5px;margin-top:2px;}
+.prog-bar-wrap{position:relative;}
+.prog-bar-bg{height:3px;background:var(--border);border-radius:2px;}
+.prog-bar-fill{position:absolute;top:0;left:0;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-2));border-radius:2px;width:68%;}
+.prog-plane{position:absolute;top:50%;transform:translate(-50%,-50%);left:68%;font-size:13px;}
+.prog-pct{display:flex;justify-content:space-between;margin-top:6px;font-size:11px;color:var(--dim);}
+.section{border-bottom:1px solid var(--border);}
+.section-hd{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;cursor:pointer;background:var(--surface);transition:background .15s;}
+.section-hd:hover{background:var(--surface-hover);}
+.section-hd-left{display:flex;align-items:center;gap:8px;}
+.section-icon{width:24px;height:24px;border-radius:6px;background:var(--accent-dim);display:flex;align-items:center;justify-content:center;font-size:12px;}
+.section-title{font-size:12px;font-weight:700;color:var(--fg);letter-spacing:.3px;text-transform:uppercase;}
+.section-toggle{font-size:14px;color:var(--dim);transition:transform .2s;}
+.section-toggle.open{transform:rotate(180deg);}
+.section-body{padding:4px 20px 16px;}
+.data-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.data-cell{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
+.data-cell.full{grid-column:1/-1;}
+.data-label{font-size:10px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;font-weight:600;margin-bottom:4px;}
+.data-val{font-size:15px;font-weight:700;color:var(--fg);}
+.data-val.accent{color:var(--accent);}
+.data-sub{font-size:11px;color:var(--dim);margin-top:2px;}
+.airport-card{display:flex;align-items:center;gap:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;}
+.airport-iata{font-family:var(--display);font-size:24px;font-weight:700;color:var(--fg);letter-spacing:-1px;min-width:48px;}
+.airport-info{flex:1;}
+.airport-name{font-size:12px;font-weight:600;color:var(--fg);}
+.airport-dist{font-size:11px;color:var(--dim);margin-top:2px;}
+.action-row{display:flex;gap:8px;padding:16px 20px;border-top:1px solid var(--border);}
+.act-btn{flex:1;padding:9px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-family:var(--font);font-size:12px;font-weight:600;color:var(--fg);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .15s;}
+.act-btn:hover{background:var(--surface-hover);border-color:var(--border-strong);}
+.act-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+.act-btn.primary:hover{background:#0052cc;}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand-icon">✈</div>
+  <div class="brand-name">AEROSTRAT</div>
+  <div class="breadcrumb"><span>/</span><span>Radar</span><span>›</span><b>Flight Detail</b></div>
+  <div class="topbar-sep"></div>
+  <div class="close-btn">✕</div>
+</div>
+<div class="map-area">
+  <div class="map-grid"></div>
+  <div class="map-trail"></div>
+  <div class="route-apt dep"><div class="apt-dot"></div><div class="apt-lbl">TPE</div></div>
+  <div class="map-plane">✈</div>
+  <div class="route-apt arr"><div class="apt-dot"></div><div class="apt-lbl">NRT</div></div>
+  <div class="map-label">TAIWAN FIR · LIVE TRACK</div>
+</div>
+<div class="sidebar">
+  <div class="airline-banner">
+    <div class="airline-logo-area">
+      <div class="airline-logo">CI</div>
+      <div><div class="airline-name">China Airlines</div><div class="airline-sub">FLIGHT CI-107</div></div>
+    </div>
+  </div>
+  <div class="identity">
+    <div><div class="callsign">CAL107</div><div class="reg">B-18357 · ICAO 899B12</div></div>
+    <div class="type-badge">✈ A330-300</div>
+  </div>
+  <div class="progress-strip">
+    <div class="progress-airports">
+      <div class="prog-apt"><div class="prog-iata">TPE</div><div class="prog-city">TAIPEI</div></div>
+      <div style="font-size:12px;color:var(--dim);">— 68% —</div>
+      <div class="prog-apt"><div class="prog-iata">NRT</div><div class="prog-city">TOKYO</div></div>
+    </div>
+    <div class="prog-bar-wrap">
+      <div class="prog-bar-bg"></div>
+      <div class="prog-bar-fill"></div>
+      <div class="prog-plane">✈</div>
+    </div>
+    <div class="prog-pct"><span>Departed 10:42 UTC</span><span>ETA 13:05 UTC</span></div>
+  </div>
+  <div class="section">
+    <div class="section-hd" onclick="toggleSec(this)">
+      <div class="section-hd-left"><div class="section-icon">📍</div><span class="section-title">Position &amp; Speed</span></div>
+      <span class="section-toggle open">▾</span>
+    </div>
+    <div class="section-body">
+      <div class="data-grid">
+        <div class="data-cell"><div class="data-label">Altitude</div><div class="data-val accent">FL338</div><div class="data-sub">33,800 ft · Climbing</div></div>
+        <div class="data-cell"><div class="data-label">Ground Speed</div><div class="data-val">498 kt</div><div class="data-sub">922 km/h</div></div>
+        <div class="data-cell"><div class="data-label">Heading</div><div class="data-val">037°</div><div class="data-sub">NNE</div></div>
+        <div class="data-cell"><div class="data-label">Vertical Rate</div><div class="data-val accent">+800 fpm</div><div class="data-sub">Climbing</div></div>
+        <div class="data-cell full"><div class="data-label">Coordinates</div><div class="data-val" style="font-size:13px;">25.0748° N, 123.5641° E</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-hd" onclick="toggleSec(this)">
+      <div class="section-hd-left"><div class="section-icon">✈</div><span class="section-title">Aircraft</span></div>
+      <span class="section-toggle open">▾</span>
+    </div>
+    <div class="section-body">
+      <div class="data-grid">
+        <div class="data-cell"><div class="data-label">Type</div><div class="data-val">A330-302</div><div class="data-sub">Wide-body</div></div>
+        <div class="data-cell"><div class="data-label">Category</div><div class="data-val">Cat H</div><div class="data-sub">Heavy</div></div>
+        <div class="data-cell"><div class="data-label">Registration</div><div class="data-val">B-18357</div></div>
+        <div class="data-cell"><div class="data-label">Country</div><div class="data-val">🇹🇼 TW</div><div class="data-sub">Taiwan</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-hd" onclick="toggleSec(this)">
+      <div class="section-hd-left"><div class="section-icon">🛬</div><span class="section-title">Nearest Airport</span></div>
+      <span class="section-toggle open">▾</span>
+    </div>
+    <div class="section-body">
+      <div class="airport-card">
+        <div class="airport-iata">MZG</div>
+        <div class="airport-info"><div class="airport-name">Magong Airport</div><div class="airport-dist">84 km away · bearing 220°</div></div>
+        <div style="font-size:11px;color:var(--dim);">RCQC</div>
+      </div>
+    </div>
+  </div>
+  <div class="action-row">
+    <button class="act-btn primary">✈ Track Flight</button>
+    <button class="act-btn">🔗 Share</button>
+    <button class="act-btn">⭐ Save</button>
+  </div>
+</div>
+<script>
+function toggleSec(hd){const body=hd.nextElementSibling;const tog=hd.querySelector('.section-toggle');const open=body.style.display!=='none';body.style.display=open?'none':'';tog.classList.toggle('open',!open);}
+</script>
+</body>
+</html>

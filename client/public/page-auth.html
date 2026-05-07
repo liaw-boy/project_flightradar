@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>AEROSTRAT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#f5f7fa;--surface:#ffffff;--surface-2:#f8fafc;--surface-hover:#f1f5f9;
+  --fg:#0f172a;--muted:#374151;--dim:#6b7280;--border:#e5e7eb;--border-strong:#d1d5db;
+  --accent:#0066ff;--accent-2:#6366f1;--accent-dim:rgba(0,102,255,0.07);
+  --accent-hover:rgba(0,102,255,0.12);--danger:#ef4444;--success:#10b981;
+  --shadow:0 1px 4px rgba(0,0,0,0.06),0 0 0 1px rgba(0,0,0,0.03);
+  --shadow-md:0 4px 16px rgba(0,0,0,0.08),0 0 0 1px rgba(0,0,0,0.03);
+  --font:'Inter',-apple-system,sans-serif;--display:'Fraunces','Georgia',serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);min-height:100vh;display:flex;align-items:stretch;-webkit-font-smoothing:antialiased;}
+.left{flex:1;background:linear-gradient(145deg,#0f172a 0%,#1e3a5f 50%,#0f172a 100%);display:flex;flex-direction:column;justify-content:space-between;padding:48px 56px;position:relative;overflow:hidden;}
+.left::before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(-55deg,transparent,transparent 40px,rgba(255,255,255,0.015) 40px,rgba(255,255,255,0.015) 41px);pointer-events:none;}
+.route-display{display:flex;align-items:center;gap:20px;margin-bottom:56px;}
+.apt-code{font-family:var(--display);font-size:clamp(52px,7vw,80px);font-weight:700;color:#fff;letter-spacing:-2px;line-height:1;}
+.apt-name{font-size:11px;color:rgba(255,255,255,0.45);letter-spacing:1.5px;text-transform:uppercase;margin-top:4px;}
+.route-line{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;max-width:120px;}
+.route-dots{display:flex;align-items:center;gap:0;width:100%;}
+.r-dot{width:6px;height:6px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.4);flex-shrink:0;}
+.r-dash{flex:1;height:1px;background:repeating-linear-gradient(to right,rgba(255,255,255,0.3) 0,rgba(255,255,255,0.3) 4px,transparent 4px,transparent 8px);}
+.r-plane{font-size:14px;transform:rotate(90deg);flex-shrink:0;}
+.route-flt{font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:2px;text-transform:uppercase;}
+.headline{position:relative;z-index:1;}
+.headline-tag{font-size:10px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:rgba(0,102,255,0.8);background:rgba(0,102,255,0.12);display:inline-block;padding:4px 10px;border-radius:4px;margin-bottom:16px;}
+.headline h1{font-family:var(--display);font-size:clamp(32px,4vw,48px);font-weight:700;color:#fff;line-height:1.15;letter-spacing:-1px;margin-bottom:14px;}
+.headline h1 em{font-style:italic;color:rgba(99,179,237,0.9);}
+.headline p{font-size:14px;color:rgba(255,255,255,0.5);line-height:1.65;max-width:340px;}
+.badges{display:flex;gap:12px;flex-wrap:wrap;}
+.badge{display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:.3px;}
+.badge-icon{width:20px;height:20px;border-radius:5px;background:rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:center;font-size:10px;}
+.right{width:420px;flex-shrink:0;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;justify-content:center;padding:48px 44px;overflow-y:auto;}
+.form-brand{display:flex;align-items:center;gap:10px;margin-bottom:36px;}
+.form-brand-icon{width:36px;height:36px;background:linear-gradient(135deg,var(--accent),var(--accent-2));border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;}
+.form-brand-name{font-size:14px;font-weight:800;letter-spacing:1.5px;color:var(--fg);}
+.form-brand-sub{font-size:10px;color:var(--dim);letter-spacing:.5px;margin-top:1px;}
+.form-heading{margin-bottom:28px;}
+.form-heading h2{font-family:var(--display);font-size:26px;font-weight:700;color:var(--fg);letter-spacing:-.5px;margin-bottom:4px;}
+.form-heading p{font-size:13px;color:var(--dim);}
+.tabs{display:flex;background:var(--surface-2);border-radius:9px;padding:3px;margin-bottom:24px;border:1px solid var(--border);}
+.tab{flex:1;padding:8px;text-align:center;background:transparent;border:none;font-family:var(--font);font-size:13px;font-weight:600;color:var(--dim);cursor:pointer;border-radius:7px;transition:all .18s;}
+.tab.active{background:var(--surface);color:var(--fg);box-shadow:var(--shadow);}
+.oauth{margin-bottom:20px;}
+.oauth-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-family:var(--font);font-size:13px;font-weight:600;color:var(--fg);cursor:pointer;transition:all .18s;}
+.oauth-btn:hover{background:var(--surface-hover);border-color:var(--border-strong);}
+.divider{display:flex;align-items:center;gap:10px;margin:18px 0;font-size:11px;color:var(--dim);letter-spacing:.5px;}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border);}
+.fg{margin-bottom:16px;}
+.fl{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;letter-spacing:.2px;}
+.fi{position:relative;}
+.fi-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--dim);pointer-events:none;}
+.fi input{width:100%;padding:10px 12px 10px 34px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-family:var(--font);font-size:14px;color:var(--fg);outline:none;transition:all .18s;}
+.fi input::placeholder{color:var(--dim);}
+.fi input:focus{border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 3px rgba(0,102,255,0.1);}
+.fg-extra{display:flex;align-items:center;justify-content:space-between;}
+.fg-extra a{font-size:12px;color:var(--accent);text-decoration:none;font-weight:500;}
+.fg-extra a:hover{text-decoration:underline;}
+.submit{width:100%;padding:12px;background:var(--accent);border:none;border-radius:8px;font-family:var(--font);font-size:14px;font-weight:700;color:#fff;cursor:pointer;transition:all .18s;margin-top:20px;display:flex;align-items:center;justify-content:center;gap:7px;}
+.submit:hover{background:#0052cc;transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,102,255,0.3);}
+.signup-link{text-align:center;margin-top:20px;font-size:12px;color:var(--dim);}
+.signup-link a{color:var(--accent);font-weight:600;text-decoration:none;}
+.form-footer{margin-top:28px;padding-top:18px;border-top:1px solid var(--border);font-size:11px;color:var(--dim);display:flex;align-items:center;gap:5px;}
+</style>
+</head>
+<body>
+<div class="left">
+  <div class="route-display">
+    <div><div class="apt-code">USR</div><div class="apt-name">Unauthenticated</div></div>
+    <div class="route-line">
+      <div class="route-dots"><div class="r-dot"></div><div class="r-dash"></div><span class="r-plane">✈</span><div class="r-dash"></div><div class="r-dot"></div></div>
+      <div class="route-flt">AS-AUTH</div>
+    </div>
+    <div><div class="apt-code">SYS</div><div class="apt-name">Online</div></div>
+  </div>
+  <div class="headline">
+    <div class="headline-tag">AEROSTRAT RADAR</div>
+    <h1>Real-time flight<br/>tracking, <em>simplified.</em></h1>
+    <p>Monitor aircraft over Taiwan FIR. Receive anomaly alerts, track your flights, and get situational awareness in real time.</p>
+  </div>
+  <div class="badges">
+    <div class="badge"><div class="badge-icon">🔒</div>TLS 1.3 Encrypted</div>
+    <div class="badge"><div class="badge-icon">✈</div>Live ADS-B Data</div>
+    <div class="badge"><div class="badge-icon">🛰</div>Taiwan FIR</div>
+  </div>
+</div>
+<div class="right">
+  <div class="form-brand">
+    <div class="form-brand-icon">✈</div>
+    <div><div class="form-brand-name">AEROSTRAT</div><div class="form-brand-sub">ATC RADAR SYSTEM</div></div>
+  </div>
+  <div class="form-heading"><h2>Welcome back</h2><p>Sign in to your operator account</p></div>
+  <div class="tabs"><button class="tab active">Sign In</button><button class="tab">Register</button></div>
+  <div class="oauth">
+    <button class="oauth-btn">
+      <svg width="16" height="16" viewBox="0 0 18 18"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/><path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>
+      Continue with Google
+    </button>
+  </div>
+  <div class="divider">or continue with email</div>
+  <div class="fg">
+    <label class="fl" for="username">Username</label>
+    <div class="fi">
+      <svg class="fi-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
+      <input id="username" type="text" placeholder="Enter your username"/>
+    </div>
+  </div>
+  <div class="fg">
+    <div class="fg-extra">
+      <label class="fl" for="password" style="margin-bottom:0">Password</label>
+      <a href="#">Forgot password?</a>
+    </div>
+    <div class="fi" style="margin-top:6px">
+      <svg class="fi-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <input id="password" type="password" placeholder="Enter your password"/>
+    </div>
+  </div>
+  <button class="submit">Sign In <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></button>
+  <div class="signup-link">Don't have an account? <a href="#">Create one</a></div>
+  <div class="form-footer"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Secured with TLS 1.3 · Session expires in 24 hours</div>
+</div>
+</body>
+</html>

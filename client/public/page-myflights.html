@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>AEROSTRAT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#f5f7fa;--surface:#ffffff;--surface-2:#f8fafc;--surface-hover:#f1f5f9;
+  --fg:#0f172a;--muted:#374151;--dim:#6b7280;--border:#e5e7eb;--border-strong:#d1d5db;
+  --accent:#0066ff;--accent-2:#6366f1;--accent-dim:rgba(0,102,255,0.07);
+  --warn:#f59e0b;--warn-dim:rgba(245,158,11,0.08);
+  --danger:#ef4444;--danger-dim:rgba(239,68,68,0.08);
+  --success:#10b981;--success-dim:rgba(16,185,129,0.08);
+  --shadow:0 1px 4px rgba(0,0,0,0.06),0 0 0 1px rgba(0,0,0,0.03);
+  --font:'Inter',-apple-system,sans-serif;--display:'Fraunces','Georgia',serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);min-height:100vh;-webkit-font-smoothing:antialiased;}
+
+.topbar{height:52px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:12px;}
+.brand-icon{width:28px;height:28px;background:linear-gradient(135deg,var(--accent),var(--accent-2));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;}
+.brand-name{font-size:13px;font-weight:800;letter-spacing:1.2px;}
+.breadcrumb{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);margin-left:4px;}
+.breadcrumb b{color:var(--fg);font-weight:600;}
+.topbar-sep{flex:1;}
+.live-badge{display:flex;align-items:center;gap:6px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);color:var(--success);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;letter-spacing:.5px;}
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--success);animation:pulse 1.5s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+.tb{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;padding:7px 12px;border-radius:7px;border:1px solid var(--border);background:var(--surface);cursor:pointer;color:var(--fg);transition:all .15s;}
+.tb:hover{background:var(--surface-hover);}
+.tb.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+.tb.primary:hover{background:#0052cc;}
+
+.content{padding:24px;}
+
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px;}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px;border-bottom:2px solid transparent;transition:box-shadow .15s;}
+.stat-card:hover{box-shadow:var(--shadow);}
+.stat-card.blue{border-bottom-color:var(--accent);}
+.stat-card.amber{border-bottom-color:var(--warn);}
+.stat-card.green{border-bottom-color:var(--success);}
+.stat-card.purple{border-bottom-color:var(--accent-2);}
+.stat-label{font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;}
+.stat-val{font-family:var(--display);font-size:36px;font-weight:700;letter-spacing:-1px;line-height:1;}
+.stat-val.blue{color:var(--accent);}
+.stat-val.amber{color:var(--warn);}
+.stat-val.green{color:var(--success);}
+.stat-val.purple{color:var(--accent-2);}
+.stat-sub{font-size:11px;color:var(--dim);margin-top:5px;}
+
+.toolbar{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
+.search-wrap{position:relative;flex:1;max-width:280px;}
+.search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--dim);font-size:13px;}
+.search-input{width:100%;padding:8px 12px 8px 32px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-family:var(--font);font-size:13px;color:var(--fg);outline:none;transition:all .15s;}
+.search-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,102,255,0.1);}
+.filter-tabs{display:flex;gap:2px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:3px;}
+.ftab{padding:6px 12px;font-size:12px;font-weight:600;color:var(--dim);border-radius:6px;cursor:pointer;border:none;background:transparent;font-family:var(--font);transition:all .15s;}
+.ftab.active{background:var(--surface);color:var(--fg);box-shadow:var(--shadow);}
+.ftab .cnt{font-size:10px;font-weight:700;margin-left:4px;color:var(--accent);}
+.ftab.active .cnt{color:var(--accent);}
+.filter-btn{display:flex;align-items:center;gap:6px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;transition:all .15s;margin-left:auto;}
+.filter-btn:hover{background:var(--surface-hover);}
+
+.table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+.t-header{display:grid;grid-template-columns:8px 1fr 120px 80px 70px 60px 80px 90px 80px;gap:0;background:var(--surface-2);border-bottom:1px solid var(--border);}
+.t-th{padding:10px 12px;font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px;text-transform:uppercase;}
+.t-row{display:grid;grid-template-columns:8px 1fr 120px 80px 70px 60px 80px 90px 80px;gap:0;border-bottom:1px solid var(--border);transition:background .12s;cursor:pointer;}
+.t-row:last-child{border-bottom:none;}
+.t-row:hover{background:var(--surface-hover);}
+.t-row.anomaly{border-left:3px solid var(--warn);}
+.t-row.emergency{border-left:3px solid var(--danger);}
+.t-ind{display:flex;align-items:center;justify-content:center;}
+.t-dot{width:6px;height:6px;border-radius:50%;}
+.t-dot.ok{background:var(--success);}
+.t-dot.warn{background:var(--warn);}
+.t-dot.danger{background:var(--danger);}
+.t-cell{padding:12px;display:flex;align-items:center;font-size:13px;}
+.t-callsign{font-weight:700;color:var(--fg);}
+.t-reg{font-size:11px;color:var(--dim);margin-top:2px;}
+.t-route{display:flex;align-items:center;gap:5px;font-size:12px;}
+.t-iata{font-weight:700;color:var(--fg);}
+.t-arr{color:var(--dim);font-size:10px;}
+.t-alt{font-size:13px;font-weight:700;color:var(--accent);}
+.t-sub{font-size:11px;color:var(--dim);}
+.t-type{background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:3px 7px;font-size:11px;font-weight:700;color:var(--fg);}
+.t-status{display:inline-flex;align-items:center;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:700;letter-spacing:.3px;}
+.t-status.ok{background:var(--success-dim);color:var(--success);border:1px solid rgba(16,185,129,0.2);}
+.t-status.warn{background:var(--warn-dim);color:var(--warn);border:1px solid rgba(245,158,11,0.2);}
+.t-status.danger{background:var(--danger-dim);color:var(--danger);border:1px solid rgba(239,68,68,0.2);}
+.t-actions{display:flex;gap:5px;}
+.t-act{padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);font-size:11px;font-weight:600;cursor:pointer;color:var(--dim);transition:all .12s;}
+.t-act:hover{background:var(--surface-hover);}
+.t-act.track{background:var(--accent-dim);color:var(--accent);border-color:rgba(0,102,255,0.2);}
+
+.table-footer{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-top:1px solid var(--border);background:var(--surface-2);font-size:11px;color:var(--dim);}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand-icon">✈</div>
+  <div class="brand-name">AEROSTRAT</div>
+  <div class="breadcrumb"><span>/</span><span>Radar</span><span>›</span><b>My Flights</b></div>
+  <div class="topbar-sep"></div>
+  <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+  <button class="tb">📡 Radar</button>
+  <button class="tb">⬇ Export</button>
+  <button class="tb primary">+ Track Flight</button>
+</div>
+
+<div class="content">
+  <div class="stats-grid">
+    <div class="stat-card blue"><div class="stat-label">Tracked Flights</div><div class="stat-val blue">12</div><div class="stat-sub">Active watches</div></div>
+    <div class="stat-card amber"><div class="stat-label">Anomalies</div><div class="stat-val amber">3</div><div class="stat-sub">Require attention</div></div>
+    <div class="stat-card green"><div class="stat-label">Nominal</div><div class="stat-val green">9</div><div class="stat-sub">Operating normally</div></div>
+    <div class="stat-card purple"><div class="stat-label">Highest Alt</div><div class="stat-val purple">FL338</div><div class="stat-sub">CAL107 · A330</div></div>
+  </div>
+
+  <div class="toolbar">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input class="search-input" type="text" placeholder="Search callsign, reg, route…"/>
+    </div>
+    <div class="filter-tabs">
+      <button class="ftab active">All<span class="cnt">12</span></button>
+      <button class="ftab">Anomaly<span class="cnt" style="color:var(--warn)">3</span></button>
+      <button class="ftab">Departing<span class="cnt">4</span></button>
+      <button class="ftab">En Route<span class="cnt">5</span></button>
+    </div>
+    <button class="filter-btn">⚙ Filters</button>
+  </div>
+
+  <div class="table-wrap">
+    <div class="t-header">
+      <div class="t-th"></div>
+      <div class="t-th">Flight</div>
+      <div class="t-th">Route</div>
+      <div class="t-th">Altitude</div>
+      <div class="t-th">Speed</div>
+      <div class="t-th">HDG</div>
+      <div class="t-th">Type</div>
+      <div class="t-th">Status</div>
+      <div class="t-th">Actions</div>
+    </div>
+
+    <div class="t-row">
+      <div class="t-ind"><div class="t-dot ok"></div></div>
+      <div class="t-cell" style="flex-direction:column;align-items:flex-start;gap:2px;"><span class="t-callsign">CAL107</span><span class="t-reg">B-18357</span></div>
+      <div class="t-cell"><div class="t-route"><span class="t-iata">TPE</span><span class="t-arr">→</span><span class="t-iata">NRT</span></div></div>
+      <div class="t-cell" style="flex-direction:column;align-items:flex-start;gap:2px;"><span class="t-alt">FL338</span><span class="t-sub">Climbing</span></div>
+      <div class="t-cell">498 kt</div>
+      <div class="t-cell">037°</div>
+      <div class="t-cell"><span class="t-type">A330</span></div>
+      <div class="t-cell"><span class="t-status ok">Nominal</span></div>
+      <div class="t-cell"><div class="t-actions"><button class="t-act track">Track</button><button class="t-act">Info</button></div></div>
+    </div>
+
+    <div class="t-row anomaly">
+      <div class="t-ind"><div class="t-dot warn"></div></div>
+      <div class="t-cell" style="flex-direction:column;align-items:flex-start;gap:2px;"><span class="t-callsign">EVA256</span><span class="t-reg">B-16781</span></div>
+      <div class="t-cell"><div class="t-route"><span class="t-iata">TPE</span><span class="t-arr">→</span><span class="t-iata">LAX</span></div></div>
+      <div class="t-cell" style="flex-direction:column;align-items:flex-start;gap:2px;"><span class="t-alt">FL350</span><span class="t-sub">Cruise</span></div>
+      <div class="t-cell" style="color:var(--warn);font-weight:700;">544 kt</div>
+      <div class="t-cell">082°</div>
+      <div class="t-cell"><span class="t-type">B77W</span></div>
+      <div class="t-cell"><span class="t-status warn">Anomaly</span></div>
+      <div class="t-cell"><div class="t-actions"><button class="t-act track">Track</button><button class="t-act">Info</button></div></div>
+    </div>
+
+    <div class="t-row emergency">
+      <div class="t-ind"><div class="t-dot danger"></div></div>
+      <div class="t-cell" style="flex-direction:column;align-items:flex-start;gap:2px;"><span class="t-callsign">SQK7700</span><span class="t-reg">B-58503</span></div>
+      <div class="t-cell"><div class="t-route"><span class="t-iata">KHH</span><span class="t-arr">→</span><span class="t-iata">TSA</span></div></div>
+      <div class="t-cell" style="flex-direction:column;align-items:flex-start;gap:2px;"><span class="t-alt" style="color:var(--danger);">FL220</span><span class="t-sub">Descending</span></div>
+      <div class="t-cell">312 kt</div>
+      <div class="t-cell">355°</div>
+      <div class="t-cell"><span class="t-type">B738</span></div>
+      <div class="t-cell"><span class="t-status danger">Emergency</span></div>
+      <div class="t-cell"><div class="t-actions"><button class="t-act track">Track</button><button class="t-act">Info</button></div></div>
+    </div>
+
+    <div class="t-row">
+      <div class="t-ind"><div class="t-dot ok"></div></div>
+      <div class="t-cell" style="flex-direction:column;align-items:flex-start;gap:2px;"><span class="t-callsign">TTW101</span><span class="t-reg">B-28018</span></div>
+      <div class="t-cell"><div class="t-route"><span class="t-iata">TSA</span><span class="t-arr">→</span><span class="t-iata">HUN</span></div></div>
+      <div class="t-cell" style="flex-direction:column;align-items:flex-start;gap:2px;"><span class="t-alt">FL180</span><span class="t-sub">Cruise</span></div>
+      <div class="t-cell">320 kt</div>
+      <div class="t-cell">014°</div>
+      <div class="t-cell"><span class="t-type">A321</span></div>
+      <div class="t-cell"><span class="t-status ok">Nominal</span></div>
+      <div class="t-cell"><div class="t-actions"><button class="t-act track">Track</button><button class="t-act">Info</button></div></div>
+    </div>
+
+    <div class="t-row anomaly">
+      <div class="t-ind"><div class="t-dot warn"></div></div>
+      <div class="t-cell" style="flex-direction:column;align-items:flex-start;gap:2px;"><span class="t-callsign">CAL808</span><span class="t-reg">B-18806</span></div>
+      <div class="t-cell"><div class="t-route"><span class="t-iata">TPE</span><span class="t-arr">→</span><span class="t-iata">BKK</span></div></div>
+      <div class="t-cell" style="flex-direction:column;align-items:flex-start;gap:2px;"><span class="t-alt" style="color:var(--warn);">FL160</span><span class="t-sub">Rapid Desc.</span></div>
+      <div class="t-cell">388 kt</div>
+      <div class="t-cell">225°</div>
+      <div class="t-cell"><span class="t-type">A330</span></div>
+      <div class="t-cell"><span class="t-status warn">Anomaly</span></div>
+      <div class="t-cell"><div class="t-actions"><button class="t-act track">Track</button><button class="t-act">Info</button></div></div>
+    </div>
+
+    <div class="t-row">
+      <div class="t-ind"><div class="t-dot ok"></div></div>
+      <div class="t-cell" style="flex-direction:column;align-items:flex-start;gap:2px;"><span class="t-callsign">JAL804</span><span class="t-reg">JA743J</span></div>
+      <div class="t-cell"><div class="t-route"><span class="t-iata">NRT</span><span class="t-arr">→</span><span class="t-iata">TPE</span></div></div>
+      <div class="t-cell" style="flex-direction:column;align-items:flex-start;gap:2px;"><span class="t-alt">FL320</span><span class="t-sub">Cruise</span></div>
+      <div class="t-cell">482 kt</div>
+      <div class="t-cell">216°</div>
+      <div class="t-cell"><span class="t-type">B789</span></div>
+      <div class="t-cell"><span class="t-status ok">Nominal</span></div>
+      <div class="t-cell"><div class="t-actions"><button class="t-act track">Track</button><button class="t-act">Info</button></div></div>
+    </div>
+  </div>
+
+  <div class="table-footer">
+    <span>Nominal: 9 · Anomaly: 3 · Emergency: 1</span>
+    <span>Updated 12:07:44 UTC</span>
+  </div>
+</div>
+</body>
+</html>

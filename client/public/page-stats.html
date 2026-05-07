@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>AEROSTRAT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&display=swap" rel="stylesheet"/>
+<style>
+:root{--bg:#f5f7fa;--surface:#ffffff;--surface-2:#f8fafc;--surface-hover:#f1f5f9;--fg:#0f172a;--muted:#374151;--dim:#6b7280;--border:#e5e7eb;--border-strong:#d1d5db;--accent:#0066ff;--accent-2:#6366f1;--accent-dim:rgba(0,102,255,0.07);--warn:#f59e0b;--danger:#ef4444;--success:#10b981;--shadow:0 1px 4px rgba(0,0,0,0.06),0 0 0 1px rgba(0,0,0,0.03);--font:'Inter',-apple-system,sans-serif;--display:'Fraunces','Georgia',serif;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);min-height:100vh;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;}
+.topbar{height:52px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:14px;flex-shrink:0;}
+.brand-icon{width:28px;height:28px;background:linear-gradient(135deg,var(--accent),var(--accent-2));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;}
+.brand-name{font-size:13px;font-weight:800;letter-spacing:1.2px;}
+.breadcrumb{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);margin-left:4px;}
+.breadcrumb b{color:var(--fg);font-weight:600;}
+.topbar-sep{flex:1;}
+.live-badge{display:flex;align-items:center;gap:6px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);color:var(--success);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;letter-spacing:.5px;}
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--success);animation:pulse 1.5s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+.close-btn{width:30px;height:30px;border-radius:7px;background:var(--surface-2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--dim);}
+.tab-bar{display:flex;gap:2px;background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;}
+.tab{padding:12px 16px;font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;margin-bottom:-1px;}
+.tab:hover{color:var(--fg);}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+.content{padding:24px;flex:1;overflow-y:auto;}
+.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px;}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;border-bottom:2px solid transparent;}
+.kpi.blue{border-bottom-color:var(--accent);}
+.kpi.green{border-bottom-color:var(--success);}
+.kpi.amber{border-bottom-color:var(--warn);}
+.kpi.red{border-bottom-color:var(--danger);}
+.kpi.purple{border-bottom-color:var(--accent-2);}
+.kpi-label{font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;}
+.kpi-val{font-family:var(--display);font-size:32px;font-weight:700;letter-spacing:-1px;line-height:1;}
+.kpi-val.blue{color:var(--accent);}
+.kpi-val.green{color:var(--success);}
+.kpi-val.amber{color:var(--warn);}
+.kpi-val.red{color:var(--danger);}
+.kpi-val.purple{color:var(--accent-2);}
+.kpi-sub{font-size:11px;color:var(--dim);margin-top:5px;}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+.card.full{grid-column:1/-1;}
+.card-hd{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);}
+.card-title{font-size:12px;font-weight:700;color:var(--fg);letter-spacing:.3px;text-transform:uppercase;}
+.card-meta{font-size:11px;color:var(--dim);}
+.bar-list{padding:14px 18px;display:flex;flex-direction:column;gap:10px;}
+.bar-row{display:flex;align-items:center;gap:10px;}
+.bar-label{font-size:12px;font-weight:600;color:var(--fg);width:52px;flex-shrink:0;}
+.bar-track{flex:1;height:6px;background:var(--surface-2);border-radius:3px;overflow:hidden;}
+.bar-fill{height:100%;border-radius:3px;background:var(--accent);}
+.bar-count{font-size:12px;font-weight:700;color:var(--dim);width:28px;text-align:right;flex-shrink:0;}
+.type-grid{padding:14px 18px;display:flex;flex-wrap:wrap;gap:8px;}
+.type-chip{display:flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:7px;padding:6px 10px;}
+.type-name{font-size:12px;font-weight:700;color:var(--fg);}
+.type-count{font-size:10px;font-weight:700;background:var(--accent-dim);color:var(--accent);padding:2px 6px;border-radius:4px;}
+.alt-bins{padding:14px 18px;display:flex;align-items:flex-end;gap:4px;height:80px;}
+.alt-bin{flex:1;background:var(--accent-dim);border-radius:3px 3px 0 0;border-bottom:2px solid var(--accent);cursor:pointer;}
+.alt-bin:hover{background:rgba(0,102,255,0.15);}
+.alt-bin-labels{display:flex;justify-content:space-between;padding:4px 18px 10px;font-size:10px;color:var(--dim);}
+.alert-row{display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--border);}
+.alert-row:last-child{border-bottom:none;}
+.alert-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.alert-dot.red{background:var(--danger);}
+.alert-dot.amber{background:var(--warn);}
+.alert-callsign{font-size:13px;font-weight:700;width:90px;}
+.alert-desc{flex:1;font-size:12px;color:var(--dim);}
+.alert-badge{font-size:10px;font-weight:700;letter-spacing:.5px;padding:3px 7px;border-radius:5px;}
+.alert-badge.danger{background:rgba(239,68,68,0.1);color:var(--danger);border:1px solid rgba(239,68,68,0.2);}
+.alert-badge.warn{background:rgba(245,158,11,0.1);color:var(--warn);border:1px solid rgba(245,158,11,0.2);}
+.fps-card{padding:14px 18px;}
+.fps-val{font-family:var(--display);font-size:28px;font-weight:700;letter-spacing:-1px;}
+.fps-sparkline{height:48px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-top:10px;}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand-icon">✈</div>
+  <div class="brand-name">AEROSTRAT</div>
+  <div class="breadcrumb"><span>/</span><span>Radar</span><span>›</span><b>Statistics</b></div>
+  <div class="topbar-sep"></div>
+  <div class="live-badge"><div class="live-dot"></div>LIVE · 12:07 UTC</div>
+  <div class="close-btn" style="margin-left:10px;">✕</div>
+</div>
+<div class="tab-bar">
+  <div class="tab active" onclick="switchTab('overview',this)">Overview</div>
+  <div class="tab" onclick="switchTab('airlines',this)">Airlines</div>
+  <div class="tab" onclick="switchTab('alerts',this)">Alerts</div>
+  <div class="tab" onclick="switchTab('performance',this)">Performance</div>
+</div>
+<div class="content">
+  <div id="tab-overview">
+    <div class="kpi-grid">
+      <div class="kpi blue"><div class="kpi-label">Total Aircraft</div><div class="kpi-val blue">127</div><div class="kpi-sub">In Taiwan FIR</div></div>
+      <div class="kpi green"><div class="kpi-label">Airborne</div><div class="kpi-val green">112</div><div class="kpi-sub">88% in flight</div></div>
+      <div class="kpi amber"><div class="kpi-label">On Ground</div><div class="kpi-val amber">15</div><div class="kpi-sub">Taxiing / parked</div></div>
+      <div class="kpi red"><div class="kpi-label">Anomalies</div><div class="kpi-val red">3</div><div class="kpi-sub">Require attention</div></div>
+      <div class="kpi purple"><div class="kpi-label">Avg Altitude</div><div class="kpi-val purple">FL298</div><div class="kpi-sub">29,800 ft mean</div></div>
+    </div>
+    <div class="two-col">
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Top Airlines</span><span class="card-meta">24 carriers</span></div>
+        <div class="bar-list">
+          <div class="bar-row"><span class="bar-label">CAL</span><div class="bar-track"><div class="bar-fill" style="width:82%"></div></div><span class="bar-count">22</span></div>
+          <div class="bar-row"><span class="bar-label">EVA</span><div class="bar-track"><div class="bar-fill" style="width:70%"></div></div><span class="bar-count">19</span></div>
+          <div class="bar-row"><span class="bar-label">TTW</span><div class="bar-track"><div class="bar-fill" style="width:55%;background:var(--accent-2)"></div></div><span class="bar-count">15</span></div>
+          <div class="bar-row"><span class="bar-label">JAL</span><div class="bar-track"><div class="bar-fill" style="width:44%;background:var(--accent-2)"></div></div><span class="bar-count">12</span></div>
+          <div class="bar-row"><span class="bar-label">ANA</span><div class="bar-track"><div class="bar-fill" style="width:33%;background:var(--dim);opacity:.4"></div></div><span class="bar-count">9</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Aircraft Types</span><span class="card-meta">18 types</span></div>
+        <div class="type-grid">
+          <div class="type-chip"><span class="type-name">A321</span><span class="type-count">28</span></div>
+          <div class="type-chip"><span class="type-name">B738</span><span class="type-count">24</span></div>
+          <div class="type-chip"><span class="type-name">A330</span><span class="type-count">16</span></div>
+          <div class="type-chip"><span class="type-name">B77W</span><span class="type-count">14</span></div>
+          <div class="type-chip"><span class="type-name">A359</span><span class="type-count">11</span></div>
+          <div class="type-chip"><span class="type-name">B789</span><span class="type-count">9</span></div>
+          <div class="type-chip"><span class="type-name">A320</span><span class="type-count">8</span></div>
+          <div class="type-chip" style="color:var(--dim)"><span class="type-name">+10 more</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Altitude Distribution</span><span class="card-meta">Airborne only</span></div>
+        <div class="alt-bins">
+          <div class="alt-bin" style="height:12%"></div><div class="alt-bin" style="height:18%"></div><div class="alt-bin" style="height:28%"></div><div class="alt-bin" style="height:42%"></div><div class="alt-bin" style="height:78%"></div><div class="alt-bin" style="height:100%;background:rgba(0,102,255,0.2);border-color:var(--accent-2)"></div><div class="alt-bin" style="height:88%"></div><div class="alt-bin" style="height:65%"></div><div class="alt-bin" style="height:45%"></div><div class="alt-bin" style="height:22%"></div>
+        </div>
+        <div class="alt-bin-labels"><span>GND</span><span>FL100</span><span>FL200</span><span>FL300</span><span>FL400+</span></div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Active Anomalies</span><span class="card-meta" style="color:var(--danger)">3 alerts</span></div>
+        <div class="alert-row"><div class="alert-dot red"></div><div class="alert-callsign">SQK7700</div><div class="alert-desc">Emergency squawk 7700 — B738</div><span class="alert-badge danger">EMERGENCY</span></div>
+        <div class="alert-row"><div class="alert-dot amber"></div><div class="alert-callsign">CAL808</div><div class="alert-desc">Rapid descent &gt;3000 fpm — A330</div><span class="alert-badge warn">ANOMALY</span></div>
+        <div class="alert-row"><div class="alert-dot amber"></div><div class="alert-callsign">EVA256</div><div class="alert-desc">Speed deviation +48 kt — B77W</div><span class="alert-badge warn">ANOMALY</span></div>
+      </div>
+    </div>
+  </div>
+  <div id="tab-performance" style="display:none;">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Render FPS</span><span class="card-meta">Last 20 frames</span></div>
+        <div class="fps-card"><div class="fps-val" style="color:var(--success)">58 fps</div><div style="font-size:10px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;">Current frame rate</div>
+          <div class="fps-sparkline"><svg width="100%" height="48" viewBox="0 0 200 48" preserveAspectRatio="none"><defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(16,185,129,0.3)"/><stop offset="100%" stop-color="rgba(16,185,129,0)"/></linearGradient></defs><path d="M0,8 L20,7 L40,9 L60,6 L80,8 L100,5 L120,7 L140,6 L160,8 L180,5 L200,8 L200,48 L0,48 Z" fill="url(#g1)"/><path d="M0,8 L20,7 L40,9 L60,6 L80,8 L100,5 L120,7 L140,6 L160,8 L180,5 L200,8" fill="none" stroke="#10b981" stroke-width="1.5"/></svg></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><span class="card-title">WebSocket Latency</span><span class="card-meta">ms</span></div>
+        <div class="fps-card"><div class="fps-val" style="color:var(--accent)">34 ms</div><div style="font-size:10px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;">Average round-trip</div>
+          <div class="fps-sparkline"><svg width="100%" height="48" viewBox="0 0 200 48" preserveAspectRatio="none"><defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(0,102,255,0.25)"/><stop offset="100%" stop-color="rgba(0,102,255,0)"/></linearGradient></defs><path d="M0,30 L40,28 L60,32 L80,22 L100,25 L120,20 L140,28 L160,18 L180,20 L200,24 L200,48 L0,48 Z" fill="url(#g2)"/><path d="M0,30 L40,28 L60,32 L80,22 L100,25 L120,20 L140,28 L160,18 L180,20 L200,24" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg></div>
+        </div>
+      </div>
+      <div class="card full">
+        <div class="card-hd"><span class="card-title">System Resources</span><span class="card-meta">Node.js process</span></div>
+        <div class="bar-list" style="padding:16px 18px;">
+          <div class="bar-row"><span class="bar-label" style="width:100px;">CPU</span><div class="bar-track"><div class="bar-fill" style="width:62%"></div></div><span class="bar-count" style="width:40px;">62%</span></div>
+          <div class="bar-row"><span class="bar-label" style="width:100px;">Heap Used</span><div class="bar-track"><div class="bar-fill" style="width:45%;background:var(--accent-2)"></div></div><span class="bar-count" style="width:40px;">45%</span></div>
+          <div class="bar-row"><span class="bar-label" style="width:100px;">RSS Memory</span><div class="bar-track"><div class="bar-fill" style="width:38%;background:var(--success)"></div></div><span class="bar-count" style="width:40px;">38%</span></div>
+          <div class="bar-row"><span class="bar-label" style="width:100px;">Event Loop</span><div class="bar-track"><div class="bar-fill" style="width:12%;background:var(--success)"></div></div><span class="bar-count" style="width:40px;">12%</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="tab-alerts" style="display:none;">
+    <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);">
+      <div class="kpi red"><div class="kpi-label">Emergency</div><div class="kpi-val red">1</div><div class="kpi-sub">Squawk 7700</div></div>
+      <div class="kpi amber"><div class="kpi-label">Anomaly</div><div class="kpi-val amber">2</div><div class="kpi-sub">Deviations detected</div></div>
+      <div class="kpi green"><div class="kpi-label">Nominal</div><div class="kpi-val green">124</div><div class="kpi-sub">Normal operation</div></div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="card-title">All Active Alerts</span><span class="card-meta" style="color:var(--danger)">3 active</span></div>
+      <div class="alert-row"><div class="alert-dot red"></div><div class="alert-callsign">SQK7700</div><div class="alert-desc">Emergency squawk 7700 · B738 · FL220 · 24.8N 121.4E</div><span class="alert-badge danger">EMERGENCY</span></div>
+      <div class="alert-row"><div class="alert-dot amber"></div><div class="alert-callsign">CAL808</div><div class="alert-desc">Rapid descent −3,200 fpm · A330 · FL180 descending</div><span class="alert-badge warn">ANOMALY</span></div>
+      <div class="alert-row"><div class="alert-dot amber"></div><div class="alert-callsign">EVA256</div><div class="alert-desc">Speed anomaly +48 kt over limit · B77W · FL350</div><span class="alert-badge warn">ANOMALY</span></div>
+    </div>
+  </div>
+  <div id="tab-airlines" style="display:none;">
+    <div class="card">
+      <div class="card-hd"><span class="card-title">Airlines in Taiwan FIR</span><span class="card-meta">24 carriers · 127 flights</span></div>
+      <div class="bar-list" style="padding:16px 18px;gap:12px;">
+        <div class="bar-row"><span class="bar-label">CAL</span><div class="bar-track"><div class="bar-fill" style="width:82%"></div></div><span class="bar-count">22</span></div>
+        <div class="bar-row"><span class="bar-label">EVA</span><div class="bar-track"><div class="bar-fill" style="width:70%;background:var(--accent-2)"></div></div><span class="bar-count">19</span></div>
+        <div class="bar-row"><span class="bar-label">TTW</span><div class="bar-track"><div class="bar-fill" style="width:55%;background:var(--success)"></div></div><span class="bar-count">15</span></div>
+        <div class="bar-row"><span class="bar-label">JAL</span><div class="bar-track"><div class="bar-fill" style="width:44%"></div></div><span class="bar-count">12</span></div>
+        <div class="bar-row"><span class="bar-label">ANA</span><div class="bar-track"><div class="bar-fill" style="width:33%"></div></div><span class="bar-count">9</span></div>
+        <div class="bar-row"><span class="bar-label">CPA</span><div class="bar-track"><div class="bar-fill" style="width:26%;background:var(--warn);opacity:.7"></div></div><span class="bar-count">7</span></div>
+        <div class="bar-row"><span class="bar-label">SIA</span><div class="bar-track"><div class="bar-fill" style="width:22%;background:var(--accent-2)"></div></div><span class="bar-count">6</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+function switchTab(id,el){document.querySelectorAll('[id^="tab-"]').forEach(t=>t.style.display='none');document.getElementById('tab-'+id).style.display='';document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');}
+</script>
+</body>
+</html>

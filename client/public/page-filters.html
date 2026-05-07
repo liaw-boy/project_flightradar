@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>AEROSTRAT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#f5f7fa;--surface:#ffffff;--surface-2:#f8fafc;--surface-hover:#f1f5f9;
+  --fg:#0f172a;--muted:#374151;--dim:#6b7280;--border:#e5e7eb;--border-strong:#d1d5db;
+  --accent:#0066ff;--accent-2:#6366f1;--accent-dim:rgba(0,102,255,0.07);
+  --warn:#f59e0b;--danger:#ef4444;--success:#10b981;
+  --shadow:0 1px 4px rgba(0,0,0,0.06),0 0 0 1px rgba(0,0,0,0.03);
+  --font:'Inter',-apple-system,sans-serif;--display:'Fraunces','Georgia',serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);min-height:100vh;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;}
+.topbar{height:52px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:12px;flex-shrink:0;}
+.brand-icon{width:28px;height:28px;background:linear-gradient(135deg,var(--accent),var(--accent-2));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;}
+.brand-name{font-size:13px;font-weight:800;letter-spacing:1.2px;}
+.breadcrumb{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);margin-left:4px;}
+.breadcrumb b{color:var(--fg);font-weight:600;}
+.topbar-sep{flex:1;}
+.active-badge{background:var(--accent-dim);border:1px solid rgba(0,102,255,0.2);color:var(--accent);font-size:11px;font-weight:700;padding:5px 10px;border-radius:6px;letter-spacing:.5px;}
+
+.layout{display:flex;flex:1;min-height:0;}
+
+/* Sidebar */
+.sidebar{width:296px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;}
+.sidebar-hd{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--border);}
+.sidebar-title{font-size:14px;font-weight:700;color:var(--fg);}
+.reset-link{font-size:12px;color:var(--accent);cursor:pointer;font-weight:600;}
+.reset-link:hover{text-decoration:underline;}
+
+.filter-section{border-bottom:1px solid var(--border);padding:16px 20px;}
+.fs-label{font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.2px;text-transform:uppercase;margin-bottom:12px;}
+
+/* Toggle rows */
+.toggle-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+.toggle-row:last-child{margin-bottom:0;}
+.toggle-label{font-size:13px;color:var(--fg);}
+.toggle{width:36px;height:20px;border-radius:10px;background:var(--border-strong);cursor:pointer;position:relative;transition:background .2s;flex-shrink:0;}
+.toggle.on{background:var(--accent);}
+.toggle::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .2s;}
+.toggle.on::after{left:18px;}
+
+/* Range slider */
+.range-wrap{padding:4px 0;}
+.range-display{display:flex;justify-content:space-between;margin-bottom:8px;font-size:12px;font-weight:600;color:var(--fg);}
+.range-track{position:relative;height:4px;background:var(--border);border-radius:2px;}
+.range-fill{position:absolute;height:100%;background:var(--accent);border-radius:2px;left:15%;right:20%;}
+.range-thumb{position:absolute;width:14px;height:14px;border-radius:50%;background:var(--surface);border:2px solid var(--accent);top:50%;transform:translate(-50%,-50%);cursor:pointer;}
+.range-labels{display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:var(--dim);}
+
+/* Tag chips */
+.tag-grid{display:flex;flex-wrap:wrap;gap:6px;}
+.tag{padding:5px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--surface-2);color:var(--dim);transition:all .15s;}
+.tag.on{background:var(--accent-dim);color:var(--accent);border-color:rgba(0,102,255,0.25);}
+.tag.warn{background:rgba(245,158,11,0.08);color:var(--warn);border-color:rgba(245,158,11,0.2);}
+.tag.danger{background:rgba(239,68,68,0.08);color:var(--danger);border-color:rgba(239,68,68,0.2);}
+.tag.success{background:rgba(16,185,129,0.08);color:var(--success);border-color:rgba(16,185,129,0.2);}
+
+/* Map layer grid */
+.layer-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.layer-card{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px;cursor:pointer;text-align:center;transition:all .15s;}
+.layer-card.on{background:var(--accent-dim);border-color:rgba(0,102,255,0.25);}
+.layer-card:hover{background:var(--surface-hover);}
+.layer-emoji{font-size:18px;margin-bottom:4px;}
+.layer-name{font-size:11px;font-weight:600;color:var(--fg);}
+
+/* Apply buttons */
+.sidebar-footer{padding:16px 20px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;margin-top:auto;}
+.apply-btn{width:100%;padding:10px;background:var(--accent);border:none;border-radius:8px;font-family:var(--font);font-size:13px;font-weight:700;color:#fff;cursor:pointer;transition:all .15s;}
+.apply-btn:hover{background:#0052cc;}
+.reset-btn{width:100%;padding:9px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-family:var(--font);font-size:13px;font-weight:600;color:var(--dim);cursor:pointer;transition:all .15s;}
+.reset-btn:hover{background:var(--surface-hover);}
+
+/* Results pane */
+.results{flex:1;padding:20px 24px;overflow-y:auto;}
+.active-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px;}
+.chip{display:flex;align-items:center;gap:5px;background:var(--accent-dim);border:1px solid rgba(0,102,255,0.2);color:var(--accent);font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;}
+.chip:hover{background:rgba(0,102,255,0.12);}
+.chip .x{font-size:10px;opacity:.6;}
+.results-hd{display:flex;align-items:baseline;gap:8px;margin-bottom:16px;}
+.results-count{font-family:var(--display);font-size:32px;font-weight:700;color:var(--fg);letter-spacing:-1px;}
+.results-label{font-size:13px;color:var(--dim);}
+
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;}
+.result-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;position:relative;overflow:hidden;cursor:pointer;transition:box-shadow .15s;}
+.result-card:hover{box-shadow:var(--shadow);}
+.result-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
+.result-card.nominal::before{background:var(--success);}
+.result-card.anomaly::before{background:var(--warn);border:1px solid rgba(245,158,11,0.2);}
+.result-card.emergency::before{background:var(--danger);}
+.result-card.anomaly{border-color:rgba(245,158,11,0.25);}
+.result-card.emergency{border-color:rgba(239,68,68,0.25);}
+.rc-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;}
+.rc-callsign{font-family:var(--display);font-size:18px;font-weight:700;color:var(--fg);letter-spacing:-.5px;}
+.rc-reg{font-size:11px;color:var(--dim);margin-top:2px;}
+.rc-status{font-size:10px;font-weight:700;padding:3px 7px;border-radius:5px;letter-spacing:.5px;}
+.rc-status.ok{background:rgba(16,185,129,0.1);color:var(--success);}
+.rc-status.warn{background:rgba(245,158,11,0.1);color:var(--warn);}
+.rc-status.danger{background:rgba(239,68,68,0.1);color:var(--danger);}
+.rc-data{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
+.rc-item{}
+.rc-item-label{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;font-weight:700;}
+.rc-item-val{font-size:13px;font-weight:700;color:var(--fg);margin-top:2px;}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand-icon">✈</div>
+  <div class="brand-name">AEROSTRAT</div>
+  <div class="breadcrumb"><span>/</span><span>Radar</span><span>›</span><b>Filters</b></div>
+  <div class="topbar-sep"></div>
+  <div class="active-badge">5 Active</div>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-hd"><span class="sidebar-title">Filters</span><span class="reset-link">Reset all</span></div>
+
+    <div class="filter-section">
+      <div class="fs-label">Traffic Type</div>
+      <div class="toggle-row"><span class="toggle-label">Airborne</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+      <div class="toggle-row"><span class="toggle-label">On Ground</span><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+      <div class="toggle-row"><span class="toggle-label">Emergency Only</span><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+    </div>
+
+    <div class="filter-section">
+      <div class="fs-label">Altitude Range (ft)</div>
+      <div class="range-wrap">
+        <div class="range-display"><span>5,000</span><span>45,000</span></div>
+        <div class="range-track">
+          <div class="range-fill"></div>
+          <div class="range-thumb" style="left:15%;"></div>
+          <div class="range-thumb" style="left:80%;"></div>
+        </div>
+        <div class="range-labels"><span>0</span><span>FL200</span><span>FL400+</span></div>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="fs-label">Ground Speed (kt)</div>
+      <div class="range-wrap">
+        <div class="range-display"><span>100 kt</span><span>600 kt</span></div>
+        <div class="range-track">
+          <div class="range-fill" style="left:10%;right:15%;"></div>
+          <div class="range-thumb" style="left:10%;"></div>
+          <div class="range-thumb" style="left:85%;"></div>
+        </div>
+        <div class="range-labels"><span>0</span><span>300</span><span>600+</span></div>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="fs-label">Aircraft Category</div>
+      <div class="tag-grid">
+        <div class="tag on" onclick="this.classList.toggle('on')">Heavy (H)</div>
+        <div class="tag on" onclick="this.classList.toggle('on')">Medium (M)</div>
+        <div class="tag" onclick="this.classList.toggle('on')">Light (L)</div>
+        <div class="tag" onclick="this.classList.toggle('on')">Super (J)</div>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="fs-label">Airlines</div>
+      <div class="tag-grid">
+        <div class="tag on" onclick="this.classList.toggle('on')">CAL</div>
+        <div class="tag on" onclick="this.classList.toggle('on')">EVA</div>
+        <div class="tag on" onclick="this.classList.toggle('on')">TTW</div>
+        <div class="tag" onclick="this.classList.toggle('on')">JAL</div>
+        <div class="tag" onclick="this.classList.toggle('on')">ANA</div>
+        <div class="tag" onclick="this.classList.toggle('on')">CPA</div>
+        <div class="tag" onclick="this.classList.toggle('on')">SIA</div>
+        <div class="tag" onclick="this.classList.toggle('on')">+ More</div>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="fs-label">Alert Status</div>
+      <div class="tag-grid">
+        <div class="tag success on" onclick="this.classList.toggle('on')">Nominal</div>
+        <div class="tag warn on" onclick="this.classList.toggle('on')">Anomaly</div>
+        <div class="tag danger" onclick="this.classList.toggle('on')">Emergency</div>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="fs-label">Map Layer</div>
+      <div class="layer-grid">
+        <div class="layer-card on" onclick="this.classList.toggle('on')"><div class="layer-emoji">🗺</div><div class="layer-name">Routes</div></div>
+        <div class="layer-card" onclick="this.classList.toggle('on')"><div class="layer-emoji">🌧</div><div class="layer-name">Weather</div></div>
+        <div class="layer-card on" onclick="this.classList.toggle('on')"><div class="layer-emoji">✈</div><div class="layer-name">Labels</div></div>
+        <div class="layer-card" onclick="this.classList.toggle('on')"><div class="layer-emoji">🛬</div><div class="layer-name">Airports</div></div>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <button class="apply-btn">Apply Filters</button>
+      <button class="reset-btn">Reset</button>
+    </div>
+  </div>
+
+  <div class="results">
+    <div class="active-chips">
+      <div class="chip">Airborne<span class="x">✕</span></div>
+      <div class="chip">Heavy + Medium<span class="x">✕</span></div>
+      <div class="chip">CAL, EVA, TTW<span class="x">✕</span></div>
+      <div class="chip">Alt 5k–45k<span class="x">✕</span></div>
+      <div class="chip">Nominal + Anomaly<span class="x">✕</span></div>
+    </div>
+
+    <div class="results-hd">
+      <span class="results-count">127</span>
+      <span class="results-label">aircraft matching filters</span>
+    </div>
+
+    <div class="card-grid">
+      <div class="result-card nominal">
+        <div class="rc-top"><div><div class="rc-callsign">CAL107</div><div class="rc-reg">B-18357 · A330</div></div><span class="rc-status ok">Nominal</span></div>
+        <div class="rc-data">
+          <div class="rc-item"><div class="rc-item-label">Alt</div><div class="rc-item-val">FL338</div></div>
+          <div class="rc-item"><div class="rc-item-label">Speed</div><div class="rc-item-val">498 kt</div></div>
+          <div class="rc-item"><div class="rc-item-label">Hdg</div><div class="rc-item-val">037°</div></div>
+        </div>
+      </div>
+      <div class="result-card anomaly">
+        <div class="rc-top"><div><div class="rc-callsign">EVA256</div><div class="rc-reg">B-16781 · B77W</div></div><span class="rc-status warn">Anomaly</span></div>
+        <div class="rc-data">
+          <div class="rc-item"><div class="rc-item-label">Alt</div><div class="rc-item-val">FL350</div></div>
+          <div class="rc-item"><div class="rc-item-label">Speed</div><div class="rc-item-val" style="color:var(--warn)">544 kt</div></div>
+          <div class="rc-item"><div class="rc-item-label">Hdg</div><div class="rc-item-val">082°</div></div>
+        </div>
+      </div>
+      <div class="result-card emergency">
+        <div class="rc-top"><div><div class="rc-callsign">SQK7700</div><div class="rc-reg">B-58503 · B738</div></div><span class="rc-status danger">Emergency</span></div>
+        <div class="rc-data">
+          <div class="rc-item"><div class="rc-item-label">Alt</div><div class="rc-item-val" style="color:var(--danger)">FL220</div></div>
+          <div class="rc-item"><div class="rc-item-label">Speed</div><div class="rc-item-val">312 kt</div></div>
+          <div class="rc-item"><div class="rc-item-label">Hdg</div><div class="rc-item-val">355°</div></div>
+        </div>
+      </div>
+      <div class="result-card nominal">
+        <div class="rc-top"><div><div class="rc-callsign">TTW101</div><div class="rc-reg">B-28018 · A321</div></div><span class="rc-status ok">Nominal</span></div>
+        <div class="rc-data">
+          <div class="rc-item"><div class="rc-item-label">Alt</div><div class="rc-item-val">FL180</div></div>
+          <div class="rc-item"><div class="rc-item-label">Speed</div><div class="rc-item-val">320 kt</div></div>
+          <div class="rc-item"><div class="rc-item-label">Hdg</div><div class="rc-item-val">014°</div></div>
+        </div>
+      </div>
+      <div class="result-card anomaly">
+        <div class="rc-top"><div><div class="rc-callsign">CAL808</div><div class="rc-reg">B-18806 · A330</div></div><span class="rc-status warn">Anomaly</span></div>
+        <div class="rc-data">
+          <div class="rc-item"><div class="rc-item-label">Alt</div><div class="rc-item-val" style="color:var(--warn)">FL160</div></div>
+          <div class="rc-item"><div class="rc-item-label">Speed</div><div class="rc-item-val">388 kt</div></div>
+          <div class="rc-item"><div class="rc-item-label">Hdg</div><div class="rc-item-val">225°</div></div>
+        </div>
+      </div>
+      <div class="result-card nominal">
+        <div class="rc-top"><div><div class="rc-callsign">JAL804</div><div class="rc-reg">JA743J · B789</div></div><span class="rc-status ok">Nominal</span></div>
+        <div class="rc-data">
+          <div class="rc-item"><div class="rc-item-label">Alt</div><div class="rc-item-val">FL320</div></div>
+          <div class="rc-item"><div class="rc-item-label">Speed</div><div class="rc-item-val">482 kt</div></div>
+          <div class="rc-item"><div class="rc-item-label">Hdg</div><div class="rc-item-val">216°</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
