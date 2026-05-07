@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * Manages the SSE /api/events connection for planes-updated triggers and anomaly alerts.
- * Returns { sseStale } — true when the connection has been down for >8s (ignores brief reconnects).
+ * Manages the SSE /api/events connection for anomaly alerts.
+ * Returns { sseStale } — true when BOTH SSE has been down for >20s AND WebSocket
+ * has not delivered data in the last 15s. This prevents false "LIVE LOST" when
+ * SSE hiccups but the WebSocket data channel is still healthy.
+ *
+ * @param {object} opts
+ * @param {React.MutableRefObject} opts.fetchPlanesRef
+ * @param {Function} opts.setAnomalyAlerts
+ * @param {Function} opts.playSquawkAlert
+ * @param {React.MutableRefObject<number>} [opts.wsAliveRef] — updated to Date.now() on each WS batch
  */
-export function useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkAlert }) {
+export function useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkAlert, wsAliveRef }) {
     const seenAlertKeys = useRef(new Set());
     const [sseStale, setSseStale] = useState(false);
     const staleTimerRef = useRef(null);
@@ -29,6 +37,7 @@ export function useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkA
             setSseStale(false);
             try {
                 const data = JSON.parse(e.data);
+                if (data.type === 'heartbeat') return;
                 if (data.type === 'planes-updated') {
                     fetchPlanesRef.current?.();
                 } else if (data.type === 'anomalies' && data.alerts?.length > 0) {
@@ -55,13 +64,18 @@ export function useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkA
         };
 
         es.onerror = () => {
-            // Only show stale warning after 8s of sustained disconnection.
-            // Browser auto-reconnect fires onerror briefly — this debounce avoids false positives.
+            // Show LIVE LOST only after 20s of sustained SSE disconnection (5s heartbeat × 3 misses
+            // + buffer), AND only if the WebSocket data channel is also silent for >15s.
+            // This prevents false positives when SSE hiccups but WS is still delivering plane data.
             if (!staleTimerRef.current) {
                 staleTimerRef.current = setTimeout(() => {
-                    setSseStale(true);
                     staleTimerRef.current = null;
-                }, 8000);
+                    const wsAge = wsAliveRef ? Date.now() - (wsAliveRef.current || 0) : Infinity;
+                    if (wsAge > 15000) {
+                        setSseStale(true);
+                    }
+                    // If WS is alive, don't set stale — SSE dropped but data is still flowing
+                }, 20000);
             }
         };
 

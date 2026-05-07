@@ -1067,10 +1067,11 @@ app.get('/api/events', (req, res) => {
     // 立即發送当前資料快照
     res.write(`data: ${JSON.stringify({ type: 'connected', time: globalPlanesCache.time, count: globalPlanesCache.states.length })}\n\n`);
 
-    // 心跳機制：每 30 秒發送一次 ping 防止連線超時斷開
+    // 心跳機制：每 5 秒發送 data 訊息（comment ping 不觸發 onmessage，改用 data）
     const heartbeat = setInterval(() => {
-        res.write(`: ping\n\n`);
-    }, 30000);
+        try { res.write(`data: ${JSON.stringify({ type: 'heartbeat' })}\n\n`); }
+        catch (e) { sseClients.delete(res); clearInterval(heartbeat); }
+    }, 5000);
 
     // 客戶端斷開後清理
     req.on('close', () => {
@@ -5551,7 +5552,15 @@ process.on('unhandledRejection', (reason, promise) => {
 
 process.on('uncaughtException', (err) => {
     logger.error('PROCESS', `Uncaught exception: ${err.message}\n${err.stack}`);
-    process.exit(1); // Uncaught exceptions leave the process in an unknown state
+    // Gracefully notify all SSE clients before exiting, so browsers reconnect immediately
+    // rather than waiting for TCP timeout (~30s). This reduces LIVE LOST window from
+    // "restart duration + TCP timeout" down to just "restart duration".
+    try {
+        for (const client of sseClients) {
+            try { client.end(); } catch (_) {}
+        }
+    } catch (_) {}
+    process.exit(1);
 });
 
 process.on('SIGTERM', () => {

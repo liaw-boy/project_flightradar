@@ -188,6 +188,10 @@ export default function App() {
 
     const mapInstanceRef = useRef(null);
 
+    // Tracks last WebSocket PLANES_BATCH timestamp — used to suppress false LIVE LOST
+    // when SSE hiccups but the WebSocket data channel is still healthy.
+    const wsAliveRef = useRef(0);
+
     const {
         planesDict,
         planeCount,
@@ -206,7 +210,9 @@ export default function App() {
         flightHistoryRef,
         trackPointListenerRef,
         sendWorkerMessage,
-    } = useFlightData(mapInstanceRef);
+    } = useFlightData(mapInstanceRef, {
+        onWsData: () => { wsAliveRef.current = Date.now(); },
+    });
 
     // Wire live track point push — called by useFlightData when WS delivers a track_point
     // Keep trailOwnerRef in a ref so the callback doesn't become stale
@@ -227,7 +233,7 @@ export default function App() {
     // [v2.9.0] SSE EventSource — real-time server push (logic in useAnomalyStream)
     const fetchPlanesRef = useRef(fetchPlanes);
     useEffect(() => { fetchPlanesRef.current = fetchPlanes; }, [fetchPlanes]);
-    const { sseStale } = useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkAlert });
+    const { sseStale } = useAnomalyStream({ fetchPlanesRef, setAnomalyAlerts, playSquawkAlert, wsAliveRef });
 
     // Initial URL Params parsing
     const initializedUrlRef = useRef(false);

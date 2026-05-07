@@ -39,7 +39,7 @@ function _isImpossibleJump(fromLat, fromLng, toLat, toLng, dtMs) {
  * - 從 /api/stats 拉取 API 使用統計
  * - 管理 planesDict、flightHistory
  */
-export function useFlightData(mapRef) {
+export function useFlightData(mapRef, options = {}) {
     const [planesDict, setPlanesDict] = useState({});
     const [planeCount, setPlaneCount] = useState(0);
     const [airCount, setAirCount] = useState(0);
@@ -577,6 +577,7 @@ export function useFlightData(mapRef) {
             } else if (type === 'PLANES_BATCH') {
                 // Worker has already done: msgpack decode → array→object → state consolidation → debounce
                 // Main thread only: projection + trackStore + React setState (minimal work)
+                options.onWsData?.();
                 const { changed, removed = [], globalTime } = payload;
                 globalLastUpdateRef.current = globalTime;
                 setLastUpdateTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
