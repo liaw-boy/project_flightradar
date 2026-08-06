@@ -3,7 +3,7 @@ import { X, AlertTriangle, Plane as PlaneIcon, Map, Fingerprint, Activity, MapPi
 import {
     getAirlineLogoUrl, getAirlineBannerUrl, getAirlineName, getCountryIso, getCategoryName,
     getNearestAirport, formatVerticalRate, getAirportDisplayData,
-    formatLocalTime, ICAO_TO_IATA
+    formatLocalTime, ICAO_TO_IATA, getSafeCallsignParam
 } from '../utils/flightUtils';
 import { useI18n } from '../hooks/useI18n';
 import { logToServer, logger } from '../utils/logger';
@@ -78,8 +78,13 @@ export default function Sidebar({
         setIsLoadingDetails(true);
         setFusionData(null);
         
-        const callsignParam = (plane.callsign && plane.callsign.trim() && plane.callsign !== plane.icao24?.toUpperCase()) ? plane.callsign.trim() : 'N/A';
+        const callsignParam = getSafeCallsignParam(plane);
         const cached = flightDetailsCache.get(icao24);
+        if (!callsignParam) {
+            if (cached) { setFusionData(cached); }
+            setIsLoadingDetails(false);
+            return () => { isMounted = false; };
+        }
         if (cached) {
             setFusionData(cached);
             setIsLoadingDetails(false);

@@ -257,11 +257,21 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
         }
 
         const planespottersPromise = fetch(`https://api.planespotters.net/pub/photos/hex/${hex}`, {
-            headers: { 'User-Agent': 'AEROSTRAT/4.4.0 FlightTracker' },
+            // planespotters.net rejects UAs without a contact URL/email (HTTP 403)
+            headers: { 'User-Agent': 'AEROSTRAT/4.4.0 (+https://github.com/liaw-boy/project_flightradar)' },
             signal: AbortSignal.timeout(5000)
         })
-            .then(res => res.ok ? res.json() : null)
-            .catch(() => null);
+            .then(res => {
+                if (!res.ok) {
+                    logger.warn('PHOTO', `planespotters.net returned ${res.status} for ${hex}`);
+                    return null;
+                }
+                return res.json();
+            })
+            .catch(err => {
+                logger.warn('PHOTO', `planespotters.net fetch failed for ${hex}: ${err.message}`);
+                return null;
+            });
 
         const metadataWaterfall = async () => {
             // [v13.6] Enrichment Logic: Accumulate data from multiple layers

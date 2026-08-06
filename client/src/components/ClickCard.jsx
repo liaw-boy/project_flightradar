@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plane, X, ChevronRight } from 'lucide-react';
 import { dataManager } from '../services/dataManager';
 import { flightDetailsCache } from '../services/flightDetailsCache';
-import { ICAO_TO_IATA, getAirlineLogoUrl } from '../utils/flightUtils';
+import { ICAO_TO_IATA, getAirlineLogoUrl, getSafeCallsignParam } from '../utils/flightUtils';
 import './ClickCard.css';
 
 export default function ClickCard({ plane, pos, onClose, onOpenDetails }) {
@@ -15,17 +15,19 @@ export default function ClickCard({ plane, pos, onClose, onOpenDetails }) {
         prevIcaoRef.current = plane.icao24;
         setRoute(null);
 
-        const callsignParam = plane.callsign ? plane.callsign.trim() : 'UNKNOWN';
+        const callsignParam = getSafeCallsignParam(plane);
         const cached = flightDetailsCache.get(plane.icao24);
 
         Promise.all([
             dataManager.getRoute(plane.icao24, plane.callsign),
             cached
                 ? Promise.resolve(cached)
-                : fetch(`/api/flight/complete-details/${plane.icao24}/${callsignParam}`)
-                    .then(r => r.ok ? r.json() : null)
-                    .then(d => { if (d) flightDetailsCache.set(plane.icao24, d); return d; })
-                    .catch(() => null),
+                : (!callsignParam
+                    ? Promise.resolve(null)
+                    : fetch(`/api/flight/complete-details/${plane.icao24}/${callsignParam}`)
+                        .then(r => r.ok ? r.json() : null)
+                        .then(d => { if (d) flightDetailsCache.set(plane.icao24, d); return d; })
+                        .catch(() => null)),
         ]).then(([basicRoute, fusionData]) => {
             const fr = fusionData?.route || {};
             setRoute({

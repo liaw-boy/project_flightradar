@@ -170,6 +170,19 @@ const COUNTRY_ISO = {
 /**
  * 取得航空公司名稱
  */
+/**
+ * 取得可安全送進 /api/flight/complete-details/:hex/:callsign 的 callsign 參數。
+ * 地面 ADS-B 訊號常缺真呼號，部分來源會把機型代碼誤填進 callsign 欄位——
+ * 這類值等於 icao24、或不符合「2-3 碼英文字母開頭+數字」的呼號格式時一律視為無效。
+ */
+export function getSafeCallsignParam(plane) {
+    const raw = plane?.callsign ? plane.callsign.trim() : '';
+    if (!raw) return null;
+    if (raw.toUpperCase() === plane?.icao24?.toUpperCase()) return null;
+    if (!/^[A-Z]{2,3}\d/.test(raw.toUpperCase())) return null;
+    return raw;
+}
+
 export function getAirlineName(callsign) {
     if (!callsign || callsign === 'UNKNOWN') return '';
 

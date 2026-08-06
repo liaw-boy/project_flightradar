@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plane } from 'lucide-react';
 import { dataManager } from '../services/dataManager';
 import { flightDetailsCache } from '../services/flightDetailsCache';
-import { ICAO_TO_IATA, getAirlineLogoUrl } from '../utils/flightUtils';
+import { ICAO_TO_IATA, getAirlineLogoUrl, getSafeCallsignParam } from '../utils/flightUtils';
 import './HoverCard.css';
 
 /**
@@ -28,7 +28,7 @@ export default function HoverCard({ plane, pos }) {
         setDepInfo(null);
         setArrInfo(null);
 
-        const callsignParam = plane.callsign ? plane.callsign.trim() : 'UNKNOWN';
+        const callsignParam = getSafeCallsignParam(plane);
         const cachedFusion = flightDetailsCache.get(plane.icao24);
 
         Promise.all([
@@ -36,10 +36,12 @@ export default function HoverCard({ plane, pos }) {
             dataManager.getRoute(plane.icao24, plane.callsign),
             cachedFusion
                 ? Promise.resolve(cachedFusion)
-                : fetch(`/api/flight/complete-details/${plane.icao24}/${callsignParam}`)
-                    .then(r => r.ok ? r.json() : null)
-                    .then(d => { if (d) flightDetailsCache.set(plane.icao24, d); return d; })
-                    .catch(() => null)
+                : (!callsignParam
+                    ? Promise.resolve(null)
+                    : fetch(`/api/flight/complete-details/${plane.icao24}/${callsignParam}`)
+                        .then(r => r.ok ? r.json() : null)
+                        .then(d => { if (d) flightDetailsCache.set(plane.icao24, d); return d; })
+                        .catch(() => null))
         ]).then(([photos, routeData, fusionData]) => {
             if (photos && photos.length > 0) setPhoto(photos[0]);
             else setPhoto(null);
