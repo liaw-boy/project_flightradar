@@ -38,14 +38,53 @@ export function haversineKm(lat1, lon1, lat2, lon2) {
 }
 
 // ─── Path2D Vector Object Cache (with ViewBox support) ──────────────
+//
+// AIRCRAFT_CATALOG's declared `vb` (viewBox) is not trustworthy for sizing:
+// entries were hand-authored/scraped from an external SVG repo and their
+// viewBox padding is wildly inconsistent — some paths fill ~99% of their
+// declared box (A388, A225), others only ~6-50% (E300, A320, B738...).
+// Dividing a uniform target pixel size by the DECLARED viewBox therefore
+// makes some aircraft render up to ~16x larger than others at the same
+// zoom level, for no reason related to real aircraft size. We measure the
+// actual ink bounding box via a real SVG element instead and use that for
+// all scale/centering math, so every shape fills the same proportion of
+// its target size regardless of how loose its source viewBox was.
+function _measurePathBBoxes(entries) {
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    const pathEl = document.createElementNS(svgNS, 'path');
+    svg.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;visibility:hidden;';
+    svg.appendChild(pathEl);
+    document.body.appendChild(svg);
+
+    const bboxes = new Map();
+    for (const [key, entry] of entries) {
+        try {
+            pathEl.setAttribute('d', entry.d);
+            const b = pathEl.getBBox();
+            bboxes.set(key, (b.width > 0 && b.height > 0) ? [b.x, b.y, b.width, b.height] : null);
+        } catch (_) {
+            bboxes.set(key, null);
+        }
+    }
+
+    document.body.removeChild(svg);
+    return bboxes;
+}
+
 export const vectorPathsMap = new Map();
-Object.entries(paths).forEach(([key, entry]) => {
-    const vbArr = (entry.vb || "0 0 500 500").split(/\s+/).map(Number);
-    vectorPathsMap.set(key, {
-        path: new Path2D(entry.d),
-        vb: vbArr
+{
+    const entries = Object.entries(paths);
+    const measured = (typeof document !== 'undefined') ? _measurePathBBoxes(entries) : new Map();
+    entries.forEach(([key, entry]) => {
+        const declaredVb = (entry.vb || "0 0 500 500").split(/\s+/).map(Number);
+        const realBBox = measured.get(key);
+        vectorPathsMap.set(key, {
+            path: new Path2D(entry.d),
+            vb: realBBox || declaredVb, // fall back to declared viewBox if measurement failed
+        });
     });
-});
+}
 
 // Module-level enrichment guard — persists across React re-renders
 export const _enrichScheduled = new Set();
