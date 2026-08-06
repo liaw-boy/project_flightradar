@@ -2569,7 +2569,12 @@ function normalizeAcRecord(p, sourceNowMs) {
         lat:         p.lat,
         altitude:    p.alt_baro === 'ground' ? 0 : (p.alt_baro || p.alt_geom || 0),
         velocity:    p.gs != null ? p.gs * 0.51444 : null,
-        heading:     p.track || 0,
+        // p.track (ground track) is frequently null/0 while taxiing — ADS-B ground
+        // track requires movement to compute. Fall back to the aircraft's own
+        // true/magnetic heading (from its INS/magnetometer, independent of GPS
+        // motion) before giving up and defaulting to 0, which previously made
+        // every ground aircraft without a track render facing due north.
+        heading:     p.track ?? p.true_heading ?? p.mag_heading ?? 0,
         vRate:       (p.baro_rate || 0) * 0.00508,
         onGround:    p.alt_baro === 'ground' || false,
         squawk:      p.squawk || null,

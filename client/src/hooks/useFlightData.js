@@ -303,12 +303,13 @@ export function useFlightData(mapRef, options = {}) {
                         return; // skip normal interp update below
                     }
 
-                    // Lerp from the last confirmed ADS-B position to the new one.
-                    // Dead reckoning has been removed from the animation loop, so
-                    // renderLat always stays at _interpToLat once the lerp finishes —
-                    // using _interpToLat as "from" gives a clean start with no overshoot.
-                    const fromLat = existing._interpToLat ?? existing.lat;
-                    const fromLng = existing._interpToLng ?? existing.lng;
+                    // Lerp from wherever the plane is actually rendered right now, not
+                    // from the previous segment's target. If new data arrives before the
+                    // prior lerp finished (bursty network, server catch-up), curRenderLat
+                    // reflects the true on-screen position; _interpToLat would still be
+                    // the old, not-yet-reached target and cause a visible snap-back.
+                    const fromLat = curRenderLat;
+                    const fromLng = curRenderLng;
                     const interpUpdate = {
                         _interpFromLat: fromLat,
                         _interpFromLng: fromLng,
@@ -659,11 +660,13 @@ export function useFlightData(mapRef, options = {}) {
                         p.renderLat      = emaLat;
                         p.renderLng      = emaLng;
                     } else {
-                        // Lerp from last confirmed position to new EMA position.
-                        // Dead reckoning removed — icon stays at _interpToLat when idle,
-                        // so using _interpToLat as "from" is always accurate (no overshoot).
-                        p._interpFromLat = p._interpToLat ?? emaLat;
-                        p._interpFromLng = p._interpToLng ?? emaLng;
+                        // Lerp from wherever the plane is actually rendered right now
+                        // (wsRenderLat/Lng), not from the previous segment's target —
+                        // if this update arrives before the prior lerp finished, the
+                        // old target isn't where the icon is, and using it as "from"
+                        // causes a visible snap back to that stale point.
+                        p._interpFromLat = wsRenderLat;
+                        p._interpFromLng = wsRenderLng;
                         p._interpToLat   = emaLat;
                         p._interpToLng   = emaLng;
                         p._interpStartMs = now;
