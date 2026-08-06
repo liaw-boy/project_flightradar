@@ -75,9 +75,11 @@ backend/public/svg/
 
 # Data Sources & Raw Assets
 doc/
-assets/AircraftShapesSVG/
+backend/assets/AircraftShapesSVG/
 client/src/assets/AircraftShapesSVG/
 client/public/shapes/
+# External clone, kept in sync via scripts/syncVrsRoutes.js — never tracked here
+backend/data/standing-data/
 *.html
 !client/public/page-*.html
 *.log
@@ -100,3 +102,12 @@ backend/data/raw_jonty.json
 
 # Training data (large binary/CSV datasets, not for git)
 training_data/
+backend/data/routes.db-shm
+backend/data/routes.db-wal
+
+# Generated/downloaded data — rebuilt by scripts/download_data.js,
+# process_data.js, build-routes-db.js (see backend/scripts/)
+backend/data/routes.db
+backend/data/raw_openflights.dat
+backend/data/aircraft.csv.gz
+backend/data/processed/

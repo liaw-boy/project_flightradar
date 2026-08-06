@@ -7,6 +7,7 @@
 [![SQLite](https://img.shields.io/badge/Database-SQLite%203-003B57?style=flat-square&logo=sqlite)](https://www.sqlite.org/)
 [![Leaflet](https://img.shields.io/badge/Map-Leaflet%201.9-199900?style=flat-square&logo=leaflet)](https://leafletjs.com/)
 [![Playwright](https://img.shields.io/badge/Tests-Playwright-45ba4b?style=flat-square&logo=playwright)](https://playwright.dev/)
+[![Version](https://img.shields.io/badge/version-4.3.0-blue?style=flat-square)](https://github.com/liaw-boy/project_flightradar)
 
 AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系統整合 OpenSky、ADSB-Fi 等多源資料，透過二進制 WebSocket 協議與 60fps Canvas 渲染技術，提供流暢專業的雷達體驗。
 
@@ -70,11 +71,21 @@ AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系�
 - **航跡追蹤** — 顯示歷史軌跡路徑，支援 24 小時歷史回放
 - **高度色彩圖例** — ALTITUDE / TACTICAL / MONO 三種配色方案，底部顯示 ALT 色帶標籤
 
+### 歷史回放
+- **TimePlayer** — 點擊側邊欄航跡後可進行歷史軌跡回放，10 倍速播放，支援拖曳時間軸
+- **24 小時快取** — 後端追蹤點以 SQLite 儲存，前端透過 WebSocket 拉取後離線播放
+
 ### 資料融合
-- **多源整合** — OpenSky、ADSB-Fi、adsb.lol 三重冗餘，自動切換
+- **多源整合** — airplanes.live、ADSB-Fi、OpenSky 三重冗餘，自適應切換（Adaptive Primary Telemetry Resolver）
 - **機型資料庫** — Mictronics 全球 21 萬架航機資料，本地離線查詢
 - **航線解析** — VRS 靜態路線庫 + ADSB.fi 即時路線 + AeroDataBox 時刻表
-- **機場資料庫** — 全球機場 ICAO/IATA 代碼 + 座標快查
+- **機場資料庫** — 全球機場 ICAO/IATA 代碼 + 座標快查（空間格狀索引，O(k)查詢）
+- **METAR 天氣** — 自動從 NOAA 抓取目的地機場即時氣象（風向、風速、溫度、原始 METAR 電文）
+
+### 飛行異常偵測
+- **即時告警引擎** — 後端持續分析全球飛機狀態，偵測低速失速、急速下墜、超低空巡航等危險模式
+- **SSE 廣播** — 異常事件透過 `/api/events` Server-Sent Events 推播至所有前端
+- **通知容器** — `NotificationContainer` 以 toast 形式顯示，含機型、呼號、異常類型
 
 ### 過濾與搜尋
 - **多維度篩選** — 高度、地速、機型代碼、軍事/商業分類
@@ -83,8 +94,19 @@ AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系�
 
 ### 個人航班記錄
 - **我的航班** — 登入後可新增、編輯、刪除個人飛行記錄
-- **登機證卡片** — 垂直卡片佈局，顯示 IATA 代碼、時間、機型、座位等資訊
-- **資料連線狀態** — SSE 斷線超過 8 秒顯示 `LIVE LOST`；後台資料過期顯示 `DATA STALE`
+- **登機證卡片** — 垂直卡片佈局，顯示 IATA 代碼、時間、機型、座位、國旗等資訊
+- **統計儀表板** — 個人總里程、最常搭機型 bar chart、常飛航線 Top 5、近期航班時間線
+- **資料連線狀態** — WebSocket 斷線超過 8 秒顯示 `LIVE LOST`；後台資料過期顯示 `DATA STALE`
+
+### 行動裝置支援
+- **MobileSheet** — 底部滑出式面板，顯示飛機詳情與互動操作
+- **MobilePlaneCard** — 針對小螢幕最佳化的飛機資訊卡片
+- **響應式佈局** — 桌面側邊欄 / 手機底部 sheet 自動切換
+
+### 管理後台
+- **用戶管理** — 管理員可查看所有用戶、停用帳號、授予/撤銷管理員權限
+- **監控頁面** — 即時顯示 DB 列數、記憶體用量、API quota、各資料來源健康狀態（`/monitor`，密碼保護）
+- **效能監控** — `PerformanceMonitor` 元件顯示即時 FPS 與 JS heap 使用量
 
 ### 多國語言
 - **中英雙語** — 所有 UI 文字支援繁體中文 / English 即時切換（含統計標籤、搜尋提示）
@@ -100,17 +122,32 @@ AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系�
 | Vite | 6 | 構建工具 |
 | Leaflet | 1.9 | 地圖底圖 |
 | Canvas API | — | 飛機渲染（60fps） |
+| @msgpack/msgpack | 3 | WebSocket 二進制協議（飛機資料） |
 | Lucide React | — | 圖示系統 |
+| flag-icons | 7 | 國旗圖示 |
 | Playwright | — | E2E 測試 |
 
 ### Backend
 | 技術 | 版本 | 用途 |
 |------|------|------|
 | Node.js | 24 | 執行環境 |
-| Express | 4 | HTTP 伺服器 |
-| better-sqlite3 | 12 | 本地資料庫 |
-| SSE | — | 即時飛機推送 |
+| Express | 5.2 | HTTP 伺服器 |
+| better-sqlite3 | 12 | 本地資料庫（航跡點、用戶、航班） |
+| ws | 8 | WebSocket 伺服器（飛機即時推播） |
+| SSE | — | 異常事件推播（`/api/events`） |
+| helmet | 8 | 安全 HTTP headers |
+| compression | — | Gzip 壓縮 |
+| express-rate-limit | 8 | API 速率限制 |
+| node-cron | 4 | 定時任務（METAR、DB 清理） |
+| msgpack-lite | — | 二進制序列化（伺服器端） |
 | PM2 | — | 程序管理 |
+
+### 資料傳輸協議
+| 通道 | 協議 | 資料 |
+|------|------|------|
+| 飛機即時位置 | WebSocket + MsgPack | 全機場景，每 5s 更新 |
+| 飛行異常告警 | SSE (`/api/events`) | 危險飛行狀態廣播 |
+| 航班詳情 / 用戶 API | HTTP REST | 按需查詢 |
 
 ---
 
@@ -119,15 +156,19 @@ AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系�
 ```
 project_aerostrat/
 ├── backend/
-│   ├── server.js            # 主伺服器入口
-│   ├── db/                  # SQLite 資料庫操作
-│   ├── routes/              # API 路由
-│   ├── services/            # 資料爬取、同步任務
-│   └── data/                # 機型、機場、路線等靜態資料
+│   ├── server.js            # 主伺服器入口（含所有 API routes）
+│   ├── socketEngine.js      # WebSocket 引擎（飛機推播）
+│   ├── crawler.js           # 多源 ADS-B 資料抓取
+│   ├── accountPool.js       # OpenSky 帳號池管理
+│   ├── controllers/         # authController、userFlightsController 等
+│   ├── db/                  # SQLite 存取層（trackStore、metarStore 等）
+│   ├── workers/             # 背景任務
+│   ├── data/                # 機型、機場、航線等靜態資料
+│   └── __tests__/           # API 整合測試
 ├── client/
 │   ├── src/
-│   │   ├── components/      # React 元件
-│   │   ├── hooks/           # 自訂 Hook（含 useI18n、useAnomalyStream）
+│   │   ├── components/      # React 元件（含 TimePlayer、MobileSheet、AdminPanel）
+│   │   ├── hooks/           # useI18n、useAnomalyStream、useFlightData 等
 │   │   ├── utils/           # 飛機圖示、渲染工具
 │   │   ├── services/        # DataManager、IndexedDB 快取
 │   │   └── workers/         # flightWorker.js
@@ -207,7 +248,7 @@ APP_URL=http://localhost:3000
 # API Keys（選填，增加資料來源）
 AERODATABOX_API_KEY=
 
-# 監控頁面密碼
+# 監控頁面密碼（/monitor 路徑）
 MONITOR_PASSWORD=<自設密碼>
 
 # CORS（逗號分隔）
