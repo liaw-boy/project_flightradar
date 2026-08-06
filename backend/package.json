@@ -8,13 +8,15 @@
     "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan.bold,magenta.bold\" \"node server.js\" \"cd client && npm run dev\"",
     "seed-shapes": "node scripts/seedAircraftShapes.js",
     "sync-mictronics": "node scripts/syncMictronics.js",
-    "test": "jest --forceExit --testTimeout=15000",
+    "test": "jest --forceExit --testTimeout=15000 --runInBand",
     "test:watch": "jest --watch --forceExit",
     "test:coverage": "jest --coverage --forceExit"
   },
   "jest": {
     "testEnvironment": "node",
-    "testMatch": ["**/__tests__/**/*.test.js"],
+    "testMatch": [
+      "**/__tests__/**/*.test.js"
+    ],
     "testTimeout": 15000
   },
   "keywords": [],
@@ -22,7 +24,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.0",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.8.0",
     "compression": "^1.8.1",
@@ -35,13 +37,12 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "msgpack-lite": "^0.1.26",
-    "multer": "^2.1.1",
     "node-cache": "^5.1.2",
     "node-cron": "^4.2.1",
     "passport": "^0.7.0",
     "passport-facebook": "^3.0.0",
     "passport-google-oauth20": "^2.0.0",
-    "ws": "^8.19.0"
+    "ws": "^8.21.2"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

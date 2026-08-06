@@ -351,7 +351,7 @@ const loginLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many login attempts, please wait a minute.' },
-    keyGenerator: (req) => ipKeyGenerator(req),
+    keyGenerator: (req) => ipKeyGenerator(req.ip),
 });
 
 const registerLimiter = rateLimit({
@@ -360,7 +360,7 @@ const registerLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many registration attempts, please try again later.' },
-    keyGenerator: (req) => ipKeyGenerator(req),
+    keyGenerator: (req) => ipKeyGenerator(req.ip),
 });
 
 const refreshLimiter = rateLimit({
@@ -369,7 +369,19 @@ const refreshLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many refresh requests.' },
-    keyGenerator: (req) => ipKeyGenerator(req),
+    keyGenerator: (req) => ipKeyGenerator(req.ip),
+});
+
+// ── Monitor login rate limiter: 5 attempts / minute / IP — same policy as
+// the user login endpoint. The /monitor backend can delete users and grant
+// admin, so brute force here is at least as dangerous as the user login path. ──
+const monitorLoginLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many login attempts, please wait a minute.' },
+    keyGenerator: (req) => ipKeyGenerator(req.ip),
 });
 
 // ── User Auth ────────────────────────────────────────────────────────────────
@@ -2119,10 +2131,23 @@ app.get('/monitor', (req, res) => {
 
 app.use('/monitor', express.urlencoded({ extended: false }));
 
-app.post('/monitor/login', (req, res) => {
-    const { password } = req.body;
+function isMonitorPasswordValid(password) {
     const expected = process.env.MONITOR_PASSWORD;
-    if (!expected || password !== expected) {
+    if (!expected || typeof password !== 'string') return false;
+    const expectedBuf = Buffer.from(expected);
+    const givenBuf = Buffer.from(password);
+    // Buffers must be equal length for timingSafeEqual; pad the shorter one
+    // so the comparison itself still runs in constant time either way.
+    if (givenBuf.length !== expectedBuf.length) {
+        crypto.timingSafeEqual(expectedBuf, Buffer.alloc(expectedBuf.length));
+        return false;
+    }
+    return crypto.timingSafeEqual(givenBuf, expectedBuf);
+}
+
+app.post('/monitor/login', monitorLoginLimiter, (req, res) => {
+    const { password } = req.body;
+    if (!isMonitorPasswordValid(password)) {
         return res.status(401).send(getLoginHtml('密碼錯誤，請再試一次'));
     }
     const token = crypto.randomBytes(32).toString('hex');
@@ -3542,97 +3567,6 @@ app.get('/api/planes/bbox', async (req, res) => {
     });
 });
 
-// ==========================================
-// [Phase 12] High-Availability Live Data Pump & DB-First Trace
-// ==========================================
-app.get('/api/flights/live', async (req, res) => {
-    try {
-        // 1. 【快取攔截】：從 masterStateMap 取得即時資料（取代 MongoDB ActiveFlight）
-        if (masterStateMap && masterStateMap.size > 0 && globalPlanesCache.time > Date.now() / 1000 - 10) {
-            const states = Array.from(masterStateMap.values()).map(p => ({
-                hex: p.icao24, callsign: p.callsign,
-                lat: p.lat, lon: p.lng, alt: p.altitude, hdg: p.heading, gs: p.velocity
-            }));
-            return res.json({ source: 'master_state_map', states });
-        }
-
-        // 2. 【主線程 (OpenSky)】— 統一走 fetchOpenSky() 避免雙路徑維護
-        let standardizedStates = [];
-        let sourceUsed = 'opensky';
-
-        try {
-            const { states } = await fetchOpenSky({ lamin: 20, lomin: 120, lamax: 26, lomax: 124 });
-            standardizedStates = states.map(p => ({
-                hex: p.icao24,
-                callsign: p.callsign,
-                lat: p.lat,
-                lon: p.lng,
-                alt: p.altitude,
-                gs: Math.round((p.velocity || 0) / 0.51444),
-                hdg: p.heading
-            }));
-        } catch (error) {
-            // 3. 【備援切換 (ADSB.lol)】
-            console.warn(`⚠️ [LIVE PUMP] OpenSky failed (${error.message}). Switching to ADSB.lol...`);
-            sourceUsed = 'adsb_lol';
-            const fallbackRes = await fetch('https://api.adsb.lol/v2/lat/25.0330/lon/121.5654/dist/250', {
-                signal: AbortSignal.timeout(5000)
-            });
-            if (!fallbackRes.ok) throw new Error(`ADSB.lol failed with status ${fallbackRes.status}`);
-            const data = await fallbackRes.json();
-            standardizedStates = (data.ac || [])
-                .filter(p => p.lat != null && p.lon != null)
-                .map(p => ({
-                    hex: p.hex,
-                    callsign: (p.flight || '').trim(),
-                    lat: p.lat,
-                    lon: p.lon,
-                    alt: p.alt_baro || p.alt_geom || 0,
-                    gs: p.gs || 0,
-                    hdg: p.track || 0
-                }));
-        }
-
-        // 4. 【資料正規化與寫入 DB】
-        if (standardizedStates.length > 0) {
-            const now = new Date();
-            const bulkOps = standardizedStates.map(p => ({
-                updateOne: {
-                    filter: { hex: p.hex },
-                    update: {
-                        $set: {
-                            callsign: p.callsign,
-                            current_state: {
-                                lat: p.lat,
-                                lon: p.lon,
-                                alt: p.alt,
-                                hdg: p.hdg,
-                                gs: p.gs
-                            },
-                            last_updated_at: now
-                        },
-                        $push: {
-                            trace: {
-                                $each: [{ lat: p.lat, lon: p.lon, alt: p.alt, timestamp: now }],
-                                $slice: -500 // Limit to 500 points
-                            }
-                        }
-                    },
-                    upsert: true
-                }
-            }));
-
-            // masterStateMap is the authoritative store — no separate DB write needed
-        }
-
-        // 5. 回傳最新陣列給前端
-        res.json({ source: sourceUsed, states: standardizedStates });
-
-    } catch (err) {
-        console.error('❌ [LIVE PUMP ERROR]', err.message);
-        res.status(500).json({ error: 'Live data unavailable' });
-    }
-});
 
 // ICAO24 hex 格式驗證 helper（6 位十六進位）
 function isValidIcao24(hex) {
@@ -5092,246 +5026,7 @@ app.get('/api/metar', async (req, res) => {
         res.status(500).json({ error: "Internal server error" });
     }
 });
-// [API 404 防火牆]
-// ==========================================
-// [v9.0] Ultimate Data Fusion Endpoint (DB-First)
-// ==========================================
-app.get('/api/flight/complete-details/:hex/:callsign', async (req, res) => {
-    const hex = req.params.hex.toLowerCase();
-    const callsign = req.params.callsign.toUpperCase().trim();
-    const cacheKey = `complete_${hex}_${callsign}`;
-
-    try {
-        // 1. Memory Cache Check (Fastest)
-        const cached = flightDetailsCache.get(cacheKey);
-        if (cached) return res.json({ ...cached, source: 'memory_cache' });
-
-        // 2. [DB READ-THROUGH] Local Knowledge Base
-        // Aircraft: SQLite mictronics_aircraft (sync, weekly refresh, ~400k records)
-        // Route:    MongoDB Route (still needed — no SQLite route table)
-        const micRec  = MictronicsDb.lookup(hex);
-        const dbAircraft = micRec ? {
-            icao24: micRec.icao24, hex: micRec.icao24,
-            registration: micRec.registration,
-            type: micRec.typecode, typecode: micRec.typecode,
-            model: micRec.model,
-            operator: micRec.operator,
-            airline: null, manufacturer: null, photo_url: null,
-            _syncedAt: micRec.synced_at   // unix seconds
-        } : null;
-        const dbRoute = await Route.findOne({ callsign }).catch(() => null);
-
-        const AIRCRAFT_TTL = 30 * 24 * 60 * 60 * 1000; // 30 Days
-        const ROUTE_TTL = 4 * 60 * 60 * 1000;         // 4 Hours — cargo/charter airlines swap legs frequently
-
-        // SQLite uses synced_at (unix seconds); no lastUpdated date object
-        const isAircraftFresh = dbAircraft && (Date.now() - (dbAircraft._syncedAt ?? 0) * 1000 < AIRCRAFT_TTL);
-        const isRouteFresh = dbRoute && (Date.now() - new Date(dbRoute.lastUpdated).getTime() < ROUTE_TTL);
-
-        // --- Step 2: Live state from in-memory cache (no extra API call) ---
-        // globalPlanesCache is refreshed every 10s. Avoids burning OpenSky quota
-        // for individual per-aircraft queries on every sidebar click.
-        const liveState = (globalPlanesCache.states || []).find(p => p.icao24 === hex) || null;
-
-        if (!liveState) {
-            // Aircraft not in live cache (landed / left coverage) — return static DB data if available
-            if (dbAircraft) {
-                return res.json({
-                    hex, callsign,
-                    aircraft: { registration: dbAircraft.registration, model: dbAircraft.model, typecode: dbAircraft.typecode, operator: dbAircraft.operator },
-                    route: { origin: { iata: dbRoute?.origin_iata || 'N/A' }, destination: { iata: dbRoute?.destination_iata || '---' } },
-                    status: null,
-                    source: 'db_static_only'
-                });
-            }
-            return res.status(404).json({ error: 'AIRCRAFT_NOT_IN_CACHE' });
-        }
-
-        // Route cache is only valid when the plane is on the ground — an airborne aircraft
-        // may be on a different leg than the one previously cached for this callsign.
-        const isOnGround = liveState.onGround === true;
-        const isRouteTrusted = isRouteFresh && isOnGround;
-
-        // Local DB has full data — skip all external enrichment API calls
-        const hasLocalAircraftData = isAircraftFresh && dbAircraft?.registration && dbAircraft.registration !== 'N/A'
-            && dbAircraft.typecode;
-        if (hasLocalAircraftData && isRouteTrusted) {
-            console.log(`🎯 [DB HIT] Serving cached knowledge for ${hex}/${callsign}`);
-            const fused = await finalizeProfile(dbAircraft, dbRoute, liveState);
-            flightDetailsCache.set(cacheKey, fused);
-            return res.json({ ...fused, source: 'db_knowledge_base' });
-        }
-
-        console.log(`⚡ [ENRICHMENT] DB Stale or Missing. Fusing external sources...`);
-        // --- Step 3: [RESILIENT ENRICHMENT] ---
-        // Skip hexdb + planespotters if local DB already has registration & typecode
-        // (populated by Mictronics sync or Airplanes.Live write-back). Only fetch what's missing.
-        const needsAircraftMeta = !hasLocalAircraftData;
-        const enrichment = await Promise.allSettled([
-            // a. HexDB — only if local DB doesn't already have the aircraft specs
-            needsAircraftMeta
-                ? fetch(`https://hexdb.io/api/v1/aircraft/${hex}`, { signal: AbortSignal.timeout(3000) }).then(r => r.ok ? r.json() : null).catch(() => null)
-                : Promise.resolve(null),
-            // b. Planespotters — only if we don't already have a photo cached
-            (!dbAircraft?.photo_url && !dbAircraft?.photoData?.url)
-                ? fetch(`https://api.planespotters.net/pub/photos/hex/${hex}`, { headers: { 'User-Agent': 'AEROSTRAT/5.0' }, signal: AbortSignal.timeout(4000) }).then(r => r.ok ? r.json() : null).catch(() => null)
-                : Promise.resolve(null),
-            // c. Route — only if airborne (grounded aircraft route doesn't matter) and not recently cached
-            (!isOnGround && !isRouteFresh)
-                ? fetchRouteData(callsign)
-                : Promise.resolve(null),
-            // d. adsb.fi — skip if local DB already has full data
-            needsAircraftMeta
-                ? fetch(`https://opendata.adsb.fi/api/v2/hex/${hex}`, { headers: { 'User-Agent': 'AEROSTRAT/5.0' }, signal: AbortSignal.timeout(4000) })
-                    .then(r => r.ok ? r.json() : null)
-                    .then(d => (d?.aircraft?.[0] || null))
-                    .catch(() => null)
-                : Promise.resolve(null)
-        ]);
-
-        const [hexRes, photoRes, routeRes, adsbfiRes] = enrichment.map(r => r.status === 'fulfilled' ? r.value : null);
-        if (adsbfiRes) console.log(`✈️ [ADSB.FI] ${hex}: r=${adsbfiRes.r} t=${adsbfiRes.t} op=${adsbfiRes.ownOp}`);
-
-        // --- Step 4: [PERSISTENCE] Smart Normalization & Upsert ---
-        // Priority: adsb.fi (live enriched) > hexdb.io (static) > local DB
-        const aircraftUpdate = {
-            hex,
-            icao24: hex,
-            type: adsbfiRes?.t || hexRes?.typeName || hexRes?.type || dbAircraft?.type || dbAircraft?.model || 'Unknown',
-            model: adsbfiRes?.desc || hexRes?.typeName || hexRes?.type || dbAircraft?.model || 'Unknown',
-            type_code: adsbfiRes?.t || hexRes?.type || dbAircraft?.type_code || null,
-            typecode: adsbfiRes?.t || hexRes?.type || dbAircraft?.typecode || null,
-            manufacturer: hexRes?.icaotype || dbAircraft?.manufacturer || 'Unknown',
-            registration: adsbfiRes?.r || hexRes?.registration || dbAircraft?.registration || 'N/A',
-            airline: adsbfiRes?.ownOp || hexRes?.operator || dbAircraft?.airline || dbAircraft?.registered_owner || 'Unknown Airline',
-            operator: adsbfiRes?.ownOp || hexRes?.operator || dbAircraft?.operator || 'Unknown Airline',
-            registered_owner: adsbfiRes?.ownOp || hexRes?.operator || dbAircraft?.registered_owner || 'Unknown Airline',
-            photo_url: photoRes?.photos?.[0]?.thumbnail_large?.src || dbAircraft?.photo_url || dbAircraft?.photoData?.url || null,
-            lastUpdated: new Date()
-        };
-        const updatedAircraft = await Aircraft.findOneAndUpdate({ $or: [{ icao24: hex }, { hex: hex }] }, { $set: aircraftUpdate }, { upsert: true, returnDocument: 'after' });
- 
-        // Flight Route Info (VRS standing-data as final fallback, skip multi-leg entries)
-        const vrsRoute = VrsDb.lookup(callsign);
-        const vrsIsMultiLeg = vrsRoute?.raw ? (vrsRoute.raw.match(/-/g) || []).length > 1 : false;
-        const validIata = (v) => v && v !== 'N/A' && v !== '---' ? v : null;
-        const routeUpdate = {
-            callsign,
-            origin_iata:         validIata(routeRes?.origin_iata) || validIata(dbRoute?.origin_iata) || (!vrsIsMultiLeg && vrsRoute?.from) || 'N/A',
-            origin_name:         routeRes?.origin_name         || dbRoute?.origin_name         || null,
-            origin_city:         routeRes?.origin_city         || dbRoute?.origin_city         || null,
-            destination_iata:    validIata(routeRes?.destination_iata) || validIata(dbRoute?.destination_iata) || (!vrsIsMultiLeg && vrsRoute?.to) || '---',
-            destination_icao:    routeRes?.destination_icao    || dbRoute?.destination_icao    || null,
-            destination_name:    routeRes?.destination_name    || dbRoute?.destination_name    || null,
-            destination_city:    routeRes?.destination_city    || dbRoute?.destination_city    || null,
-            departure_time:      routeRes?.departure_time      || dbRoute?.departure_time      || null,
-            departure_terminal:  routeRes?.departure_terminal  || dbRoute?.departure_terminal  || null,
-            departure_gate:      routeRes?.departure_gate      || dbRoute?.departure_gate      || null,
-            arrival_time:        routeRes?.arrival_time        || dbRoute?.arrival_time        || null,
-            arrival_terminal:    routeRes?.arrival_terminal    || dbRoute?.arrival_terminal    || null,
-            arrival_gate:        routeRes?.arrival_gate        || dbRoute?.arrival_gate        || null,
-            flightNumber:        routeRes?.flightNumber        || dbRoute?.flightNumber        || null,
-            flightStatus:        routeRes?.flightStatus        || dbRoute?.flightStatus        || null,
-            airline_name:        routeRes?.airline_name        || dbRoute?.airline_name        || null,
-            estimated_arrival_time: routeRes?.estimated_arrival_time || dbRoute?.estimated_arrival_time || null,
-            departureAirport:    routeRes?.origin_iata         || dbRoute?.departureAirport,
-            arrivalAirport:      routeRes?.destination_iata    || dbRoute?.arrivalAirport,
-            lastUpdated: new Date()
-        };
-        const updatedRoute = await Route.findOneAndUpdate({ callsign }, { $set: routeUpdate }, { upsert: true, returnDocument: 'after' });
- 
-        // --- Step 5: [FINAL ASSEMBLY] Profile Serialization & Caching ---
-        const finalProfile = await finalizeProfile(updatedAircraft, updatedRoute, liveState);
-        flightDetailsCache.set(cacheKey, finalProfile);
-        res.json({ ...finalProfile, source: 'api_fusion_complete' });
-
-    } catch (err) {
-        console.error(`❌ [ULIMATE FUSION] Critical Failure for ${hex}:`, err.message);
-        res.status(500).json({ error: 'Data fusion failed' });
-    }
-});
-
-/**
- * Helper to finalize the profile object and inject weather
- */
-async function finalizeProfile(aircraft, route, liveState = null) {
-    // Lookup departure and arrival airport coordinates in parallel
-    let weather = null;
-    let depCoords = null;
-    let arrCoords = null;
-
-    const depIata = route.origin_iata || route.departureAirport;
-    const destIata = route.destination_iata || route.arrivalAirport;
-
-    // Lookup coords from globalAirportsDB (keyed by IATA)
-    if (depIata && depIata !== 'N/A' && depIata !== '---') {
-        const ap = globalAirportsDB[depIata];
-        if (ap?.lat && ap?.lng) depCoords = { lat: ap.lat, lng: ap.lng, iata: depIata, name: ap.name };
-    }
-    if (destIata && destIata !== '---' && destIata !== 'N/A') {
-        const ap = globalAirportsDB[destIata];
-        if (ap?.lat && ap?.lng) arrCoords = { lat: ap.lat, lng: ap.lng, iata: destIata, name: ap.name };
-        if (ap?.icao) {
-            try {
-                weather = await fetchMetar(ap.icao);
-                if (weather && route.callsign) {
-                    Route.updateOne({ callsign: route.callsign }, { $set: { destination_weather: weather } }).catch(() => null);
-                }
-            } catch (e) {}
-        }
-    }
-
-    return {
-        hex: aircraft.hex || aircraft.icao24,
-        callsign: route.callsign,
-        status: {
-            alt: liveState?.altitude || 0,
-            gs: liveState?.velocity || 0,
-            track: liveState?.heading || 0,
-            lat: liveState?.lat || 0,
-            lon: liveState?.lng || 0,
-            squawk: liveState?.squawk || '0000',
-            onGround: !!liveState?.onGround,
-            timestamp: liveState?.lastContact || Math.floor(Date.now() / 1000)
-        },
-        route: {
-            // nested (legacy compat)
-            origin: { iata: route.origin_iata || 'N/A' },
-            destination: { iata: route.destination_iata || '---' },
-            arrival: route.estimated_arrival_time,
-            weather: weather || route.destination_weather || null,
-            // flat fields expected by Sidebar
-            origin_iata:        route.origin_iata        || null,
-            origin_name:        route.origin_name        || null,
-            origin_city:        route.origin_city        || null,
-            destination_iata:   route.destination_iata   || null,
-            destination_icao:   route.destination_icao   || null,
-            destination_name:   route.destination_name   || null,
-            destination_city:   route.destination_city   || null,
-            departure_time:     route.departure_time     || null,
-            departure_terminal: route.departure_terminal || null,
-            departure_gate:     route.departure_gate     || null,
-            arrival_time:       route.arrival_time       || null,
-            arrival_terminal:   route.arrival_terminal   || null,
-            arrival_gate:       route.arrival_gate       || null,
-            flightNumber:       route.flightNumber       || null,
-            flightStatus:       route.flightStatus       || null,
-            airline_name:       route.airline_name       || null,
-            destination_weather: weather || route.destination_weather || null,
-            depCoords,
-            arrCoords,
-        },
-        aircraft: {
-            type: aircraft.type || aircraft.model,
-            model: aircraft.model,
-            registration: aircraft.registration,
-            airline: aircraft.airline || aircraft.registered_owner,
-            manufacturer: aircraft.manufacturer,
-            photo_url: aircraft.photo_url || aircraft.photoData?.url || null
-        },
-        last_updated: aircraft.lastUpdated
-    };
-}
+// ── API 404 firewall — must stay last among /api/* routes ──────────────────
 
 
 

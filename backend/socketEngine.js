@@ -10,7 +10,10 @@ let broadcastCount = 0; // [LOG] rolling counter for throttled log output
  * Initialize WebSocket Server
  */
 function initWebSocketServer(server) {
-    wss = new WebSocket.Server({ server, path: '/ws' });
+    // maxPayload caps a single incoming frame — client only ever sends small
+    // viewport/selection messages, so 64KB is generous headroom against
+    // memory-exhaustion abuse of the unauthenticated /ws endpoint.
+    wss = new WebSocket.Server({ server, path: '/ws', maxPayload: 64 * 1024 });
 
     wss.on('connection', (ws) => {
         logger.info('WS', `Client connected — total: ${wss.clients.size}`);

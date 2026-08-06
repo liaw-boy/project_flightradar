@@ -34,21 +34,31 @@ async function post(path, payload, cookie = '') {
 
 // ─────────────────────────────────────────────
 // 0. 取得認證 Cookie
+// loginLimiter is IP-scoped and shared with every other test file hitting
+// this server in the same run — if an earlier file (e.g. api.test.js's own
+// burst test) already used up the window, retry once the window resets
+// instead of failing the whole suite on a false-positive rate-limit hit.
 // ─────────────────────────────────────────────
 beforeAll(async () => {
-    const res = await fetch(`${BASE}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'stress_tester', password: 'StressTest2026!' }),
-        signal: AbortSignal.timeout(10000),
-    });
+    let res;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        res = await fetch(`${BASE}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: 'stress_tester', password: 'StressTest2026!' }),
+            signal: AbortSignal.timeout(10000),
+        });
+        if (res.status !== 429) break;
+        const resetSecs = Number(res.headers.get('ratelimit-reset')) || 60;
+        await new Promise(r => setTimeout(r, (resetSecs + 1) * 1000));
+    }
     const setCookie = res.headers.get('set-cookie');
     if (setCookie) {
         authCookie = setCookie.split(';')[0]; // aerostrat_token=...
     }
     expect(res.status).toBe(200);
     expect(authCookie).toContain('aerostrat_token');
-}, 15000);
+}, 130000);
 
 // ─────────────────────────────────────────────
 // 1. 並發地圖請求（模擬 N 個用戶同時開啟地圖）
