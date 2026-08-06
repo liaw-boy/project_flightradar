@@ -296,8 +296,8 @@
 
 /* Dashboard inherits width from .right-hud via width:100% — no override needed */
 
-/* 960px 以下：移到底部浮動卡片（right-hud 已隱藏） */
-@media (max-width: 960px) {
+/* 768px 以下：移到底部浮動卡片（right-hud 已隱藏） */
+@media (max-width: 768px) {
     .dashboard {
         position: fixed;
         top: auto;

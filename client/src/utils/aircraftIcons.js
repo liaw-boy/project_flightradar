@@ -470,24 +470,18 @@ export function getAircraftScale(plane) {
 export const ICON_SCALE_VERSION = 4;
 
 /**
- * adsb.fi-style zoom-to-pixel curve with compressed category scaling.
+ * adsb.fi-style zoom-to-pixel curve.
  *
  * Tier 1 — Tactical Dot (zoom ≤ 4):  5 px  ← render loop draws arc(), NOT Path2D
  * Tier 2 — Small silhouette (z 5-8): 9-26 px
  * Tier 3 — Full silhouette  (z 9+):  30+ px, capped at 58 px
  *
- * `typeScale` is the raw SVG normalization factor from AIRCRAFT_CATALOG.
- * We apply power-curve compression so narrow-body vs wide-body differs by
- * only ~12% (adsb.fi reference), not 30%+ as with linear multiplication.
- *
- * Reference: B738 / A320 → catalog scale ≈ 1.45 → renders at 1.00× base.
- * Compression formula: base × REF × (typeScale / REF)^0.45
- *   LIGHT/HELI (1.00) → 0.84×  e.g. zoom9 → 37px
- *   NARROW     (1.45) → 1.00×  e.g. zoom9 → 44px  ← reference
- *   WIDE       (1.89) → 1.12×  e.g. zoom9 → 49px  (+12%)
- *   JUMBO B744 (1.88) → 1.12×  e.g. zoom9 → 49px
- *   JUMBO A380 (2.33) → 1.22×  e.g. zoom9 → 54px  (+23%)
- *   A225       (2.58) → 1.28×  e.g. zoom9 → 56px  (+27%)
+ * All aircraft render at the same pixel size per zoom level — `_typeScale`
+ * (the per-typecode catalog scale from getAircraftScale) is accepted for
+ * call-site compatibility but intentionally unused. A previous version had
+ * per-category size compression here (narrow vs wide vs jumbo); it was
+ * removed. Re-add deliberately if per-type sizing is wanted again, rather
+ * than reviving unused-but-still-threaded-through params.
  */
 const _SCALE_REF = 1.45; // B738 / A320 catalog scale — rendered as 1× base
 export function getDrawSize(_plane, zoom, _typeScale = 1.0) {

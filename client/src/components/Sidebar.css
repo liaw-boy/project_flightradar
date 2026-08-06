@@ -1253,8 +1253,8 @@
     display: none;
 }
 
-/* 手機 / 平板底部抽屜（對齊 HUD 消失點 960px） */
-@media (max-width: 960px) {
+/* 手機 / 平板底部抽屜（對齊 HUD 消失點 768px） */
+@media (max-width: 768px) {
     /* Backdrop: semi-transparent overlay so tapping outside closes the drawer */
     .sidebar-backdrop {
         display: block;
@@ -1315,7 +1315,7 @@
 }
 
 /* 橫向手機/平板：底部抽屜高度縮小避免擋住地圖 */
-@media (max-width: 960px) and (orientation: landscape) {
+@media (max-width: 768px) and (orientation: landscape) {
     .sidebar {
         height: 80vh;
         max-height: calc(100dvh - var(--topbar-h));

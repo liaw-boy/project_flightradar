@@ -523,7 +523,7 @@
 }
 
 /* Responsive Design: Right HUD */
-@media (max-width: 960px) {
+@media (max-width: 768px) {
     .right-hud {
         display: none !important;
     }
@@ -541,7 +541,7 @@
 }
 
 /* Responsive Design: Anomaly Panel */
-@media (max-width: 960px) {
+@media (max-width: 768px) {
     .anomaly-panel {
         right: 16px;
         width: min(300px, calc(100vw - 32px));

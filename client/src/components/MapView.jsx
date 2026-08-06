@@ -1420,8 +1420,17 @@ export default function MapView({
                         }
                         ctx.restore();
                     } else {
-                        // Skip pre-warmed SVG in light mode (Tier 2 has baked-in colors)
-                        const dynImg = mapLayerRef.current !== 'light' ? getDynamicImage(activeTypecode, isSelected) : null;
+                        // Tier 2 images are pre-colored once per typecode (perf: O(1) lookup
+                        // in the 60fps loop) and only ever baked as TACTICAL-yellow —
+                        // they can't reflect per-plane state. Skip them whenever the
+                        // rendered color would differ from that baked yellow: light map
+                        // mode, non-TACTICAL scheme, on-ground (grey), or emergency (red).
+                        // Falls through to Tier 3, which colors correctly per plane.
+                        const tier2ColorMatches = mapLayerRef.current !== 'light'
+                            && _planeScheme === 'TACTICAL'
+                            && !plane.onGround
+                            && !plane.isEmergency;
+                        const dynImg = tier2ColorMatches ? getDynamicImage(activeTypecode, isSelected) : null;
                         if (dynImg && dynImg.complete) {
                             // ── Tier 2: 1:1 Exact SVG (pre-warmed, has built-in white outline)
                             ctx.save();

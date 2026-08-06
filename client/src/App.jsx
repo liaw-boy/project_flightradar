@@ -62,9 +62,13 @@ export default function App() {
     const [selectedIcao24, setSelectedIcao24] = useState(null);
     const [showFullSidebar, setShowFullSidebar] = useState(false);
     const [showSidebar, setShowSidebar] = useState(false);
-    const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 960);
+    // Mobile/desktop layout switch — must stay in sync with the 768px breakpoint
+    // used by MobileSheet.css, MapView.jsx, and every other component's own
+    // media queries. A mismatch here previously created a 769-960px dead zone
+    // where neither the desktop Sidebar nor the mobile MobileSheet rendered.
+    const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
     useEffect(() => {
-        const mq = window.matchMedia('(max-width: 960px)');
+        const mq = window.matchMedia('(max-width: 768px)');
         const handler = (e) => setIsMobile(e.matches);
         mq.addEventListener('change', handler);
         return () => mq.removeEventListener('change', handler);
