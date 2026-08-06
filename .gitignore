@@ -39,6 +39,7 @@ metar-cache.json
 routes-cache.json
 quota-cache.json
 aircraft-cache.json
+backend/data/sync-status.json
 audit_report_log.txt
 audit_utf8.txt
 
