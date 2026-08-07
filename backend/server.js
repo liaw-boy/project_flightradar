@@ -191,6 +191,7 @@ function debounce(fn, delayMs) {
 
 const app = express();
 app.set('trust proxy', 1); // Fix ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+app.disable('x-powered-by'); // Don't advertise the framework/version to every response
 const PORT = config.PORT;
 
 // ==========================================
@@ -208,6 +209,60 @@ app.use(cors({
 }));
 app.use(compression()); // [v2.9.0] Gzip
 app.use(logger.httpMiddleware); // [LOG] HTTP request logging (skips high-freq endpoints)
+
+// [v3.0] Security Headers — MUST run before any static/SPA route registration
+// below. This used to sit after the static file + SPA fallback routes, which
+// meant Express resolved and answered every request for index.html and every
+// bundled JS/CSS asset before helmet ever ran — the actual page users load
+// shipped with no CSP, no HSTS, no X-Frame-Options, no nosniff at all. Only
+// /api/* JSON responses (which register after this point) ever got these
+// headers. Confirmed live via `curl -I` against both the document and an API
+// route before this fix: the API response carried the full helmet header
+// set, the document response carried none of it.
+// img-src includes map tile providers (CartoCD, ArcGIS, OpenTopoMap) + Planespotters CDN for aircraft photos.
+// script-src keeps 'unsafe-inline' because Vite injects module-preload inline scripts at build time.
+// connect-src 'self' covers same-origin XHR, fetch, SSE, and WebSocket (ws/wss same-origin).
+// [Photo Fix] airport-data.com was missing here even though /api/photos/:icao24's
+// fallback chain (and adsbdb's url_photo, wired in as a further fallback in
+// flightController.js) both return airport-data.com image URLs. The backend was
+// successfully fetching and returning those URLs, but the browser silently
+// blocked every <img src> pointed at them — no network request, no onload, no
+// error surfaced to the app — so the sidebar just sat on its loading/placeholder
+// state forever for any aircraft whose only hit came from that source.
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc:            ["'self'"],
+            scriptSrc:             ["'self'", "'unsafe-inline'"],
+            styleSrc:              ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            fontSrc:               ["'self'", "https://fonts.gstatic.com"],
+            imgSrc:                ["'self'", "data:", "blob:",
+                                    "https://*.cartocdn.com",
+                                    "https://server.arcgisonline.com",
+                                    "https://tile.opentopomap.org",
+                                    "https://*.planespotters.net",
+                                    // Planespotters serves its actual photo images from a
+                                    // completely different domain than its API host — not a
+                                    // subdomain of planespotters.net, so the entry above never
+                                    // covered it. Every real photo the API successfully found
+                                    // was silently dropped by the browser's own CSP enforcement.
+                                    "https://*.plnspttrs.net",
+                                    "https://airport-data.com"],
+            connectSrc:            ["'self'"],
+            workerSrc:             ["'self'", "blob:"],
+            frameSrc:              ["'none'"],
+            objectSrc:             ["'none'"],
+            baseUri:               ["'self'"],
+        },
+    },
+    crossOriginEmbedderPolicy: false, // Needed for Leaflet tile img cross-origin
+    // The /api/svg, /airline-logos, /airline-banners routes below explicitly
+    // set Access-Control-Allow-Origin: * for cross-origin embedding — helmet's
+    // default Cross-Origin-Resource-Policy: same-origin would silently block
+    // that regardless of the ACAO header (CORP is enforced independently by
+    // the browser), so it's relaxed globally to match that existing intent.
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 
 // [v5.0.0] Production static file serving — built frontend from public-react/
 // In development, Vite dev server handles the frontend on port 3005.
@@ -286,31 +341,6 @@ app.get('/airline-logos/*splat', (req, res) => res.status(204).end());
 app.get('/airline-banners/*splat', (req, res) => res.status(204).end());
 
 
-// [v3.0] Security Headers
-// img-src includes map tile providers (CartoCD, ArcGIS, OpenTopoMap) + Planespotters CDN for aircraft photos.
-// script-src keeps 'unsafe-inline' because Vite injects module-preload inline scripts at build time.
-// connect-src 'self' covers same-origin XHR, fetch, SSE, and WebSocket (ws/wss same-origin).
-app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc:            ["'self'"],
-            scriptSrc:             ["'self'", "'unsafe-inline'"],
-            styleSrc:              ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-            fontSrc:               ["'self'", "https://fonts.gstatic.com"],
-            imgSrc:                ["'self'", "data:", "blob:",
-                                    "https://*.cartocdn.com",
-                                    "https://server.arcgisonline.com",
-                                    "https://tile.opentopomap.org",
-                                    "https://*.planespotters.net"],
-            connectSrc:            ["'self'"],
-            workerSrc:             ["'self'", "blob:"],
-            frameSrc:              ["'none'"],
-            objectSrc:             ["'none'"],
-            baseUri:               ["'self'"],
-        },
-    },
-    crossOriginEmbedderPolicy: false, // Needed for Leaflet tile img cross-origin
-}));
 // General API rate limiter
 const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -750,7 +780,7 @@ app.get('/api/flight-details/:hex/:callsign', async (req, res) => {
             signal: AbortSignal.timeout(4000)
         }).then(r => r.ok ? r.json() : null).catch(() => null),
 
-        // e. [Internal Cache] Local MongoDB metadata (Phase 7 Correction Priority)
+        // e. [Internal Cache] Local Aircraft store metadata (Phase 7 Correction Priority)
         Aircraft.findOne({ icao24: hex }) .catch(() => null)
     ]);
 
@@ -2061,7 +2091,7 @@ function requireAdminAccess(req, res, next) {
     const token = cookieToken || headerToken;
     if (token) {
         try {
-            const payload = require('jsonwebtoken').verify(token, process.env.JWT_SECRET);
+            const payload = require('jsonwebtoken').verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
             if (payload.is_admin) return next();
         } catch {}
     }
@@ -2117,7 +2147,7 @@ function isAdminAuthed(req) {
     const token = cookieToken || headerToken;
     if (!token) return false;
     try {
-        const payload = require('jsonwebtoken').verify(token, process.env.JWT_SECRET);
+        const payload = require('jsonwebtoken').verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
         return !!payload.is_admin;
     } catch { return false; }
 }
@@ -2261,15 +2291,19 @@ app.put('/monitor/api/users/:id/admin', requireMonitorAuth, (req, res) => {
 // Public ping — no auth required, used by health checks and tests
 app.get('/api/ping', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
+// Shared with the startup catch-up checks below — a single definition so the
+// freshness badge and the "should I resync on boot" decision can't drift.
+const DATA_FRESHNESS_THRESHOLDS = {
+    mictronics: 9 * 24 * 3600 * 1000,   // 9 days (weekly job)
+    vrs:        2 * 24 * 3600 * 1000,   // 2 days (daily job)
+    tdx:        25 * 3600 * 1000,        // 25 hours (daily at 4am)
+    metar:      2 * 3600 * 1000,        // 2 hours (runs every 1 hour)
+};
+
 // Data freshness — public, used by frontend to show persistent stale badges
 // A job is "stale" if it has never succeeded, or last success was >THRESHOLD ago
 app.get('/api/data-freshness', (req, res) => {
-    const THRESHOLDS = {
-        mictronics: 9 * 24 * 3600 * 1000,   // 9 days (weekly job)
-        vrs:        2 * 24 * 3600 * 1000,   // 2 days (daily job)
-        tdx:        25 * 3600 * 1000,        // 25 hours (daily at 4am)
-        metar:      2 * 3600 * 1000,        // 2 hours (runs every 1 hour)
-    };
+    const THRESHOLDS = DATA_FRESHNESS_THRESHOLDS;
     const all  = syncLog.getAll();
     const now  = Date.now();
     const jobs = {};
@@ -2430,37 +2464,218 @@ const cbReset = (k, count, latency) => {
     sourceHealth[k] = { cbUntil: 0, consecutiveFails: 0, lastOk: Date.now(), lastCount: count, lastLatency: latency };
 };
 
+// A source held open by its circuit breaker used to fail silently — the skip
+// path logged nothing, so a permanently dead upstream (adsb.fi's /snapshot
+// started returning 403) looked identical to a healthy one in the logs.
+// Report it, throttled per source so a long outage doesn't flood the log.
+const CB_LOG_THROTTLE_MS = 10 * 60_000;
+const _cbLoggedAt = {};
+function logSuppressedSource(key) {
+    const now = Date.now();
+    if (now - (_cbLoggedAt[key] || 0) < CB_LOG_THROTTLE_MS) return;
+    _cbLoggedAt[key] = now;
+    const until = sourceHealth[key]?.cbUntil || now;
+    const fails = sourceHealth[key]?.consecutiveFails || 0;
+    logger.warn('SYNC', `${key} suppressed by circuit breaker — ${Math.ceil((until - now) / 60_000)} min left, ${fails} consecutive failures`);
+}
+
+// ── ICAO 24-bit address classification ────────────────────────────────────
+// A real ICAO address is exactly 6 hex digits. '000000' / '000001' / 'ffffff'
+// are unassigned sentinels that misconfigured feeders emit — '000001' alone
+// had accumulated 8,149 phantom flight sessions, as if one aircraft had flown
+// 8,149 separate legs.
+const RESERVED_ICAO24 = new Set(['000000', '000001', 'ffffff']);
+const isRealIcao24 = hex =>
+    typeof hex === 'string' && /^[0-9a-f]{6}$/.test(hex) && !RESERVED_ICAO24.has(hex);
+
+// adsb.lol (ADSBexchange format) prefixes non-ICAO targets — TIS-B and ADS-R
+// ground rebroadcasts — with '~'. They carry no registry-resolvable address,
+// so no lookup can ever give them a type, registration or operator. They stay
+// on the live map (they are real traffic, ~0.5% of the feed) but are kept out
+// of session/track persistence, where they had produced 217k junk sessions.
+const isNonIcaoTarget = hex => typeof hex === 'string' && hex.startsWith('~');
+
+// ADS-B "signal source" labels — not aircraft types. These come from the
+// `type` field on some feeder formats (as opposed to `t`, the real typecode)
+// and previously got written into typecode by mistake (`p.t || p.type`,
+// fixed in normalizeAcRecord). The bug is fixed at the point of ingest, but
+// polluted values from before the fix still sit in aircraft_cache.json and
+// get read back in here via Aircraft.find()/aircraftMetadataIndex — without
+// this guard, one bad cached value keeps re-entering masterStateMap and
+// getting written straight back out via the Phase 1 writeback below,
+// refreshing its timestamp and making it look "current" forever.
+const SIGNAL_SOURCE_LABELS = /^(adsb|adsr|tisb|mlat|other|unknown|mode)/i;
+const isValidTypecode = tc => typeof tc === 'string' && tc.length > 0 && !SIGNAL_SOURCE_LABELS.test(tc);
+
 // ── Merge helper ───────────────────────────────────────────────────────────
 // strategy='upsert': full replacement (Tier 1 global baseline)
 // strategy='merge' : keep existing fields, only update non-null new values (Tier 2/3 overlays)
+// Positional fields subject to time/plausibility arbitration below. Every
+// other field (squawk, callsign, enrichment, isMil, ...) is always allowed
+// to update regardless of position freshness — only the "where is it"
+// component gets held back when it's suspect.
+const POSITION_FIELDS = ['lat', 'lng', 'heading', 'altitude', 'velocity', 'onGround'];
+
+// Root cause of the "moves forward then snaps back" symptom users saw: Tier 1
+// (global adsb.lol baseline, 5s) and Tier 2 (per-viewport airplanes.live/
+// re-api overlay, 5s) both write the same icao24 into masterStateMap with no
+// coordination — this was confirmed live by capturing 4 minutes of WS traffic
+// and finding aircraft with two DIFFERENT positions reported for the same
+// nominal second. Previously mergeStates() was pure last-writer-wins keyed
+// only on server receive time (`now`), so whichever fetch happened to finish
+// last on the event loop won, independent of which one actually measured the
+// aircraft's position more recently. Track-point history inherited the same
+// corruption, since ingestTrackPoints() reads straight out of this map.
+//
+// Two independent guards, because they catch different failure modes:
+//  1. Monotonic posTime — rejects genuinely stale data that arrives late
+//     (out-of-order delivery). Confirmed to fully eliminate that class.
+//  2. Implied-speed sanity check — for updates that DO have a newer posTime,
+//     catches two sources disagreeing about the same instant (same/adjacent
+//     timestamp, different coordinates) by cross-checking the position delta
+//     against the aircraft's own reported velocity. A pure timestamp check
+//     can't order these away because they aren't actually out of order.
+const IMPLIED_SPEED_FLOOR_MPS = 15; // below this, GPS/quantization noise alone can look "too fast" — don't flag
+const IMPLIED_SPEED_RATIO = 3;      // implied speed must exceed 3x the aircraft's own reported speed to be rejected
+const REVERSAL_MIN_DIST_M = 60;     // below this, bearing is too noisy to mean anything — don't flag
+const REVERSAL_ANGLE_DEG = 120;     // displacement bearing vs reported heading disagreeing by more than this = reversal
+
+function initialBearingDeg(lat1, lon1, lat2, lon2) {
+    const toRad = d => d * Math.PI / 180;
+    const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+function angleDiffDeg(a, b) {
+    const d = Math.abs(a - b) % 360;
+    return d > 180 ? 360 - d : d;
+}
+
+function isPositionUpdateTrustworthy(existing, incoming) {
+    if (!existing || typeof existing.lat !== 'number') return true; // first sighting — nothing to compare against
+    const existingPosTime = existing.posTime;
+    const incomingPosTime = incoming.posTime;
+    if (existingPosTime == null || incomingPosTime == null) return true; // can't arbitrate without both timestamps
+
+    if (incomingPosTime < existingPosTime) return false; // guard 1: older measurement — reject outright
+
+    const dtSec = incomingPosTime - existingPosTime;
+    if (dtSec <= 0) return true; // same instant, nothing to sanity-check against
+
+    const distM = getDistance(existing.lat, existing.lng, incoming.lat, incoming.lng) * 1000;
+
+    // Guard 2: does the aircraft's own reported heading agree with the direction
+    // it apparently just moved? A real aircraft can't reverse course ~180° in a
+    // few seconds — this is what actually flagged the "moves forward then snaps
+    // back" symptom in production, catching cases a pure speed-ratio check missed
+    // (two sources disagreeing by ~2km/3s implies ~690 m/s, which is still under
+    // 3x a jet's own ~250 m/s cruise speed, so guard 3 alone let it through).
+    if (distM > REVERSAL_MIN_DIST_M && !incoming.onGround) {
+        const displacementBearing = initialBearingDeg(existing.lat, existing.lng, incoming.lat, incoming.lng);
+        const reportedHeading = typeof incoming.heading === 'number' ? incoming.heading
+            : (typeof existing.heading === 'number' ? existing.heading : null);
+        if (reportedHeading != null && angleDiffDeg(displacementBearing, reportedHeading) > REVERSAL_ANGLE_DEG) {
+            if (process.env.DEBUG_ARBITRATION) console.log(`[ARB-REJECT-BEARING] ${incoming.icao24} distM=${distM.toFixed(0)} dt=${dtSec.toFixed(1)}s bearing=${displacementBearing.toFixed(0)} heading=${reportedHeading.toFixed(0)}`);
+            return false;
+        }
+    }
+
+    // Guard 3: implied speed vastly exceeds the aircraft's own reported speed —
+    // catches same-instant conflicts a pure timestamp check can't order away.
+    const impliedMps = distM / dtSec;
+    const reportedMps = typeof incoming.velocity === 'number' ? incoming.velocity
+        : (typeof existing.velocity === 'number' ? existing.velocity : null);
+    if (reportedMps != null && impliedMps > IMPLIED_SPEED_FLOOR_MPS && impliedMps > reportedMps * IMPLIED_SPEED_RATIO) {
+        if (process.env.DEBUG_ARBITRATION) console.log(`[ARB-REJECT-SPEED] ${incoming.icao24} distM=${distM.toFixed(0)} dt=${dtSec.toFixed(1)}s impliedMps=${impliedMps.toFixed(0)} reportedMps=${reportedMps.toFixed(0)}`);
+        return false;
+    }
+    return true;
+}
+
 function mergeStates(states, strategy = 'upsert') {
     const now = Date.now();
     for (const p of states) {
         if (!p.icao24 || typeof p.lat !== 'number' || typeof p.lng !== 'number') continue;
+        // Sentinel addresses are not aircraft — drop before they reach the map.
+        if (!isRealIcao24(p.icao24) && !isNonIcaoTarget(p.icao24)) continue;
+
+        const existing = masterStateMap.get(p.icao24);
+        let record = p;
+        if (existing && !isPositionUpdateTrustworthy(existing, p)) {
+            // Keep the trusted position; still let everything else (squawk,
+            // callsign, enrichment fields) through from the new record.
+            record = { ...p };
+            for (const f of POSITION_FIELDS) record[f] = existing[f];
+            record.posTime = existing.posTime;
+        }
+
         if (strategy === 'merge') {
-            const existing = masterStateMap.get(p.icao24) || {};
-            const merged = { ...existing, ...p, _lastSeen: now };
+            const merged = { ...existing, ...record, _lastSeen: now };
             // Preserve richer metadata fields from existing if new record lacks them
-            if (!p.description && existing.description) merged.description = existing.description;
-            if (!p.year        && existing.year)        merged.year        = existing.year;
-            if (!p.typecode    && existing.typecode)    merged.typecode    = existing.typecode;
+            if (!p.description && existing?.description) merged.description = existing.description;
+            if (!p.year        && existing?.year)        merged.year        = existing.year;
+            if (!p.typecode    && existing?.typecode)    merged.typecode    = existing.typecode;
+            if (!p.operator    && existing?.operator)    merged.operator    = existing.operator;
+            if (!p.model       && existing?.model)       merged.model       = existing.model;
             masterStateMap.set(p.icao24, merged);
         } else {
-            masterStateMap.set(p.icao24, { ...p, _lastSeen: now });
+            // 'upsert' (Tier 1) previously replaced the whole record wholesale
+            // every 5s poll — raw ADS-B data has no operator/model field, so
+            // enrichAndIngest()'s MictronicsDb-sourced operator/model got
+            // silently wiped out on the very next baseline cycle, every cycle.
+            // That's why the map-wide operator merge only ever showed ~21%
+            // instead of Mictronics' actual ~80% hit rate against live
+            // traffic: only whichever planes enrichAndIngest had *just*
+          // touched, in the brief window before the next upsert, ever
+            // showed it. Position/telemetry fields still come wholesale from
+            // the new record (that data must always be fresh); only these
+            // enrichment-only fields carry forward.
+            const next = { ...record, _lastSeen: now };
+            if (!next.operator && existing?.operator) next.operator = existing.operator;
+            if (!next.model    && existing?.model)    next.model    = existing.model;
+            if (!isValidTypecode(next.typecode) && isValidTypecode(existing?.typecode)) next.typecode = existing.typecode;
+            masterStateMap.set(p.icao24, next);
         }
     }
 }
 
-// ── Prune stale planes + serialise to cache + broadcast ───────────────────
+// ── Broadcast cadence smoothing ─────────────────────────────────────────
+// Tier 1 (global baseline) and Tier 2 (viewport overlay) each poll on their
+// own independent 5s setInterval, unsynchronized with each other. Measured
+// live: the resulting WebSocket delta arrival gaps swing anywhere from
+// ~300ms to ~6800ms for the same set of aircraft, cycle to cycle — trigger-
+// based throttling (only enforcing a minimum gap) doesn't fix this, since
+// the *maximum* gap is still whatever the two unsynchronized 5s pollers
+// happen to leave between their broadcasts. The frontend derives its
+// interpolation duration from that arrival gap, so the same physical
+// movement gets animated over a 0.3s window one moment and a 6s+ window the
+// next; when two broadcasts land close together, the prior animation hasn't
+// finished before the next target arrives, which reads visually as the
+// plane snapping backward. The fix is a real fixed-cadence ticker, fully
+// decoupled from when either tier happens to fire: pruneAndBroadcast() only
+// marks state dirty; a separate setInterval flushes on a constant rhythm.
+// This fixes the delivery-side half of the "忽快忽慢/前進倒退" symptom;
+// isPositionUpdateTrustworthy() (mergeStates) fixes the data-side half.
+const BROADCAST_INTERVAL_MS = 2000;
+let _broadcastDirty = false;
+
 function pruneAndBroadcast() {
+    // Pruning + globalPlanesCache stay immediate — HTTP polling (/api/planes/bbox)
+    // and other in-process consumers should never see stale-by-design data.
     const cutoff = Date.now() - PLANE_TTL_MS;
     for (const [id, p] of masterStateMap) {
         if ((p._lastSeen || 0) < cutoff) masterStateMap.delete(id);
     }
     const states = Array.from(masterStateMap.values());
     globalPlanesCache = { states, time: Math.floor(Date.now() / 1000), stale: false };
-    broadcastPlanes(states, globalPlanesCache.time);
+    _broadcastDirty = true; // picked up by the flush ticker below
 }
+
+setInterval(() => {
+    if (!_broadcastDirty) return;
+    _broadcastDirty = false;
+    broadcastPlanes(globalPlanesCache.states, globalPlanesCache.time);
+}, BROADCAST_INTERVAL_MS);
 
 // ==========================================
 // [v2.8.4] Spatial Grid Index (空間格狀索引)
@@ -2553,6 +2768,44 @@ async function fetchOpenSky(params = {}) {
     });
 }
 
+// ── OpenSky global baseline fallback ──────────────────────────────────────
+// Last resort for Tier 1: runs only when both adsb.lol and adsb.fi return
+// nothing. OpenSky bills credits per states/all call, so this is throttled
+// independently of the 5s baseline cadence — a multi-minute upstream outage
+// costs a handful of calls, not one every five seconds.
+const OPENSKY_FALLBACK_MIN_GAP_MS = 30_000;
+let _lastOpenSkyFallbackAt = 0;
+
+async function fetchOpenSkyBaselineFallback() {
+    if (cbOpen('opensky')) {
+        logSuppressedSource('opensky');
+        return [];
+    }
+    const now = Date.now();
+    if (now - _lastOpenSkyFallbackAt < OPENSKY_FALLBACK_MIN_GAP_MS) return [];
+    _lastOpenSkyFallbackAt = now;
+
+    const t0 = performance.now();
+    try {
+        const { states } = await fetchOpenSky();
+        const usable = (states || []).filter(
+            p => p.icao24 && typeof p.lat === 'number' && typeof p.lng === 'number'
+        );
+        const ms = Math.round(performance.now() - t0);
+        cbReset('opensky', usable.length, ms);
+        logger.info('SYNC', `OpenSky fallback engaged: ${usable.length} planes | ${ms}ms`);
+        return usable;
+    } catch (e) {
+        const msg = e?.message || String(e);
+        // Quota exhaustion and rate limits both mean "stop asking for a while".
+        if (msg.includes('429') || msg.includes('503') || /credit|quota/i.test(msg)) {
+            cbTrip('opensky');
+        }
+        logger.warn('SYNC', `OpenSky fallback failed: ${msg}`);
+        return [];
+    }
+}
+
 /**
  * [v10.3] Shared normalizer for all adsb-format sources (adsb.lol, adsb.fi, airplanes.live).
  * All three return the same ADSBexchange v2 compatible format with `ac[]` array.
@@ -2560,8 +2813,12 @@ async function fetchOpenSky(params = {}) {
  */
 // sourceNowMs: the API response's own `now` field (ms). Used to compute the true
 // position timestamp regardless of server-clock drift between sources.
+const EMERGENCY_SQUAWKS = new Set(['7500', '7600', '7700']);
+
 function normalizeAcRecord(p, sourceNowMs) {
     const nowSec = (sourceNowMs != null ? sourceNowMs : Date.now()) / 1000;
+    const squawk = p.squawk || null;
+    const posTime = p.seen_pos != null ? (nowSec - p.seen_pos) : null;
     return {
         icao24:      p.hex?.toLowerCase(),
         callsign:    (p.flight || '').trim(),
@@ -2577,8 +2834,19 @@ function normalizeAcRecord(p, sourceNowMs) {
         heading:     p.track ?? p.true_heading ?? p.mag_heading ?? 0,
         vRate:       (p.baro_rate || 0) * 0.00508,
         onGround:    p.alt_baro === 'ground' || false,
-        squawk:      p.squawk || null,
-        typecode:    p.t || p.type || null,
+        squawk,
+        // isEmergency and lastContact were never set here, even though the
+        // WebSocket delta wire format has always carried both fields — every
+        // ADS-B-sourced plane silently sent `undefined` for them, so 7500/
+        // 7600/7700 never lit up the emergency indicator on the frontend.
+        isEmergency: EMERGENCY_SQUAWKS.has(squawk),
+        lastContact: Math.floor(posTime != null ? posTime : nowSec),
+        // p.type is the ADS-B *signal source* label (adsb_icao/tisb_other/
+        // mlat/...), not an aircraft type — only p.t is ever a real typecode.
+        // Falling back to p.type here was writing values like "tisb_other"
+        // into the aircraft metadata cache as if they were the model, which
+        // then blocked every downstream metadata lookup from ever retrying.
+        typecode:    p.t || null,
         registration: p.r || null,
         operator:    p.ownOp || null,
         description: p.desc || null,
@@ -2588,7 +2856,7 @@ function normalizeAcRecord(p, sourceNowMs) {
         isMil:       !!(p.mil || p.dbFlags === 1),
         // posTime: actual position measurement time (seconds). Derived from the
         // source's own clock to avoid server-clock vs feeder-clock drift issues.
-        posTime:     p.seen_pos != null ? (nowSec - p.seen_pos) : null,
+        posTime,
     };
 }
 
@@ -2639,7 +2907,7 @@ async function fetchAdsbFi(lat, lon, dist = 250) {
 }
 
 /**
- * [Time Series] Helper to ingest raw plane data into MongoDB
+ * [Time Series] Helper to ingest raw plane data into SQLite (track_points)
  * Standardizes format, lowercases ICAO24, and filters out corrupted coordinates.
  */
 // [v6.0] Ingestion telemetry counters
@@ -2661,6 +2929,9 @@ async function ingestTrackPoints(states, timeUnix) {
 
     for (const p of states) {
         if (typeof p.lat !== 'number' || typeof p.lng !== 'number') continue;
+        // Only registry-resolvable aircraft get sessions and track history.
+        // TIS-B/ADS-R targets still render live; they just aren't persisted.
+        if (!isRealIcao24(String(p.icao24 || '').toLowerCase())) continue;
 
         const icao24 = p.icao24.toLowerCase();
         const callsign = (p.callsign || 'N/A').toUpperCase().trim();
@@ -2954,7 +3225,8 @@ async function fetchGlobalBaseline() {
             cbReset('adsb.lol', lolStates.length, Math.round(performance.now() - t0));
         } else {
             const msg = lolR.reason?.message || '';
-            if (msg !== 'CB open') {
+            if (msg === 'CB open') logSuppressedSource('adsb.lol');
+            else {
                 if (msg.includes('429') || msg.includes('503')) cbTrip('adsb.lol');
                 logger.warn('SYNC', `adsb.lol failed: ${msg}`);
             }
@@ -2966,7 +3238,8 @@ async function fetchGlobalBaseline() {
             cbReset('adsb.fi-snap', fiStates.length, Math.round(performance.now() - t0));
         } else {
             const msg = fiR.reason?.message || '';
-            if (msg !== 'CB open') {
+            if (msg === 'CB open') logSuppressedSource('adsb.fi-snap');
+            else {
                 if (msg.includes('403')) cbTrip('adsb.fi-snap', 60 * 60_000);
                 else if (msg.includes('429')) cbTrip('adsb.fi-snap');
                 logger.warn('SYNC', `adsb.fi-snap failed: ${msg}`);
@@ -2974,8 +3247,18 @@ async function fetchGlobalBaseline() {
         }
 
         // Prefer adsb.lol; fall back to adsb.fi instantly (data already fetched)
-        const states = lolStates.length > 0 ? lolStates : fiStates;
-        const source  = lolStates.length > 0 ? 'adsb.lol' : (fiStates.length > 0 ? 'adsb.fi-snap' : '');
+        let states = lolStates.length > 0 ? lolStates : fiStates;
+        let source = lolStates.length > 0 ? 'adsb.lol' : (fiStates.length > 0 ? 'adsb.fi-snap' : '');
+
+        // Tier 1c: both ADS-B aggregators came back empty — fall back to OpenSky.
+        // Credit-metered, so it throttles itself rather than following the 5s loop.
+        if (states.length === 0) {
+            const osStates = await fetchOpenSkyBaselineFallback();
+            if (osStates.length > 0) {
+                states = osStates;
+                source = 'opensky';
+            }
+        }
 
         if (states.length === 0) {
             logger.warn('SYNC', 'Global baseline: all sources failed — using stale cache');
@@ -2983,7 +3266,9 @@ async function fetchGlobalBaseline() {
             return;
         }
 
-        mergeStates(states, 'upsert');
+        // OpenSky carries no typecode/registration/operator — merge so the
+        // enrichment already collected from adsb.lol survives the outage.
+        mergeStates(states, source === 'opensky' ? 'merge' : 'upsert');
         pruneAndBroadcast();
         logger.info('SYNC', `✅ Global baseline: ${states.length} planes | source: ${source} | ${Math.round(performance.now()-t0)}ms`);
 
@@ -3076,8 +3361,16 @@ async function fetchViewportOverlay() {
         if (vpStates.length > 0) {
             mergeStates(vpStates, 'merge');  // merge: preserve existing desc/year/typecode
             pruneAndBroadcast();
-            // Also ingest track points for viewport aircraft (6s resolution vs 25s global)
-            ingestTrackPoints(vpStates, Math.floor(Date.now() / 1000)).catch(() => {});
+            // Ingest the post-arbitration positions from masterStateMap, not
+            // the raw vpStates — mergeStates() may have rejected a stale or
+            // implausible position for a given aircraft this cycle, and
+            // ingesting vpStates directly bypassed that check entirely,
+            // writing the same backend-vs-backend position conflicts that
+            // caused live-map jitter straight into permanent track history.
+            const arbitratedVpStates = vpStates
+                .map(p => masterStateMap.get(p.icao24))
+                .filter(Boolean);
+            ingestTrackPoints(arbitratedVpStates, Math.floor(Date.now() / 1000)).catch(() => {});
             logger.debug('SYNC', `Viewport overlay: ${vpStates.length} planes | sources: ${vpSources.join('+')} | ${Math.round(performance.now()-t0)}ms`);
         }
     } catch (e) {
@@ -3162,24 +3455,31 @@ async function enrichAndIngest() {
                 _aircraftWriteCooldown.set(p.icao24, now);
                 return true;
             })
-            .map(p => ({
-                updateOne: {
-                    filter: { $or: [{ icao24: p.icao24 }, { hex: p.icao24 }] },
-                    update: {
-                        $set: Object.fromEntries([
-                            ['icao24', p.icao24], ['hex', p.icao24],
-                            p.registration && ['registration', p.registration],
-                            p.typecode     && ['typecode',      p.typecode],
-                            p.typecode     && ['type_code',     p.typecode],
-                            p.operator     && ['operator',      p.operator],
-                            p.operator     && ['airline',       p.operator],
-                            p.description  && ['description',   p.description],
-                            p.year         && ['year',          p.year],
-                        ].filter(Boolean)),
+            .map(p => {
+                // Defense in depth against the same class of bug this cache
+                // already got polluted by once — never persist a signal-source
+                // label as if it were a typecode, regardless of how p.typecode
+                // ended up set this cycle.
+                const typecode = isValidTypecode(p.typecode) ? p.typecode : null;
+                return {
+                    updateOne: {
+                        filter: { $or: [{ icao24: p.icao24 }, { hex: p.icao24 }] },
+                        update: {
+                            $set: Object.fromEntries([
+                                ['icao24', p.icao24], ['hex', p.icao24],
+                                p.registration && ['registration', p.registration],
+                                typecode       && ['typecode',      typecode],
+                                typecode       && ['type_code',     typecode],
+                                p.operator     && ['operator',      p.operator],
+                                p.operator     && ['airline',       p.operator],
+                                p.description  && ['description',   p.description],
+                                p.year         && ['year',          p.year],
+                            ].filter(Boolean)),
+                        },
+                        upsert: true,
                     },
-                    upsert: true,
-                },
-            }));
+                };
+            });
         if (writebackOps.length > 0) Aircraft.bulkWrite(writebackOps, { ordered: false })
             .catch(err => logger.warn('SYNC', `Aircraft writeback failed: ${err.message}`));
 
@@ -3198,9 +3498,11 @@ async function enrichAndIngest() {
         let enrichedCount = 0;
         finalStates.forEach(p => {
             const k = p.icao24.toLowerCase();
-            let tc = p.typecode || metaMap.get(k);
+            let tc = isValidTypecode(p.typecode) ? p.typecode : null;
+            if (!tc && isValidTypecode(metaMap.get(k))) tc = metaMap.get(k);
             if (!tc && aircraftMetadataIndex?.has(k)) {
-                tc = aircraftMetadataIndex.get(k);
+                const idxTc = aircraftMetadataIndex.get(k);
+                if (isValidTypecode(idxTc)) tc = idxTc;
                 if (p.callsign && p.callsign !== 'UNKNOWN') triggerBackgroundResolution(k, p.callsign);
             }
             if (tc) { p.typecode = tc; enrichedCount++; }
@@ -3209,6 +3511,22 @@ async function enrichAndIngest() {
                 if (!p.registration && reg.registration) p.registration = reg.registration;
                 if (!p.operator && (reg.owner || reg.operatorCallsign))
                     p.operator = reg.owner || reg.operatorCallsign;
+            }
+            // Mictronics has 73%/76%/99.9% operator/model/registration coverage
+            // (vs the in-memory AircraftStore's ~4% operator coverage above,
+            // which only ever gets populated from the live ADS-B ownOp field).
+            // This was previously only queried on a single-plane detail click
+            // (getCompleteDetailsInternal) — every plane in the map-wide bbox
+            // view showed no airline at all. A lookup here is a local indexed
+            // SQLite read (~6μs each; 7,000 planes ≈ 44ms measured), nowhere
+            // near expensive enough to justify skipping it map-wide.
+            if (!p.operator || !p.model || !isValidTypecode(p.typecode)) {
+                const mict = MictronicsDb.lookup(k);
+                if (mict) {
+                    if (!p.operator && mict.operator) p.operator = mict.operator;
+                    if (!p.model && mict.model) p.model = mict.model;
+                    if (!isValidTypecode(p.typecode) && isValidTypecode(mict.typecode)) p.typecode = mict.typecode;
+                }
             }
         });
 
@@ -3535,7 +3853,7 @@ const isFreshQuota = accountPool.loadCache(QUOTA_CACHE_FILE);
     setTimeout(fetchSpecialCategories, 3_000);
 })();
 
-// [Surgical Patch] 極簡化 BBox 路由：整合 MongoDB 飛機情報融合
+// [Surgical Patch] 極簡化 BBox 路由：整合 Aircraft store 飛機情報融合
 app.get('/api/planes/bbox', async (req, res) => {
     const { lamin, lomin, lamax, lomax } = req.query;
 
@@ -3641,7 +3959,7 @@ try {
     console.warn('⚠️ Failed to load static metadata:', e.message);
 }
 
-// [REMOVED] saveMetadataCache is no longer needed with MongoDB
+// [REMOVED] saveMetadataCache is no longer needed with the Aircraft store
 
 app.get('/api/metadata/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
@@ -3719,7 +4037,7 @@ app.get('/api/metadata/:icao24', async (req, res) => {
             lastUpdated: new Date()
         };
 
-        // 存入 MongoDB
+        // 存入 Aircraft store
         await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true });
         resolveMissingData(icao24, 'metadata');
         console.log(`${getTime()} 📦 [METADATA] Cached to DB: ${icao24} = ${metadata.typecode} ${metadata.model}`);
@@ -3742,7 +4060,7 @@ app.post('/api/metadata/batch', async function (req, res) {
     if (filteredIcaos.length === 0) return res.json({ fetched: 0 });
 
     try {
-        // 從 MongoDB 找出已有的
+        // 從 Aircraft store 找出已有的
         const existingInDb = await Aircraft.find({ icao24: { $in: filteredIcaos.map(id => id.toLowerCase()) } });
         const existingIcaos = new Set(existingInDb.map(a => a.icao24));
 
@@ -3944,7 +4262,7 @@ try {
     console.error('❌ [ROUTE DB] Failed to load route JSONs:', e.message);
 }
 
-// [REMOVED] routesDatabase is migrated to MongoDB
+// [REMOVED] routesDatabase is migrated to RouteStore
 
 const routeCache = new Map(); // icao24 -> { data, timestamp } (動態航線快取)
 const ROUTE_CACHE_TTL = 1800000; // 30 分鐘
@@ -4200,7 +4518,7 @@ app.get('/api/aircraft/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
 
     try {
-        // [DB CACHE] 1. 優先從 MongoDB 讀取
+        // [DB CACHE] 1. 優先從 RouteStore 讀取
         let [aircraft, registry] = await Promise.all([
             Aircraft.findOne({ icao24 }),
             AircraftRegistry.findOne({ icao24 }) .catch(() => null)
@@ -4493,7 +4811,7 @@ app.get('/api/route/:icao24', async (req, res, next) => {
                         source: 'spatial_inference'
                     };
                     routeCache.set(icao24, { data: inferredResult, timestamp: Date.now() });
-                    // Do NOT persist spatial_inference to MongoDB — avoids poisoning the route cache
+                    // Do NOT persist spatial_inference to RouteStore — avoids poisoning the route cache
                     return res.json(inferredResult);
                 }
             } else {
@@ -4521,7 +4839,7 @@ app.get('/api/route/external', async (req, res) => {
     console.log(`🌐 [EXT-ROUTE] Processing request for ${callsign}...`);
 
     try {
-        // --- Layer 1: MongoDB Cache (DB HIT) ---
+        // --- Layer 1: RouteStore Cache (DB HIT) ---
         const dbRoute = await Route.findOne({ callsign });
         if (dbRoute && dbRoute.departureAirport && dbRoute.arrivalAirport) {
             console.log(`🎯 [DB HIT] Found complete route for ${callsign}: ${dbRoute.departureAirport} -> ${dbRoute.arrivalAirport}`);
@@ -5140,23 +5458,35 @@ cron.schedule('17 3 * * 0', () => {
     }
 })();
 
-// On startup: sync Mictronics if table is empty; if data exists, mark syncLog ok
+// On startup: sync Mictronics if the table is empty OR the last sync is older
+// than the same staleness threshold /api/data-freshness uses.
+//
+// The previous version of this check only asked "does data exist at all" —
+// if the table had rows, it just marked syncLog ok and moved on, with no age
+// check. That is precisely how this went unnoticed for two months: the
+// weekly cron (Sun 03:17 Asia/Taipei) can only fire while the process is
+// alive, and this service's systemd unit was broken (wrong working
+// directory) for an extended period. Every cron window it missed was silent
+// — the table still had 464k old rows, so this check kept reporting "ok".
 (async () => {
     try {
         const existing  = MictronicsDb.count();
-        const lastEntry = syncLog.get('mictronics');
-        if (existing >= 10000) {
-            // Data is present — mark as ok if syncLog has no record (e.g. after fresh restart)
-            if (!lastEntry?.lastSuccess) {
-                syncLog.success('mictronics', `${existing} aircraft (existing DB)`);
-            }
-            const lastSync = MictronicsDb.lastSyncTime();
-            const ageDays  = lastSync ? ((Date.now() / 1000 - lastSync) / 86400).toFixed(1) : '?';
-            console.log(`✅ [Mictronics] ${existing.toLocaleString()} aircraft in DB (last sync: ${ageDays}d ago)`);
+        const lastSync  = MictronicsDb.lastSyncTime();
+        const ageMs     = lastSync ? Date.now() - lastSync * 1000 : Infinity;
+        const isStale   = ageMs > DATA_FRESHNESS_THRESHOLDS.mictronics;
+
+        if (existing >= 10000 && !isStale) {
+            // Always refresh syncLog to the DB's real synced_at — not just
+            // when syncLog has no record — so a syncLog entry that predates
+            // an out-of-band resync (e.g. a manual `node scripts/syncMictronics.js`
+            // run) doesn't keep reporting the old, stale timestamp forever.
+            syncLog.success('mictronics', `${existing} aircraft (last synced ${(ageMs / 86400000).toFixed(1)}d ago)`);
+            console.log(`✅ [Mictronics] ${existing.toLocaleString()} aircraft in DB (last sync: ${(ageMs / 86400000).toFixed(1)}d ago)`);
         } else {
-            console.log(`🛫 [Mictronics] Table empty (${existing} rows) — running initial sync...`);
+            const reason = existing < 10000 ? `table has only ${existing} rows` : `data is ${(ageMs / 86400000).toFixed(1)}d old`;
+            console.log(`🛫 [Mictronics] ${reason} — running catch-up sync...`);
             syncLog.start('mictronics');
-            const r = await syncMictronics(msg => console.log(msg));
+            const r = await syncMictronics(msg => console.log(msg), { force: true });
             syncLog.success('mictronics', `${r?.total || r?.count || 0} aircraft`);
         }
     } catch (e) {
@@ -5165,22 +5495,65 @@ cron.schedule('17 3 * * 0', () => {
     }
 })();
 
-// On startup: if VRS routes.db has data but syncLog never recorded success, mark as ok
+// On startup: sync VRS routes if routes.db is empty/missing OR stale.
+// Same bug as Mictronics above — the old guard (`if lastSuccess, bail`)
+// meant a two-month-old success record permanently blocked any catch-up.
 (function checkVrsOnStartup() {
-    const lastEntry = syncLog.get('vrs');
-    if (lastEntry?.lastSuccess) return;
     try {
-        const Database = require('better-sqlite3');
-        const vrsDbPath = path.join(__dirname, 'data', 'routes.db');
-        if (!require('fs').existsSync(vrsDbPath)) return;
-        const db = new Database(vrsDbPath, { readonly: true });
-        const row = db.prepare('SELECT COUNT(*) as c FROM routes').get();
-        db.close();
-        if (row.c > 0) {
-            syncLog.success('vrs', `${row.c} routes (existing DB)`);
-            logger.info('VRS', `Startup: marked ok — ${row.c} routes already in DB`);
+        const lastEntry = syncLog.get('vrs');
+        const ageMs = lastEntry?.lastSuccess ? Date.now() - new Date(lastEntry.lastSuccess).getTime() : Infinity;
+        const isStale = ageMs > DATA_FRESHNESS_THRESHOLDS.vrs;
+
+        let existingCount = 0;
+        try {
+            const Database = require('better-sqlite3');
+            const vrsDbPath = path.join(__dirname, 'data', 'routes.db');
+            if (require('fs').existsSync(vrsDbPath)) {
+                const db = new Database(vrsDbPath, { readonly: true });
+                existingCount = db.prepare('SELECT COUNT(*) as c FROM routes').get().c;
+                db.close();
+            }
+        } catch (_) { /* routes.db not queryable yet — treat as empty */ }
+
+        if (existingCount > 0 && !isStale) {
+            if (!lastEntry?.lastSuccess) syncLog.success('vrs', `${existingCount} routes (existing DB)`);
+            logger.info('VRS', `Startup: ${existingCount} routes, ${(ageMs / 86400000).toFixed(1)}d old — within threshold`);
+            return;
         }
-    } catch (_) {}
+
+        logger.info('VRS', `Startup: ${existingCount} routes, ${lastEntry?.lastSuccess ? (ageMs / 86400000).toFixed(1) + 'd old' : 'never synced'} — running catch-up sync...`);
+        syncLog.start('vrs');
+        syncVrsRoutes(msg => logger.info('VRS', msg))
+            .then(r => {
+                if (r.success) {
+                    VrsDb.reload();
+                    syncLog.success('vrs', 'routes updated');
+                } else {
+                    syncLog.fail('vrs', r.error || 'sync returned success=false');
+                }
+            })
+            .catch(e => {
+                logger.error('VRS', `Startup catch-up sync failed: ${e.message}`);
+                syncLog.fail('vrs', e.message);
+            });
+    } catch (e) {
+        logger.error('VRS', `Startup check failed: ${e.message}`);
+    }
+})();
+
+// On startup: run TDX crawl if it has never succeeded or is stale. Unlike
+// Mictronics/VRS there was previously no startup check at all for TDX — only
+// the 04:00 Asia/Taipei cron — so a process that's down at 4am misses a
+// whole day with no catch-up until the next scheduled window.
+(function checkTdxOnStartup() {
+    const lastEntry = syncLog.get('tdx');
+    const ageMs = lastEntry?.lastSuccess ? Date.now() - new Date(lastEntry.lastSuccess).getTime() : Infinity;
+    if (ageMs <= DATA_FRESHNESS_THRESHOLDS.tdx) {
+        logger.info('TDX', `Startup: ${(ageMs / 3600000).toFixed(1)}h old — within threshold`);
+        return;
+    }
+    logger.info('TDX', `Startup: ${lastEntry?.lastSuccess ? (ageMs / 3600000).toFixed(1) + 'h old' : 'never synced'} — running catch-up crawl...`);
+    crawlFlightSchedules();
 })();
 
 // ==========================================
@@ -5188,7 +5561,7 @@ cron.schedule('17 3 * * 0', () => {
 // ==========================================
 /**
  * Triggers a non-blocking background metadata lookup for new aircraft.
- * Uses the flightController's internal waterfall resolution to populate MongoDB.
+ * Uses the flightController's internal waterfall resolution to populate the Aircraft store.
  */
 const pendingResolutions = new Set();
 function triggerBackgroundResolution(hex, callsign) {

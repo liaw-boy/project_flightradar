@@ -3,8 +3,45 @@ const msgpack = require('msgpack-lite');
 const logger = require('./logger');
 
 let wss;
-const prevStates = new Map(); // icao24 -> state for delta encoding
+// icao24 -> { lat, lng, heading, altitude, velocity, onGround, lastContact, tuple }
+// `tuple` is the full 14-field wire row, kept alongside the diffing fields so
+// a bbox snapshot (new connection / viewport pan) can be served straight from
+// this map without recomputing anything.
+const prevStates = new Map();
 let broadcastCount = 0; // [LOG] rolling counter for throttled log output
+
+function buildTuple(plane) {
+    return [
+        plane.icao24, plane.lat, plane.lng, plane.heading, plane.altitude,
+        plane.velocity, plane.onGround, plane.category, plane.isEmergency,
+        plane.callsign, plane.vRate, plane.squawk, plane.lastContact,
+        plane.typecode || null
+    ];
+}
+
+function inBbox(bbox, lat, lng) {
+    return !bbox || (
+        lat >= bbox.lamin && lat <= bbox.lamax &&
+        lng >= bbox.lomin && lng <= bbox.lomax
+    );
+}
+
+// Send every currently-known plane inside a client's bbox as a one-off delta.
+function sendBboxSnapshot(client) {
+    if (client.readyState !== 1 /* OPEN */) return;
+    const updates = [];
+    for (const [, entry] of prevStates) {
+        if (inBbox(client.bbox, entry.lat, entry.lng)) updates.push(entry.tuple);
+    }
+    if (updates.length === 0) return;
+    const payload = msgpack.encode({
+        type: 'delta',
+        time: Math.floor(Date.now() / 1000),
+        updates,
+        removed: [],
+    });
+    try { client.send(payload); } catch (_) { /* client disconnected mid-send */ }
+}
 
 /**
  * Initialize WebSocket Server
@@ -34,6 +71,12 @@ function initWebSocketServer(server) {
                 if (msg.type === 'SET_VIEWPORT') {
                     ws.bbox = msg.payload;
                     logger.debug('WS', `Viewport set: lamin=${ws.bbox.lamin?.toFixed(2)} lamax=${ws.bbox.lamax?.toFixed(2)} lomin=${ws.bbox.lomin?.toFixed(2)} lomax=${ws.bbox.lomax?.toFixed(2)}`);
+                    // Deltas only cover planes whose state changed since the last
+                    // broadcast. A plane parked or holding steady in an area the
+                    // client just panned into never "changes" again, so without
+                    // this it stays invisible until it moves >~11m. Send every
+                    // known plane in the new bbox once, as a synthetic delta.
+                    sendBboxSnapshot(ws);
                 } else if (msg.type === 'SELECT_PLANE') {
                     ws.selectedIcao24 = msg.icao24 || null;
                     logger.debug('WS', `Client selected plane: ${ws.selectedIcao24 || '(none)'}`);
@@ -74,14 +117,8 @@ function broadcastPlanes(states, timestamp) {
         const prev = prevStates.get(icao24);
         let changed = false;
 
-        if (!prev) {
-            changed = true;
-            prevStates.set(icao24, {
-                lat: plane.lat, lng: plane.lng, heading: plane.heading,
-                altitude: plane.altitude, velocity: plane.velocity,
-                onGround: plane.onGround, lastContact: plane.lastContact
-            });
-        } else if (
+        if (
+            !prev ||
             Math.abs(plane.lat - prev.lat) > 0.0001 ||
             Math.abs(plane.lng - prev.lng) > 0.0001 ||
             Math.abs(plane.heading - prev.heading) > 1 ||
@@ -91,23 +128,19 @@ function broadcastPlanes(states, timestamp) {
             prev.lastContact !== plane.lastContact
         ) {
             changed = true;
-            prev.lat = plane.lat;
-            prev.lng = plane.lng;
-            prev.heading = plane.heading;
-            prev.altitude = plane.altitude;
-            prev.velocity = plane.velocity;
-            prev.onGround = plane.onGround;
-            prev.lastContact = plane.lastContact;
         }
 
-        if (changed) {
-            updatesMap.set(icao24, [
-                icao24, plane.lat, plane.lng, plane.heading, plane.altitude,
-                plane.velocity, plane.onGround, plane.category, plane.isEmergency,
-                plane.callsign, plane.vRate, plane.squawk, plane.lastContact,
-                plane.typecode || null
-            ]);
-        }
+        // Always refresh — even unchanged planes must stay current so a
+        // later viewport pan can snapshot them accurately.
+        const tuple = buildTuple(plane);
+        prevStates.set(icao24, {
+            lat: plane.lat, lng: plane.lng, heading: plane.heading,
+            altitude: plane.altitude, velocity: plane.velocity,
+            onGround: plane.onGround, lastContact: plane.lastContact,
+            tuple,
+        });
+
+        if (changed) updatesMap.set(icao24, tuple);
     }
 
     // 2. Detect removed planes
@@ -126,15 +159,8 @@ function broadcastPlanes(states, timestamp) {
         const clientRemoved = [];
 
         // Check if aircraft is in client's BBox
-        for (const [icao24, update] of updatesMap) {
-            const lat = update[1];
-            const lng = update[2];
-            if (!client.bbox || (
-                lat >= client.bbox.lamin && lat <= client.bbox.lamax &&
-                lng >= client.bbox.lomin && lng <= client.bbox.lomax
-            )) {
-                clientUpdates.push(update);
-            }
+        for (const [, update] of updatesMap) {
+            if (inBbox(client.bbox, update[1], update[2])) clientUpdates.push(update);
         }
 
         // Removed planes: simple check (or can skip filtering for simplicity if small list)
