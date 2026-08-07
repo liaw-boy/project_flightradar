@@ -47,49 +47,45 @@ function getAirlineFromCallsign(callsign) {
     return CALLSIGN_PREFIX_AIRLINES[prefix] || null;
 }
 
-// [v14.0] High-Fidelity Callsign-to-Route Resolution (ADSB.fi Feed)
+// [v14.1] High-Fidelity Callsign-to-Route Resolution (adsbdb)
+// Previously called adsb.fi's /v2/callsign endpoint as the "primary source",
+// but that (and every other adsb.lol/adsb.fi state-vector endpoint) only
+// ever returns live ADS-B state — position, altitude, squawk — never route
+// fields. `flight.origin`/`flight.destination` could never be populated no
+// matter the host, so this source silently contributed nothing. adsbdb's
+// callsign endpoint is the one free, keyless source that actually resolves
+// scheduled origin/destination (already relied on elsewhere in server.js).
 async function fetchRouteInfo(callsign) {
     if (!callsign) return null;
     const normalized = normalizeCallsign(callsign);
-    
+
     try {
-        // [Primary Source] ADSB.fi dynamic callsign API (Free & Real-time)
-        const res = await fetch(`https://api.adsb.fi/v2/callsign/${normalized}`, {
-            headers: { 'User-Agent': 'AEROSTRAT/5.0' },
+        const res = await fetch(`https://api.adsbdb.com/v0/callsign/${normalized}`, {
+            headers: { 'User-Agent': 'AEROSTRAT/12.0' },
             signal: AbortSignal.timeout(4000)
         });
-        
+
         if (!res.ok) return null;
         const data = await res.json();
-        
-        // ADSB.fi returns { ac: [{ origin: "VHHH", destination: "RCTP", ... }] }
-        if (data.ac && data.ac.length > 0) {
-            const flight = data.ac[0];
-            if (flight.origin && flight.destination) {
-                logger.debug('FUSION', `ADSB.fi matched Route: ${normalized} -> ${flight.origin} to ${flight.destination}`);
-                
-                // Lookup full names from static dictionary
-                const [originAp, destAp] = await Promise.all([
-                    AirportDictionary.findOne({ icao: flight.origin.toUpperCase() }),
-                    AirportDictionary.findOne({ icao: flight.destination.toUpperCase() }),
-                ]);
+        const route = data?.response?.flightroute;
 
-                return {
-                    origin_iata:      originAp?.iata || flight.origin.substring(1), // Fallback to ICAO trim
-                    origin_icao:      flight.origin.toUpperCase(),
-                    origin_name:      originAp ? originAp.name : null,
-                    origin_city:      originAp ? originAp.city : null,
-                    destination_iata: destAp?.iata   || flight.destination.substring(1),
-                    destination_icao: flight.destination.toUpperCase(),
-                    destination_name: destAp ? destAp.name : null,
-                    destination_city: destAp ? destAp.city : null,
-                    source: 'adsb_fi_live'
-                };
-            }
+        if (route?.origin?.icao_code && route?.destination?.icao_code) {
+            logger.debug('FUSION', `adsbdb matched Route: ${normalized} -> ${route.origin.icao_code} to ${route.destination.icao_code}`);
+            return {
+                origin_iata:      route.origin.iata_code      || route.origin.icao_code.substring(1),
+                origin_icao:      route.origin.icao_code,
+                origin_name:      route.origin.name           || null,
+                origin_city:      route.origin.municipality   || null,
+                destination_iata: route.destination.iata_code || route.destination.icao_code.substring(1),
+                destination_icao: route.destination.icao_code,
+                destination_name: route.destination.name         || null,
+                destination_city: route.destination.municipality || null,
+                source: 'adsbdb_route'
+            };
         }
         return null;
     } catch (err) {
-        logger.debug('FUSION', `ADSB.fi Route lookup failed for ${normalized}: ${err.message}`);
+        logger.debug('FUSION', `adsbdb route lookup failed for ${normalized}: ${err.message}`);
         return null;
     }
 }
@@ -119,27 +115,33 @@ async function fetchNOAAWeather(iata) {
     }
 }
 
-// Tar1090 Static DB Fallback (Layer 2 Aircraft Metadata)
-async function fetchTar1090Fallback(hex) {
-    if (!hex || hex.length < 2) return null;
-    const prefix = hex.substring(0, 2).toLowerCase();
+// adsbdb.com Aircraft Registry (Layer 3 Aircraft Metadata)
+// Replaces the old tar1090 static-DB fallback: `api.adsb.lol/v2/static/db/`
+// has returned 404 for every prefix for some time, so that layer was
+// permanently dead weight. adsbdb is free, keyless, and — unlike tar1090 —
+// actually carries manufacturer and registered-owner/airline, which this
+// system otherwise has almost no working source for (Mictronics' operator
+// column is unpopulated and OpenSky's metadata API returned 410 Gone).
+async function fetchAdsbdbAircraft(hex) {
+    if (!hex) return null;
     try {
-        const res = await fetch(`https://api.adsb.lol/v2/static/db/${prefix}.json`, {
+        const res = await fetch(`https://api.adsbdb.com/v0/aircraft/${hex}`, {
+            headers: { 'User-Agent': 'AEROSTRAT/12.0' },
             signal: AbortSignal.timeout(4000)
         });
         if (!res.ok) return null;
         const data = await res.json();
-        if (data && data[hex]) {
-            return {
-                type: data[hex].t || 'Unknown',
-                registration: data[hex].r || 'Unknown',
-                manufacturer: 'Unknown',
-                airline: 'Unknown' // Often tar1090 doesn't have full name, but resolving type is critical
-            };
-        }
-        return null;
+        const a = data?.response?.aircraft;
+        if (!a) return null;
+        return {
+            type: a.icao_type || 'Unknown',
+            registration: a.registration || 'Unknown',
+            manufacturer: a.manufacturer || 'Unknown',
+            airline: a.registered_owner || 'Unknown',
+            photoUrl: a.url_photo || null,
+        };
     } catch (err) {
-        logger.debug('FUSION', `tar1090 fallback failed for ${hex}: ${err.message}`);
+        logger.debug('FUSION', `adsbdb aircraft fallback failed for ${hex}: ${err.message}`);
         return null;
     }
 }
@@ -256,22 +258,35 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
             };
         }
 
-        const planespottersPromise = fetch(`https://api.planespotters.net/pub/photos/hex/${hex}`, {
-            // planespotters.net rejects UAs without a contact URL/email (HTTP 403)
-            headers: { 'User-Agent': 'AEROSTRAT/4.4.0 (+https://github.com/liaw-boy/project_flightradar)' },
-            signal: AbortSignal.timeout(5000)
-        })
+        // [Photo Fix] Query by registration first when we already know it (L0
+        // DB/Mictronics resolve synchronously above, before this fires) — mirrors
+        // /api/photos/:icao24's reg-priority order. Registration-keyed lookups hit
+        // meaningfully more often than hex for re-registered/GA aircraft; falling
+        // back to hex only when no registration is known yet or the reg lookup
+        // itself comes up empty.
+        const knownReg = resolvedMetadata?.registration;
+        const hasKnownReg = knownReg && knownReg !== 'Unknown';
+        const psHeaders = { 'User-Agent': 'AEROSTRAT/4.4.0 (+https://github.com/liaw-boy/project_flightradar)' };
+        const fetchPlanespotters = (url) => fetch(url, { headers: psHeaders, signal: AbortSignal.timeout(5000) })
             .then(res => {
                 if (!res.ok) {
-                    logger.warn('PHOTO', `planespotters.net returned ${res.status} for ${hex}`);
+                    logger.warn('PHOTO', `planespotters.net returned ${res.status} for ${url}`);
                     return null;
                 }
                 return res.json();
             })
             .catch(err => {
-                logger.warn('PHOTO', `planespotters.net fetch failed for ${hex}: ${err.message}`);
+                logger.warn('PHOTO', `planespotters.net fetch failed for ${url}: ${err.message}`);
                 return null;
             });
+
+        const planespottersPromise = (async () => {
+            if (hasKnownReg) {
+                const byReg = await fetchPlanespotters(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(knownReg)}`);
+                if (byReg?.photos?.length) return byReg;
+            }
+            return fetchPlanespotters(`https://api.planespotters.net/pub/photos/hex/${hex}`);
+        })();
 
         const metadataWaterfall = async () => {
             // [v13.6] Enrichment Logic: Accumulate data from multiple layers
@@ -313,12 +328,23 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
                 }
             }
 
-            // Layer 3: Tar1090 Static Fallback
-            if (!info.type || info.type === 'Unknown') {
-                logger.debug('FUSION', `L3 tar1090 fallback for ${hex}`);
-                const tarData = await fetchTar1090Fallback(hex);
-                if (tarData) {
-                    info = { ...info, ...tarData };
+            // Layer 3: adsbdb registry — also the only source for manufacturer
+            // and airline, so it fires even when type/registration are known.
+            const stillMissingRichData = !info.type || info.type === 'Unknown' ||
+                !info.airline || info.airline === 'Unknown' ||
+                !info.manufacturer || info.manufacturer === 'Unknown';
+            if (stillMissingRichData) {
+                logger.debug('FUSION', `L3 adsbdb fallback for ${hex}`);
+                const adsbdbData = await fetchAdsbdbAircraft(hex);
+                if (adsbdbData) {
+                    info = {
+                        ...info,
+                        type: (!info.type || info.type === 'Unknown') ? adsbdbData.type : info.type,
+                        registration: (!info.registration || info.registration === 'Unknown') ? adsbdbData.registration : info.registration,
+                        manufacturer: (!info.manufacturer || info.manufacturer === 'Unknown') ? adsbdbData.manufacturer : info.manufacturer,
+                        airline: (!info.airline || info.airline === 'Unknown') ? adsbdbData.airline : info.airline,
+                        photoUrl: info.photoUrl || adsbdbData.photoUrl,
+                    };
                 }
             }
 
@@ -508,10 +534,21 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
                     airline: data.airline || data.ownOp || (dbAircraft ? (dbAircraft.operator || dbAircraft.airline) : 'Unknown'),
                     icon_type: data.icon_type || (dbAircraft ? dbAircraft.icon_type : 'STANDARD_JET'),
                     description: data.description || data.desc || (dbAircraft ? (dbAircraft.model || dbAircraft.description) : null),
+                    // [Photo Fix] adsbdb's `url_photo` was fetched in the metadata
+                    // waterfall (Layer 3) but never actually used — it was computed
+                    // into `info.photoUrl` and then silently dropped on the floor.
+                    // Carry it through so it can serve as a fallback below.
+                    photoUrl: data.photoUrl || null,
                     is_military_or_private: false
                 };
             }
-        } 
+        }
+
+        // [Photo Fix] adsbdb fallback — used only when Planespotters (reg + hex) missed.
+        if (!photoUrl && aircraftInfo.photoUrl) {
+            photoUrl = aircraftInfo.photoUrl;
+            photographer = photographer || 'adsbdb';
+        }
 
         // Process Route Data (VRS standing-data as final fallback)
         const vrsRoute = VrsDb.lookup(callsign);
@@ -570,6 +607,21 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
             updatedAt: new Date()
         };
 
+        // The frontend has drawn a "line back to the departure airport" on the
+        // map since it was built (App.jsx reads route.depCoords.lat/lng), but
+        // this endpoint never populated that field — the feature has been
+        // silently dead the whole time (no error, the line just never
+        // appears). AirportDictionary already has coordinates for every
+        // origin_icao we resolve; note the lat/lon → lat/lng rename, since
+        // that's what the frontend's consumer actually reads.
+        let depCoords = null;
+        if (routeInfo.origin_icao) {
+            const originAirport = await AirportDictionary.findOne({ icao: routeInfo.origin_icao });
+            if (originAirport?.lat != null && originAirport?.lon != null) {
+                depCoords = { lat: originAirport.lat, lng: originAirport.lon };
+            }
+        }
+
         const mergedRoute = {
             callsign,
             flightNumber:       routeInfo.flightNumber       || callsign,
@@ -577,6 +629,7 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
             origin_icao:        routeInfo.origin_icao        || null,
             origin_name:        routeInfo.origin_name        || null,
             origin_city:        routeInfo.origin_city        || null,
+            depCoords,
             destination_iata:   routeInfo.destination_iata   || null,
             destination_icao:   routeInfo.destination_icao   || null,
             destination_name:   routeInfo.destination_name   || null,
@@ -628,7 +681,9 @@ async function fetchAdsbFiMetadata(hex) {
         const a = data.aircraft ? (data.aircraft[0] || null) : data;
         if (a && (a.t || a.type || a.r || a.registration || a.f || a.flight || a.hex)) {
             return {
-                type: a.t || a.type || null,
+                // a.type is the ADS-B signal-source label (adsb_icao, tisb_other,
+                // mlat, ...), not an aircraft type — only a.t is ever a real one.
+                type: a.t || null,
                 registration: a.r || a.registration || null,
                 manufacturer: a.manufacturer || null,
                 airline: a.ownOp || a.operator || null,

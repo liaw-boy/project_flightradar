@@ -1,10 +1,20 @@
 'use strict';
 /**
- * syncMictronics.js — Mictronics Aircraft Database Weekly Sync
+ * syncMictronics.js — Aircraft Registry Sync
  *
- * Downloads two datasets from mictronics.de (weekly updated, ODbL license):
- *   1. aircraft_db   → ICAO24 hex → { r: registration, t: typecode, d: operator, desc: model }
- *   2. aircraft_types → ICAO typecode → { wtc }  (wake-turbulence class)
+ * Source: wiedehopf/tar1090-db (GitHub), `aircraft.csv.gz` on the `csv` branch.
+ * This replaced the original mictronics.de direct download — that endpoint
+ * (aircraft-database/aircraft_db.php) returned 404 as of 2026-08, having
+ * silently stopped working around 2026-06, two full months before anyone
+ * noticed because the sync cron never logged the download failure anywhere
+ * visible. tar1090-db is the community-maintained mirror/superset of the
+ * same Mictronics data that readsb/tar1090 ship with their releases, kept
+ * current by an active maintainer (wiedehopf), and — unlike the original
+ * source — it also carries an operator field (`ownop`), which the old
+ * mictronics_aircraft.operator column never had real data for.
+ *
+ * CSV row shape (semicolon-delimited, see tar1090-db's toJson.py writer):
+ *   icao24;registration;typecode;flags;description;year;operator;<trailing empty>
  *
  * Data is stored in the SQLite mictronics_aircraft table via mictronicsDb.bulkUpsert().
  *
@@ -13,93 +23,41 @@
  *   FORCE_RESYNC=true node scripts/syncMictronics.js — always re-download
  */
 
-const https  = require('https');
-const http   = require('http');
-const fs     = require('fs');
-const path   = require('path');
-const AdmZip = require('adm-zip');
+const https = require('https');
+const zlib  = require('zlib');
 
-const DB_URL   = 'https://www.mictronics.de/aircraft-database/aircraft_db.php';
-const TYPE_URL = 'https://www.mictronics.de/aircraft-database/aircraft_types.php';
-
-const TEMP_DIR      = path.join(__dirname, '..', 'data');
-const TEMP_DB_ZIP   = path.join(TEMP_DIR, 'mictronics_db.zip');
-const TEMP_TYPE_ZIP = path.join(TEMP_DIR, 'mictronics_types.zip');
-const TYPE_CACHE    = path.join(TEMP_DIR, 'aircraft_types.json');
+const CSV_GZ_URL = 'https://raw.githubusercontent.com/wiedehopf/tar1090-db/refs/heads/csv/aircraft.csv.gz';
 
 const BATCH_SIZE = 2000;  // rows per SQLite transaction
 
-// ── Download helper (follows redirects, 60s timeout) ─────────────────────────
-function downloadFile(url, dest) {
+// ── Download helper (follows redirects, buffers into memory, 60s timeout) ───
+function downloadBuffer(url, redirectsLeft = 5) {
     return new Promise((resolve, reject) => {
-        const proto = url.startsWith('https') ? https : http;
-        const file  = fs.createWriteStream(dest);
-        const req   = proto.get(url, { timeout: 60000 }, res => {
+        https.get(url, { timeout: 60000 }, res => {
             if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                file.close();
-                return downloadFile(res.headers.location, dest).then(resolve).catch(reject);
+                res.resume();
+                if (redirectsLeft <= 0) return reject(new Error('Too many redirects'));
+                return downloadBuffer(res.headers.location, redirectsLeft - 1).then(resolve).catch(reject);
             }
             if (res.statusCode !== 200) {
-                file.close();
-                fs.unlink(dest, () => {});
+                res.resume();
                 return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
             }
-            res.pipe(file);
-            file.on('finish', () => file.close(resolve));
-        });
-        req.on('error', err => { file.close(); fs.unlink(dest, () => {}); reject(err); });
+            const chunks = [];
+            res.on('data', c => chunks.push(c));
+            res.on('end', () => resolve(Buffer.concat(chunks)));
+            res.on('error', reject);
+        }).on('error', reject).on('timeout', function () { this.destroy(new Error('Download timeout')); });
     });
 }
 
-// ── Load aircraft_types from ZIP or cached JSON ───────────────────────────────
-function loadAircraftTypes(zipPath, logger, forceRefresh = false) {
-    if (!forceRefresh && fs.existsSync(TYPE_CACHE)) {
-        try {
-            const cached = JSON.parse(fs.readFileSync(TYPE_CACHE, 'utf8'));
-            if (Object.keys(cached).length > 0) {
-                logger(`[Mictronics] Using cached aircraft_types.json (${Object.keys(cached).length} types)`);
-                return cached;
-            }
-        } catch (_) {}
-    }
-
-    if (forceRefresh && fs.existsSync(TYPE_CACHE)) {
-        try { fs.unlinkSync(TYPE_CACHE); } catch (_) {}
-    }
-
-    try {
-        const zip      = new AdmZip(zipPath);
-        const jsonEntry = zip.getEntries().find(e => !e.isDirectory && e.name.endsWith('.json'));
-        if (jsonEntry) {
-            const types = JSON.parse(jsonEntry.getData().toString('utf8'));
-            fs.writeFileSync(TYPE_CACHE, JSON.stringify(types), 'utf8');
-            logger(`[Mictronics] aircraft_types loaded: ${Object.keys(types).length} entries`);
-            return types;
-        }
-    } catch (e) {
-        logger(`[Mictronics] WARN: could not load aircraft_types: ${e.message}`);
-    }
-    return {};
-}
-
-// ── Import ZIP into SQLite via mictronicsDb ───────────────────────────────────
-function importAircraftDb(zipPath, typesMap, logger) {
+// ── Parse the CSV and import into SQLite ─────────────────────────────────────
+function importCsv(csvText, logger) {
     const MictronicsDb = require('../db/mictronicsDb');
 
-    logger(`[Mictronics] Extracting ZIP (${(fs.statSync(zipPath).size / 1024 / 1024).toFixed(1)} MB)...`);
-
-    let zip;
-    try {
-        zip = new AdmZip(zipPath);
-    } catch (err) {
-        throw new Error(`Failed to open ZIP: ${err.message}`);
-    }
-
-    const shards = zip.getEntries().filter(e => !e.isDirectory && e.name.endsWith('.json'));
-    logger(`[Mictronics] ${shards.length} JSON shards found`);
-
     let totalRows = 0;
-    let batch     = [];
+    let skipped = 0;
+    let batch = [];
 
     const flush = () => {
         if (batch.length === 0) return;
@@ -108,57 +66,39 @@ function importAircraftDb(zipPath, typesMap, logger) {
         batch = [];
     };
 
-    for (const entry of shards) {
-        let shard;
-        try {
-            shard = JSON.parse(entry.getData().toString('utf8'));
-        } catch (e) {
-            logger(`[Mictronics] Skipping malformed shard ${entry.name}`);
-            continue;
-        }
+    const lines = csvText.split('\n');
+    for (const line of lines) {
+        if (!line) continue;
+        const cols = line.split(';');
+        const icao24 = (cols[0] || '').toLowerCase().trim();
+        if (!/^[0-9a-f]{6}$/.test(icao24)) { skipped++; continue; }
 
-        // Shard filename prefix: "a0.json" → prefix "a0"
-        const shardPrefix  = entry.name.replace(/\.json$/i, '').toLowerCase();
-        const expectedSufLen = 6 - shardPrefix.length;
+        const registration = (cols[1] || '').trim() || null;
+        const typecode      = (cols[2] || '').trim().toUpperCase() || null;
+        // cols[3] is the flags bitfield (military/LADD/PIA) — not stored here.
+        const model      = (cols[4] || '').trim() || null;
+        // cols[5] is year — not currently in the mictronics_aircraft schema.
+        const operator    = (cols[6] || '').trim() || null;
 
-        for (const [rawKey, val] of Object.entries(shard)) {
-            const key = rawKey.toLowerCase();
-            let icao24;
+        if (!registration && !typecode && !operator && !model) { skipped++; continue; }
 
-            if (key.length === expectedSufLen && /^[0-9a-f]+$/.test(key)) {
-                icao24 = shardPrefix + key;
-            } else if (key.length === 6 && /^[0-9a-f]{6}$/.test(key)) {
-                icao24 = key;
-            } else {
-                continue;
-            }
+        batch.push({ icao24, registration, typecode, operator, model });
 
-            const typecode   = (val.t || '').trim().toUpperCase() || null;
-            const registration = (val.r || '').trim() || null;
-            const operator   = (val.d || '').trim() || null;
-            const model      = (val.desc || '').trim() || null;
-
-            // Skip completely empty records
-            if (!registration && !typecode && !operator && !model) continue;
-
-            batch.push({ icao24, registration, typecode, operator, model });
-
-            if (batch.length >= BATCH_SIZE) {
-                flush();
-                if (totalRows % 50000 === 0) {
-                    logger(`[Mictronics] Progress: ${totalRows.toLocaleString()} rows written`);
-                }
+        if (batch.length >= BATCH_SIZE) {
+            flush();
+            if (totalRows % 100000 === 0) {
+                logger(`[Mictronics] Progress: ${totalRows.toLocaleString()} rows written`);
             }
         }
     }
 
     flush();
-    logger(`[Mictronics] Import complete: ${totalRows.toLocaleString()} rows written to SQLite`);
+    logger(`[Mictronics] Import complete: ${totalRows.toLocaleString()} rows written (${skipped.toLocaleString()} skipped)`);
     return totalRows;
 }
 
 // ── Main sync function ────────────────────────────────────────────────────────
-// opts.force = true → skip existing-data check + force-refresh aircraft_types cache
+// opts.force = true → skip existing-data check
 async function syncMictronics(logFn, opts = {}) {
     const logger = logFn || (msg => console.log(msg));
 
@@ -175,30 +115,15 @@ async function syncMictronics(logFn, opts = {}) {
         }
     }
 
-    logger('[Mictronics] Starting sync from mictronics.de...');
+    logger('[Mictronics] Starting sync from tar1090-db (GitHub)...');
     const startTime = Date.now();
 
-    // Step 1: Download aircraft_types (small, ~17KB)
-    logger(`[Mictronics] Downloading aircraft_types...`);
-    try {
-        await downloadFile(TYPE_URL, TEMP_TYPE_ZIP);
-    } catch (err) {
-        logger(`[Mictronics] WARN: Failed to download aircraft_types: ${err.message}`);
-    }
-    const typesMap = loadAircraftTypes(TEMP_TYPE_ZIP, logger, forceResync);
+    logger('[Mictronics] Downloading aircraft.csv.gz (~8-9 MB)...');
+    const gzBuf = await downloadBuffer(CSV_GZ_URL);
+    const csvText = zlib.gunzipSync(gzBuf).toString('utf8');
+    logger(`[Mictronics] Download complete (${(gzBuf.length / 1024 / 1024).toFixed(1)} MB compressed)`);
 
-    // Step 2: Download aircraft_db (~4.6 MB ZIP)
-    logger(`[Mictronics] Downloading aircraft_db (~4.6 MB)...`);
-    await downloadFile(DB_URL, TEMP_DB_ZIP);
-    logger('[Mictronics] Download complete');
-
-    // Step 3: Import into SQLite
-    const total = importAircraftDb(TEMP_DB_ZIP, typesMap, logger);
-
-    // Step 4: Cleanup temp ZIPs
-    for (const f of [TEMP_DB_ZIP, TEMP_TYPE_ZIP]) {
-        try { fs.unlinkSync(f); } catch (_) {}
-    }
+    const total = importCsv(csvText, logger);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     logger(`[Mictronics] ✅ Sync complete in ${elapsed}s — ${total.toLocaleString()} aircraft in DB`);

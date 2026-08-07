@@ -113,6 +113,48 @@ function loadFromJson(jsonPath, type) {
     return loaded;
 }
 
+/**
+ * Load AirportDictionary from data/processed/airports_global.json — the
+ * actual populated source (20k+ airports, keyed by ICAO, shape
+ * { icao, iata, name, city, country, lat, lng, timezone }).
+ *
+ * This dictionary previously only knew how to load from data/airports.csv
+ * or data/airport_dictionary.json, and NEITHER file has ever existed in
+ * this repo — meaning airportByIcao/airportByIata have been silently empty
+ * since this module was written. Every caller of AirportDictionary.findOne()
+ * (origin_name/origin_city/destination_name/destination_city in route
+ * responses, and departure-line coordinates on the map) has been getting
+ * null back this whole time, with no error anywhere in the chain.
+ */
+function loadAirportDictionaryFromGlobalJson(jsonPath) {
+    if (!fs.existsSync(jsonPath)) return 0;
+    let data;
+    try {
+        data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+    } catch {
+        return 0;
+    }
+    let loaded = 0;
+    for (const raw of Object.values(data)) {
+        const icao = (raw.icao || '').toUpperCase();
+        if (!icao) continue;
+        const iata = (raw.iata || '').toUpperCase();
+        const entry = {
+            icao,
+            iata:    iata || null,
+            name:    raw.name || null,
+            city:    raw.city || null,
+            country: raw.country || null,
+            lat:     typeof raw.lat === 'number' ? raw.lat : (parseFloat(raw.lat) || null),
+            lon:     typeof raw.lng === 'number' ? raw.lng : (parseFloat(raw.lng) || null),
+        };
+        airportByIcao.set(icao, entry);
+        if (iata) airportByIata.set(iata, entry);
+        loaded++;
+    }
+    return loaded;
+}
+
 // ── Initialization ────────────────────────────────────────────────────────
 const DATA_DIR = path.join(__dirname, '..', 'data');
 
@@ -120,8 +162,10 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
     // AirportDictionary
     const apCsvPath  = path.join(DATA_DIR, 'airports.csv');
     const apJsonPath = path.join(DATA_DIR, 'airport_dictionary.json');
+    const apGlobalJsonPath = path.join(DATA_DIR, 'processed', 'airports_global.json');
     let n = loadAirportDictionaryFromCsv(apCsvPath);
     if (n === 0) n = loadFromJson(apJsonPath, 'airport');
+    if (n === 0) n = loadAirportDictionaryFromGlobalJson(apGlobalJsonPath);
     if (n > 0) console.log(`[StaticMaps] AirportDictionary: ${n} airports loaded`);
 
     // RouteDictionary
