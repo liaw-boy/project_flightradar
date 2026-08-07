@@ -16,11 +16,17 @@ const stmtInsert = db.prepare(`
          @departureAirport, @arrivalAirport, @createdAt, @updatedAt)
 `);
 
+// status/end_time must be COALESCEd like the other columns — a callsign-only
+// update (e.g. resolving 'N/A' once the real callsign arrives) sends status
+// as null, which used to blast an ACTIVE session's status/end_time to NULL.
+// That made the session invisible to every `status = 'ACTIVE'` query
+// (restart hydration, the reaper, findLatestActiveByIcao24) and produced
+// ~120k orphaned NULL-status rows that could never be reaped or resumed.
 const stmtUpdate = db.prepare(`
     UPDATE flight_sessions
-    SET status = @status,
+    SET status = COALESCE(@status, status),
         callsign = COALESCE(@callsign, callsign),
-        end_time = @endTime,
+        end_time = COALESCE(@endTime, end_time),
         departure_airport = COALESCE(@departureAirport, departure_airport),
         arrival_airport   = COALESCE(@arrivalAirport, arrival_airport),
         updated_at = @updatedAt

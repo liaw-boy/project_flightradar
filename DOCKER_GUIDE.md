@@ -20,38 +20,27 @@
 docker compose up -d --build
 ```
 這會自動執行以下操作：
-1. 啟動 MongoDB 資料庫（使用高度相容的 4.4 版本）。
-2. 編譯前端專案。
-3. 啟動後端伺服器（預設開啟 `3000` 埠）。
+1. 編譯前端專案。
+2. 啟動後端伺服器（預設開啟 `3000` 埠），資料庫使用 SQLite（WAL 模式），檔案位於 `backend/data/aerostrat.db`，由 `./backend/data` volume 掛載持久化，無需另外啟動資料庫容器。
 
-## 步驟 3：資料初始化（重要）
-由於新電腦的資料庫是空的，您需要執行以下指令來導入飛機圖標與基礎資料：
-
-1. **導入飛機圖標數據**：
-   ```bash
-   docker compose exec backend node scripts/seedAircraftShapes.js
-   ```
-2. **同步機場與航線資料**：
-   ```bash
-   docker compose exec backend node scripts/syncOsintData.js
-   ```
+## 步驟 3：資料初始化
+飛機註冊資料庫（Mictronics/tar1090-db）、航線資料庫（VRS）、TDX 進出港資料會在後端啟動時自動檢查並補跑（若資料為空或已過期），無需手動執行同步腳本。
 
 ## 步驟 4：驗證部署
 1. 打開瀏覽器存取：`http://localhost:3000`
-2. 查看日誌確認資料庫連線：
+2. 查看日誌確認服務啟動：
    ```bash
    docker compose logs -f backend
    ```
-   您應該會看到 `✅ Connected to MongoDB successfully`。
+   您應該會看到 `✅ SQLite initialized (WAL mode)`。
 
 ## 故障排除
-- **資料庫連線失敗**：我們已實作自動重試機制。若持續失敗，請確認磁碟空間充足。
 - **飛機圖示異常**：本版本已優化高解析度（High-DPI）螢幕渲染，若仍有問題請清除瀏覽器快取。
 - **重新初始化資料庫**：若需完全重設，請執行：
   ```bash
   docker compose down -v
   ```
-  這會刪除具名磁碟卷並清除所有過往軌跡資料。
+  接著手動刪除 `backend/data/aerostrat.db`（volume 卸載不會自動清空 bind mount 裡的檔案）。這會清除所有過往軌跡資料。
 
 ---
 *AEROSTRAT - 高可靠性飛行追蹤系統*

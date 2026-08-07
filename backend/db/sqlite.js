@@ -165,6 +165,47 @@ function pruneOldTrackPoints() {
     batch();
 }
 
+// ── Session retention ──────────────────────────────────────────────────────
+// flight_sessions had no cleanup at all and had grown to ~12M rows (≈2GB with
+// its indexes) against 6 registered users. Track points only live 24h, so a
+// session far older than that has no trajectory left to show — it is dead
+// weight. user_flights (the user-authored flight log) has no foreign key into
+// this table, so pruning here never touches user data.
+//
+// Rows are stored in insertion order, so the oldest sit at the front of the
+// table and each batch finds its 5000 victims within a few ms — no index on
+// created_at required, which avoids a multi-second blocking index build.
+const SESSION_RETENTION_DAYS = Number(process.env.SESSION_RETENTION_DAYS) || 7;
+const _pruneSessionStmt = db.prepare(
+    'DELETE FROM flight_sessions WHERE rowid IN (SELECT rowid FROM flight_sessions WHERE created_at < ? LIMIT ?)'
+);
+
+function pruneOldSessions() {
+    const cutoff = Math.floor(Date.now() / 1000) - SESSION_RETENTION_DAYS * 86400;
+    let totalDeleted = 0;
+
+    function batch() {
+        try {
+            const info = _pruneSessionStmt.run(cutoff, PRUNE_BATCH);
+            totalDeleted += info.changes;
+            if (info.changes >= PRUNE_BATCH) {
+                if (totalDeleted % 500000 === 0) {
+                    console.log(`[SQLite] Session prune progress: ${totalDeleted} rows deleted so far…`);
+                }
+                setTimeout(batch, PRUNE_PAUSE_MS);
+            } else {
+                if (totalDeleted > 0) {
+                    console.log(`[SQLite] Pruned ${totalDeleted} flight sessions older than ${SESSION_RETENTION_DAYS}d`);
+                }
+                db.pragma('wal_checkpoint(PASSIVE)');
+            }
+        } catch (e) {
+            console.error('[SQLite] Session prune batch error:', e.message);
+        }
+    }
+    batch();
+}
+
 // ── Periodic WAL checkpoint — every 5 minutes (PASSIVE: non-blocking) ───────
 // If WAL exceeds 2GB, escalate to TRUNCATE to prevent unbounded growth.
 const WAL_SIZE_LIMIT_BYTES = 512 * 1024 * 1024; // 512MB — TRUNCATE to reclaim disk space
@@ -242,6 +283,9 @@ function vacuumIfNeeded() {
 // Defer startup prune 5s so server starts listening first
 setTimeout(pruneOldTrackPoints, 5000);
 setInterval(pruneOldTrackPoints, 3600 * 1000);
+// Offset from the track-point pruner so the two don't contend on startup.
+setTimeout(pruneOldSessions, 30_000);
+setInterval(pruneOldSessions, 3600 * 1000);
 setInterval(walCheckpoint, 5 * 60 * 1000);
 setInterval(analyzeDb, 6 * 3600 * 1000);
 

@@ -65,17 +65,24 @@ async function main() {
     const npmVer = run('npm -v');
     npmVer ? ok(`npm ${npmVer}`) : bad('npm not found');
 
-    // ── 2. MongoDB ──────────────────────────────────────────────────────────
-    section('2. MongoDB');
+    // ── 2. SQLite ───────────────────────────────────────────────────────────
+    // The backend has run entirely on better-sqlite3 (WAL mode) for a while
+    // now — the MongoDB check this used to do was stale and would tell
+    // developers to stand up a service the app no longer even imports.
+    section('2. SQLite');
     try {
-        const mongodbPath = path.join(BACKEND, 'node_modules', 'mongodb');
-        const { MongoClient } = require(mongodbPath);
-        const client = new MongoClient('mongodb://localhost:27017', { serverSelectionTimeoutMS: 3000 });
-        await client.connect();
-        await client.close();
-        ok('MongoDB reachable at localhost:27017');
-    } catch(e) {
-        caution(`MongoDB connection failed (Optional)  →  ${e.message.slice(0,60)}`);
+        const dbPath = path.join(BACKEND, 'data', 'aerostrat.db');
+        if (fs.existsSync(dbPath)) {
+            const Database = require(path.join(BACKEND, 'node_modules', 'better-sqlite3'));
+            const db = new Database(dbPath, { readonly: true });
+            db.pragma('journal_mode');
+            db.close();
+            ok(`SQLite database reachable (${dbPath})`);
+        } else {
+            caution(`SQLite database not found at ${dbPath} — will be created on first backend start`);
+        }
+    } catch (e) {
+        bad(`SQLite check failed  →  ${e.message.slice(0, 80)}`);
     }
 
     // ── 3. .env ─────────────────────────────────────────────────────────────
@@ -93,9 +100,9 @@ async function main() {
             if (m) env[m[1].trim()] = m[2].trim();
         });
 
-        const required = ['MONGODB_URI', 'PORT'];
+        const required = ['PORT', 'JWT_SECRET'];
         const missing = required.filter(k => !env[k]);
-        missing.length ? bad(`Missing required vars: ${missing.join(', ')}`) : ok('Required .env vars (MONGODB, PORT) present');
+        missing.length ? bad(`Missing required vars: ${missing.join(', ')}`) : ok('Required .env vars (PORT, JWT_SECRET) present');
 
         const osAccounts = [1,2,3,4,5].filter(i => env[`OPENSKY_USER${i}`] && env[`OPENSKY_PASS${i}`]);
         osAccounts.length >= 3
