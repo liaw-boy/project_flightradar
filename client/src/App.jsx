@@ -8,7 +8,6 @@ import SearchBar from './components/SearchBar';
 import TopBar from './components/TopBar';
 import MapView from './components/MapView';
 import PlaneList from './components/PlaneList';
-import TimePlayer from './components/TimePlayer';
 import StatsPanel from './components/StatsPanel';
 import AuthModal from './components/AuthModal';
 import MyFlightsPanel from './components/MyFlightsPanel';
@@ -116,6 +115,25 @@ export default function App() {
         }
     }, [authUser]);
 
+    // If the session expires (authStore._set(null, null) — a 401 from any
+    // authenticated call) while a login-gated panel is open, close it and
+    // prompt for login instead of leaving a now-broken panel on screen.
+    // AdminPanel and MyFlightsPanel both only reach that _set() call on 401
+    // as of this fix; previously AdminPanel's local authFetch never called
+    // it at all, so this effect had nothing to react to for that panel.
+    useEffect(() => {
+        if (authUser) return;
+        if (showAdmin) {
+            setShowAdmin(false);
+            setUrlPanel('auth');
+            setShowAuthModal(true);
+        } else if (showMyFlights) {
+            setShowMyFlights(false);
+            setUrlPanel('auth');
+            setShowAuthModal(true);
+        }
+    }, [authUser, showAdmin, showMyFlights]);
+
     // [v3.0] Theme system (dark = default, light = optional)
     const [theme, setTheme] = useState(() => {
         return localStorage.getItem('radar_theme') || 'dark';
@@ -158,6 +176,16 @@ export default function App() {
     // [v4.2.0] Anomaly alerts from server SSE
     const [anomalyAlerts, setAnomalyAlerts] = useState([]);
     const [showStats, setShowStats] = useState(false);
+    // Single entry point for toggling the stats tab so ?stats= in the URL
+    // never drifts from the actual panel state. This used to only happen via
+    // a TopBar onToggleStats handler that TopBar never actually rendered a
+    // button for — the real toggle (PlaneList's tab) called bare setShowStats
+    // and never touched the URL, so refreshing the page could silently lose
+    // or resurrect a stale ?stats=1.
+    const handleSetShowStats = useCallback((next) => {
+        setShowStats(next);
+        setUrlStats(next);
+    }, []);
 
     const playSquawkAlert = useCallback((severity) => {
         try {
@@ -251,7 +279,17 @@ export default function App() {
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (e.key === 'Escape') {
-                handleDeselectPlane();
+                // A modal/panel overlay owns Escape while it's open — it closes
+                // itself (see each component's own Escape handler). Without this
+                // guard, this global listener ALSO fired handleDeselectPlane()
+                // on every Escape press, so closing e.g. MyFlightsPanel with Esc
+                // silently deselected whatever plane was tracked on the map
+                // underneath — a side effect the user never asked for and that
+                // AuthModal's Esc (which also this same listener races against)
+                // made inconsistent depending on which overlay was open.
+                if (!showAuthModal && !showMyFlights && !showAdmin) {
+                    handleDeselectPlane();
+                }
             }
             // Ctrl+D — toggle developer monitor panel
             if (e.ctrlKey && e.key === 'd') {
@@ -265,10 +303,18 @@ export default function App() {
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
+        // handleDeselectPlane is intentionally NOT in this deps array: it's a
+        // `const` declared further down in this component (via useCallback),
+        // so referencing it here — where the array is evaluated immediately,
+        // unlike the effect body which only runs later — is a genuine
+        // temporal-dead-zone violation. It crashed the entire app in
+        // production with "Cannot access 'handleDeselectPlane' before
+        // initialization" the moment this component first rendered.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showAuthModal, showMyFlights, showAdmin]);
 
 
-    // 初始化飛機形狀 (從 MongoDB 載入 SVG 輪廓)
+    // 初始化飛機形狀 (從後端 API 載入 SVG 輪廓)
     useEffect(() => {
         dataManager.getAircraftShapes().then(shapes => {
             if (shapes.length > 0) initAircraftShapes(shapes);
@@ -563,8 +609,16 @@ export default function App() {
         return <AdminPanel onClose={() => { setShowAdmin(false); setUrlPanel(null); }} />;
     }
 
-    // New flight form → standalone full page, no map bleedthrough
-    if (showMyFlights && myFlightsInitialView === 'form') {
+    // New flight form → standalone full page, no map bleedthrough.
+    // Gated on myFlightsMode === 'page' too: this used to fire for ANY
+    // form view regardless of mode, so TopBar's "新增航班記錄" button
+    // (which explicitly sets mode 'modal') always got silently upgraded
+    // to a full-page takeover — setMyFlightsMode('modal') had no observable
+    // effect. The real modal-mode form render already exists below (the
+    // <MyFlightsPanel initialView={myFlightsInitialView} mode={myFlightsMode}>
+    // block), so modal callers just need to reach it instead of being
+    // intercepted here.
+    if (showMyFlights && myFlightsInitialView === 'form' && myFlightsMode === 'page') {
         return (
             <div className="app app--new-flight">
                 <MyFlightsPanel
@@ -630,8 +684,6 @@ export default function App() {
                 onFilterChange={handleFilterChange}
                 mapLayer={mapLayer}
                 onMapLayerChange={handleMapLayerChange}
-                showStats={showStats}
-                onToggleStats={() => setShowStats(s => { setUrlStats(!s); return !s; })}
                 onOpenAuth={() => { setShowAuthModal(true); setUrlPanel('auth'); }}
                 onOpenMyFlights={() => { setMyFlightsInitialView('list'); setMyFlightsMode('page');  setShowMyFlights(true); setUrlPanel('my-flights'); }}
                 onOpenNewFlight={() => { setMyFlightsInitialView('form'); setMyFlightsMode('modal'); setShowMyFlights(true); setUrlPanel('new-flight'); }}
@@ -659,7 +711,7 @@ export default function App() {
                     selectedIcao24={selectedIcao24}
                     filters={filters}
                     showStats={showStats}
-                    onTabChange={setShowStats}
+                    onTabChange={handleSetShowStats}
                     statsContent={
                         <StatsPanel
                             planesDict={planesDict}

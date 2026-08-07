@@ -24,8 +24,15 @@ function RadialGauge({ pct = 0, color = 'var(--accent)', size = 58, label }) {
     );
 }
 
-function authFetch(url, options = {}) {
-    return fetch(url, { ...options, credentials: 'include' });
+// This used to be a bare fetch wrapper with no 401 handling — unlike every
+// other authenticated call in the app (which goes through authStore's
+// apiFetch), a session expiring while AdminPanel was open never told
+// authStore, so `authUser` stayed non-null and the panel just kept showing
+// "HTTP 401" text in-place forever with no path back to a login prompt.
+async function authFetch(url, options = {}) {
+    const res = await fetch(url, { ...options, credentials: 'include' });
+    if (res.status === 401) authStore._set(null, null);
+    return res;
 }
 
 // ── Users Tab ────────────────────────────────────────────────────────────────
@@ -482,6 +489,21 @@ export default function AdminPanel({ onClose }) {
     const [tab, setTab] = useState('users');
     const [showUserMenu, setShowUserMenu] = useState(false);
     const user = authStore.getUser?.() ?? null;
+
+    // Escape returns to the map, same as every other top-level overlay.
+    // Skipped while a ConfirmDialog is open inside a tab (its own Escape
+    // handler owns that keypress — UsersTab/MonitorTab keep `dialog` as
+    // local state, so a DOM check is the simplest way to detect it here
+    // without lifting that state up).
+    useEffect(() => {
+        const onKeyDown = (e) => {
+            if (e.key !== 'Escape') return;
+            if (document.querySelector('.confirm-dialog-backdrop')) return;
+            onClose();
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [onClose]);
 
     return (
         <div className="adm-page">
