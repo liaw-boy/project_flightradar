@@ -30,6 +30,7 @@ const staticMaps    = require('./db/staticMaps');
 const { AircraftShape } = staticMaps;
 // AircraftRegistry → in-memory Map (circuit-breaker state, no persistence needed)
 const _registryCache = new Map(); // icao24 → { apiStatus, blockedUntil, ...metadata }
+const _sessionCache = new Map(); // callsign → { departure_airport, arrival_airport, ... }
 const AircraftRegistry = {
     findOne: (q) => Promise.resolve(_registryCache.get((q?.icao24 || '').toLowerCase()) || null),
     findOneAndUpdate: (filter, update) => {
@@ -707,7 +708,22 @@ app.get('/api/flights/live', async (req, res) => {
         }
 
         console.log(`📡 [LIVE] Primary Telemetry (${sourceName}) Success: ${rawPlanes.length} planes`);
-        return res.json({ source: sourceName, planes: rawPlanes, timestamp: Date.now() });
+
+        // [HOTFIX] Use pre-loaded session cache (global variable)
+        const enrichedPlanes = rawPlanes.map(plane => {
+            const callsignUpper = (plane.callsign || '').toUpperCase();
+            const session = _sessionCache.get(callsignUpper);
+            if (session) {
+                return {
+                    ...plane,
+                    departure_airport: session.departure_airport,
+                    arrival_airport: session.arrival_airport
+                };
+            }
+            return plane;
+        });
+
+        return res.json({ source: sourceName, planes: enrichedPlanes, timestamp: Date.now() });
 
     } catch (primaryErr) {
         console.warn(`⚠️ [LIVE] Primary Telemetry Failed (${primaryErr.message}). Switching to fallback...`);
@@ -5588,6 +5604,21 @@ function triggerBackgroundResolution(hex, callsign) {
 async function startServer() {
     // 1. Build Metadata Index (Instant SILHOUETTE support)
     await initAircraftMetadataIndex();
+
+    // 1b. Pre-load session cache for routing enrichment
+    const startCacheLoad = Date.now();
+    const Database = require('better-sqlite3');
+    const cacheDb = new Database(path.join(__dirname, 'data', 'aerostrat.db'), { readonly: true });
+    const stmt = cacheDb.prepare('SELECT callsign, departure_airport, arrival_airport FROM flight_sessions WHERE callsign IS NOT NULL LIMIT 500000');
+    const sessions = stmt.all();
+    for (const session of sessions) {
+        if (session.callsign) {
+            _sessionCache.set((session.callsign || '').toUpperCase(), session);
+        }
+    }
+    cacheDb.close();
+    const cacheLoadTime = Date.now() - startCacheLoad;
+    console.log(`✅ [CACHE] Loaded ${_sessionCache.size} flight sessions in ${cacheLoadTime}ms`);
 
     // 2. Start HTTP & WS
     const server = http.createServer(app);
