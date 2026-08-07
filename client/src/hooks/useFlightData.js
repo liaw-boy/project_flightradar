@@ -32,6 +32,32 @@ function _isImpossibleJump(fromLat, fromLng, toLat, toLng, dtMs) {
     return (dist > 20 && dtSec < 120) || (spdKph > 1500 && dist > 3 && dtSec < 120);
 }
 
+// ── Bearing-consistency check — second line of defense against reversals ───
+// The backend already arbitrates conflicting position updates (server.js
+// isPositionUpdateTrustworthy), but at global zoom with ~8,000 aircraft on
+// screen simultaneously, even the small residual rate that gets past it
+// (mostly genuine upstream MLAT noise from adsb.lol) produces a visible
+// glitch somewhere on the map roughly once a second — which reads as "the
+// same backward-snapping problem" even though the per-aircraft rate is now
+// low. _isImpossibleJump only rejects absolute distance/speed outliers; it
+// can't catch a small-magnitude update that reverses direction, which is
+// exactly the "moves forward then snaps back" symptom. This catches that:
+// if the new position's displacement bearing disagrees with the aircraft's
+// own reported heading by more than ~120°, treat it as suspect and hold the
+// current render position instead of interpolating toward it.
+function _isBearingReversal(fromLat, fromLng, toLat, toLng, heading) {
+    if (!fromLat || !toLat || typeof heading !== 'number') return false;
+    const dist = _hKm(fromLat, fromLng, toLat, toLng);
+    if (dist < 0.06) return false; // < 60m — bearing is too noisy to mean anything at this scale
+    const toRad = d => d * Math.PI / 180;
+    const y = Math.sin(toRad(toLng - fromLng)) * Math.cos(toRad(toLat));
+    const x = Math.cos(toRad(fromLat)) * Math.sin(toRad(toLat)) -
+              Math.sin(toRad(fromLat)) * Math.cos(toRad(toLat)) * Math.cos(toRad(toLng - fromLng));
+    const bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    const diff = Math.abs(bearing - heading) % 360;
+    return (diff > 180 ? 360 - diff : diff) > 120;
+}
+
 /**
  * 飛行資料管理 Hook
  * - 定時從後端 /api/states 拉取全球飛機資料
@@ -622,30 +648,45 @@ export function useFlightData(mapRef, options = {}) {
                     p.lastContact = wp.lastContact;
                     if (wp.typecode) p.typecode = wp.typecode;
 
-                    // [EMA Position Smoothing — Aeris MLAT technique]
-                    // α=0.72: 72% new + 28% prev — smooths MLAT noise (~100m)
-                    // without significantly delaying ADS-B positions (~10m).
-                    // First appearance: initialise EMA directly from raw position.
-                    const EMA_ALPHA = 0.72;
-                    const emaLat = (p._emaLat != null)
-                        ? EMA_ALPHA * wp.lat + (1 - EMA_ALPHA) * p._emaLat
-                        : wp.lat;
-                    const emaLng = (p._emaLng != null)
-                        ? EMA_ALPHA * wp.lng + (1 - EMA_ALPHA) * p._emaLng
-                        : wp.lng;
-                    p._emaLat = emaLat;
-                    p._emaLng = emaLng;
-
                     // [Snapshot Interpolation v2.1 — WS path — Buffered + Jump Guard]
                     const wsRawDurMs = now - (p._dataArrivedAt ?? now);
                     const wsDurMs = Math.max(3000, Math.min(30000, wsRawDurMs));
                     // Long idle (>60s): always snap + discard stale trail
                     const wsIsStale = wsRawDurMs > 60000;
 
-                    const wsRenderLat = p.renderLat ?? p._interpToLat ?? emaLat;
-                    const wsRenderLng = p.renderLng ?? p._interpToLng ?? emaLng;
+                    const wsRenderLat = p.renderLat ?? p._interpToLat ?? p._emaLat ?? wp.lat;
+                    const wsRenderLng = p.renderLng ?? p._interpToLng ?? p._emaLng ?? wp.lng;
 
-                    if (wsIsStale || _isImpossibleJump(wsRenderLat, wsRenderLng, wp.lat, wp.lng, wsDurMs)) {
+                    // Bearing check runs on the raw incoming position, before EMA —
+                    // a rejected raw sample must not poison the EMA's running state,
+                    // or the next (good) sample would be smoothed against corrupted
+                    // history. On reject: skip the EMA update this cycle entirely.
+                    const bearingRejected = !wsIsStale && !wp.onGround &&
+                        _isBearingReversal(wsRenderLat, wsRenderLng, wp.lat, wp.lng, wp.heading);
+
+                    // [EMA Position Smoothing — Aeris MLAT technique]
+                    // α=0.72: 72% new + 28% prev — smooths MLAT noise (~100m)
+                    // without significantly delaying ADS-B positions (~10m).
+                    // First appearance: initialise EMA directly from raw position.
+                    const EMA_ALPHA = 0.72;
+                    let emaLat, emaLng;
+                    if (bearingRejected) {
+                        // Hold at the last trusted EMA position — do not fold the
+                        // suspect sample in.
+                        emaLat = p._emaLat ?? wsRenderLat;
+                        emaLng = p._emaLng ?? wsRenderLng;
+                    } else {
+                        emaLat = (p._emaLat != null)
+                            ? EMA_ALPHA * wp.lat + (1 - EMA_ALPHA) * p._emaLat
+                            : wp.lat;
+                        emaLng = (p._emaLng != null)
+                            ? EMA_ALPHA * wp.lng + (1 - EMA_ALPHA) * p._emaLng
+                            : wp.lng;
+                        p._emaLat = emaLat;
+                        p._emaLng = emaLng;
+                    }
+
+                    if (wsIsStale || (!bearingRejected && _isImpossibleJump(wsRenderLat, wsRenderLng, wp.lat, wp.lng, wsDurMs))) {
                         // Stale idle or impossible jump → snap directly, clear stale track
                         if (wsIsStale) trackStore.clearTrack(id);
                         p._interpFromLat = emaLat;
