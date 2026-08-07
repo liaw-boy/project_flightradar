@@ -46,6 +46,20 @@ export default function HoverCard({ plane, pos }) {
             if (photos && photos.length > 0) setPhoto(photos[0]);
             else setPhoto(null);
 
+            // [Photo Fix] plane.registration is never populated by the live tracking
+            // feed, so the lookup above was always hex-only. If it missed, retry once
+            // with the registration the fusion API just resolved.
+            if ((!photos || photos.length === 0)) {
+                const reg = fusionData?.aircraft?.registration;
+                if (reg && reg !== 'Unknown' && reg !== 'N/A') {
+                    dataManager.getPhotos(plane.icao24, reg).then(retryPhotos => {
+                        if (prevIcaoRef.current === plane.icao24 && retryPhotos?.length > 0) {
+                            setPhoto(retryPhotos[0]);
+                        }
+                    }).catch(() => {});
+                }
+            }
+
             // Merge: prefer fusion IATA codes, fall back to basic route ICAO codes
             const fusionRoute = fusionData?.route || {};
             const merged = {
@@ -174,10 +188,13 @@ export default function HoverCard({ plane, pos }) {
                 ) : null}
 
                 <div className="hover-stats">
-                    <span>{plane.onGround ? 'GND' : `${Math.round((plane.altitude || 0) * 3.28084).toLocaleString()} ft`}</span>
+                    {/* altitude arrives as alt_baro — already feet. Do not convert. */}
+                    <span>{plane.onGround ? 'GND' : `${Math.round(plane.altitude || 0).toLocaleString()} ft`}</span>
                     <span className="stats-divider">&bull;</span>
                     <span>{Math.round((plane.velocity || 0) * 1.94384)} kts</span>
-                    {plane.vRate && Math.abs(plane.vRate) > 50 && (
+                    {/* vRate is m/s (max ~±25), so the old >50 threshold never fired.
+                        0.25 m/s ≈ 50 fpm — the same intent, in the right unit. */}
+                    {plane.vRate && Math.abs(plane.vRate) > 0.25 && (
                         <>
                             <span className="stats-divider">&bull;</span>
                             <span className={plane.vRate > 0 ? 'stats-climb' : 'stats-descend'}>

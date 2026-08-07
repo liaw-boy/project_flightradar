@@ -120,7 +120,9 @@ export default function SearchBar({ planesDict, onSelectPlane }) {
                                 {plane.registration && plane.registration !== 'N/A' && plane.registration !== 'Unknown' && <span className="sr-reg">{plane.registration}</span>}
                                 {plane.onGround
                                     ? <span className="sr-ground">GND</span>
-                                    : <span className="sr-alt">{plane.altitude ? `${Math.round(plane.altitude / 100) * 100}m` : ''}</span>
+                                    // altitude is already feet (alt_baro) — same unit-label bug
+                                    // pattern fixed earlier in HoverCard/MapView/PlaneList.
+                                    : <span className="sr-alt">{plane.altitude ? `${Math.round(plane.altitude / 100) * 100}ft` : ''}</span>
                                 }
                             </span>
                         </div>

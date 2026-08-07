@@ -105,7 +105,7 @@ export default function PlaneList({ planesDict, bounds, onSelectPlane, selectedI
                                         {p.callsign || p.icao24}
                                     </div>
                                     <div className="col-alt">
-                                        {p.onGround ? 'GND' : `${Math.round(p.altitude)}m`}
+                                        {p.onGround ? 'GND' : `${Math.round(p.altitude).toLocaleString()} ft`}
                                     </div>
                                     <div className="col-spd">
                                         {(p.velocity == null || (!p.onGround && p.velocity < 0.5))

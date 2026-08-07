@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Clock, Activity, Settings, Globe, Search, X, BarChart2, User, LogOut, BookOpen, Route, ShieldCheck, Plus, Sun, Moon } from 'lucide-react';
+import { Clock, Activity, Settings, Globe, Search, X, User, LogOut, BookOpen, Route, ShieldCheck, Plus, Sun, Moon } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import { authStore } from '../store/authStore';
 import SearchBar from './SearchBar';
@@ -20,8 +20,6 @@ export default function TopBar({
     onFilterChange,
     mapLayer,
     onMapLayerChange,
-    showStats,
-    onToggleStats,
     onOpenAuth,
     onOpenMyFlights,
     onOpenNewFlight,
@@ -188,37 +186,37 @@ export default function TopBar({
                         {showUserMenu && (
                             <div className="settings-popover user-menu-popover">
                                 <button className="user-menu-item" onClick={() => { setShowUserMenu(false); onOpenNewFlight?.(); }}>
-                                    <Plus size={14} /> 新增航班記錄
+                                    <Plus size={14} /> {t('newFlight')}
                                 </button>
                                 <button className="user-menu-item" onClick={() => { setShowUserMenu(false); onOpenMyFlights?.(); }}>
-                                    <BookOpen size={14} /> 歷史紀錄
+                                    <BookOpen size={14} /> {t('myFlights')}
                                 </button>
                                 {hasUserRoutes && (
                                     <button
                                         className={`user-menu-item${showUserRoutes ? ' active' : ''}`}
                                         onClick={() => { onToggleUserRoutes?.(); setShowUserMenu(false); }}
                                     >
-                                        <Route size={14} /> {showUserRoutes ? '隱藏我的航線' : '顯示我的航線'}
+                                        <Route size={14} /> {showUserRoutes ? t('hideMyRoutes') : t('showMyRoutes')}
                                     </button>
                                 )}
                                 {!!currentUser?.is_superadmin && (
                                     <>
                                         <div className="user-menu-divider" />
                                         <button className="user-menu-item admin" onClick={() => { setShowUserMenu(false); onOpenAdmin?.(); }}>
-                                            <ShieldCheck size={14} /> 管理後台
+                                            <ShieldCheck size={14} /> {t('adminPanel')}
                                         </button>
                                     </>
                                 )}
                                 <div className="user-menu-divider" />
                                 <button className="user-menu-item danger" onClick={() => { authStore.logout(); setShowUserMenu(false); }}>
-                                    <LogOut size={14} /> 登出
+                                    <LogOut size={14} /> {t('logout')}
                                 </button>
                             </div>
                         )}
                     </div>
                 ) : (
                     <button className="tb-btn tb-login-btn" onClick={() => onOpenAuth?.()}>
-                        <User size={14} /> 登入
+                        <User size={14} /> {t('login')}
                     </button>
                 )}
             </div>

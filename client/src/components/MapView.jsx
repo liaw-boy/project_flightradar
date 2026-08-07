@@ -256,7 +256,9 @@ export default function MapView({
                 const pt = map.latLngToContainerPoint([p.renderLat, wrapLngToMap(p.renderLng, map.getCenter().lng)]);
                 const dist = Math.hypot(pt.x - clickPt.x, pt.y - clickPt.y);
 
-                const hitRadius = getDrawSize(p, map.getZoom(), getAircraftScale(p)) / 2 + 8;
+                // Floor at 16px so smaller/compressed icons (light aircraft, low zoom)
+                // stay reliably clickable even in dense traffic areas.
+                const hitRadius = Math.max(16, getDrawSize(p, map.getZoom(), getAircraftScale(p)) / 2 + 8);
                 if (dist < hitRadius) {
                     // 計算命中權重 (Weight)
                     // 基礎權重為距離反比，加上顯著的業務權重
@@ -373,7 +375,8 @@ export default function MapView({
 
                 const pt = map.latLngToContainerPoint([p.renderLat, wrapLngToMap(p.renderLng, map.getCenter().lng)]);
                 const dist = Math.hypot(pt.x - mousePt.x, pt.y - mousePt.y);
-                const hoverRadius = getDrawSize(p, map.getZoom(), getAircraftScale(p)) / 2 + 4;
+                // Floor at 16px, mirrors hitRadius floor so hover/click hot zones stay in sync.
+                const hoverRadius = Math.max(16, getDrawSize(p, map.getZoom(), getAircraftScale(p)) / 2 + 4);
                 if (dist < hoverRadius) {
                     found = true;
                     foundPlane = p;
@@ -543,8 +546,21 @@ export default function MapView({
             street: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
             terrain: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
         };
+        // Each provider's actual native tile ceiling — the layer object was
+        // created once with maxZoom:19 (the CartoDB default) and swapping the
+        // URL via setUrl() never updated it per-provider, so zooming in while
+        // on Terrain kept requesting z=18/19 tiles from OpenTopoMap, which
+        // only serves up to 17. Result: bare "no tile" placeholder art at
+        // high zoom, Terrain-only. maxNativeZoom (not maxZoom) is the right
+        // knob — it tells Leaflet to stop requesting past that level and
+        // instead upscale the last real tile, so the user can still zoom in
+        // smoothly instead of hitting a hard wall or broken tiles.
+        const TILE_MAX_NATIVE_ZOOM = {
+            light: 20, dark: 20, satellite: 19, street: 20, terrain: 17,
+        };
         const url = TILE_URLS[mapLayer] || TILE_URLS.light;
         if (tileLayerRef.current) {
+            tileLayerRef.current.options.maxNativeZoom = TILE_MAX_NATIVE_ZOOM[mapLayer] || 19;
             tileLayerRef.current.setUrl(url);
         }
     }, [mapLayer]);
@@ -1407,14 +1423,15 @@ export default function MapView({
                         ctx.beginPath();
                         ctx.arc(ptX, ptY, dotR + 1.2, 0, Math.PI * 2);
                         ctx.fill();
-                        // Colored center
-                        const _selColor = (isSelected && mapLayerRef.current !== 'light') ? '#FFD700' : altColor;
-                        ctx.fillStyle = _selColor;
+                        // Colored center — always the altitude-ramp color; selection is
+                        // conveyed via the outline ring below, never by changing the hue
+                        // (keeps this consistent with the Tier 3 icon rendering path).
+                        ctx.fillStyle = altColor;
                         ctx.beginPath();
                         ctx.arc(ptX, ptY, dotR, 0, Math.PI * 2);
                         ctx.fill();
                         if (isSelected) {
-                            ctx.strokeStyle = mapLayerRef.current === 'light' ? altColor : '#FFD700';
+                            ctx.strokeStyle = mapLayerRef.current === 'light' ? '#b45309' : '#FFD700';
                             ctx.lineWidth = 1.5;
                             ctx.stroke();
                         }
@@ -1502,7 +1519,8 @@ export default function MapView({
                         // Build label text: callsign + altitude at high zoom
                         let labelText = plane.callsign || plane.icao24?.slice(0, 6) || '';
                         if (zoom >= 13 && !plane.onGround && plane.altitude > 0) {
-                            const altFL = Math.round(plane.altitude * 3.28084 / 100);
+                            // altitude is already feet; a flight level is simply feet/100.
+                            const altFL = Math.round(plane.altitude / 100);
                             labelText += ` FL${altFL}`;
                         }
 

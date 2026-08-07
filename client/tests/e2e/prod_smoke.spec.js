@@ -17,9 +17,16 @@
 import { test, expect, request } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 
 const PROD_URL = 'https://flyradar.spkuan.cc';
-const SCREENSHOT_DIR = path.resolve('/home/lbw/project_aerostrat/client/pw-screenshots/prod-run');
+// This file is loaded as an ES module (client/package.json has "type":
+// "module"), so __dirname isn't defined — it has to be derived from
+// import.meta.url instead. The previous absolute path here was also just
+// wrong on its own terms (missing a /project/ path segment vs. where the
+// repo actually lived), so it would have failed on any machine.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SCREENSHOT_DIR = path.resolve(__dirname, '../../pw-screenshots/prod-run');
 
 function ensureDir() {
     fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });

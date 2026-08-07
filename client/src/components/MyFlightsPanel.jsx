@@ -584,6 +584,20 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
 
     useEffect(() => { loadFlights(1); loadStats(); }, [loadFlights, loadStats]);
 
+    // Escape closes the modal — every other overlay in this app (AuthModal,
+    // ConfirmDialog) already does this; this panel was the one modal without
+    // it, so Esc appeared to "do nothing" here while working everywhere else.
+    // Skipped in page mode (no overlay to dismiss) and while the delete
+    // ConfirmDialog is open (that dialog owns Escape itself; without this
+    // guard both handlers would fire on the same keypress and close the
+    // whole panel instead of just cancelling the delete).
+    useEffect(() => {
+        if (mode !== 'modal' || deleteTarget) return;
+        const onKeyDown = (e) => { if (e.key === 'Escape') onClose(); };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [mode, deleteTarget, onClose]);
+
     async function handleSave(payload) {
         if (editTarget?.id) { await apiUpdateFlight(editTarget.id, payload); showToast('已更新'); }
         else { await apiCreateFlight(payload); showToast('已新增'); }
@@ -594,17 +608,15 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
     }
 
     function confirmDelete() {
-        console.log('[DELETE] confirmDelete called, deleteTarget=', deleteTarget);
-        if (!deleteTarget) { console.warn('[DELETE] no deleteTarget, abort'); return; }
+        if (!deleteTarget) return;
         const id = deleteTarget;
         setDeleteTarget(null);
         setFlights(prev => prev.filter(f => f.id !== id));
         setTotal(prev => Math.max(0, prev - 1));
         showToast('已刪除');
         apiDeleteFlight(id)
-            .then(() => { console.log('[DELETE] API ok, id=', id); loadFlights(page); loadStats(); })
-            .catch(e => {
-                console.error('[DELETE] API failed:', e);
+            .then(() => { loadFlights(page); loadStats(); })
+            .catch(() => {
                 showToast('刪除失敗，重新載入中…');
                 loadFlights(page);
             });
@@ -769,7 +781,7 @@ export default function MyFlightsPanel({ onClose, prefillFromPlane, initialView 
     // ── Modal 模式 ────────────────────────────────────────────────────────────
     return (
         <div className="mfp-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-            <div className="mfp-panel">
+            <div className="mfp-panel" role="dialog" aria-modal="true" aria-label="My flights">
                 <div className="mfp-panel-header">
                     <div className="mfp-panel-title">
                         <div className="mfp-panel-eyebrow">Aerostrat · Personal record</div>

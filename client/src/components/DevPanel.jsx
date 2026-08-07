@@ -111,9 +111,20 @@ export default function DevPanel({ usageStats, apiStatus, apiStats, latency, pla
 
     // ── Backend health poll (every 5s) ──────────────────────────
     const [health, setHealth] = useState(null);
+    // /api/health requires admin auth. A non-admin user opening DevPanel
+    // (Ctrl+D is a global, undocumented shortcut — not admin-gated) used to
+    // get a silent 401 every 5s forever: health stayed null, every stat in
+    // this panel just showed "—" with no indication why. Surface it instead.
+    const [healthAuthError, setHealthAuthError] = useState(false);
     useEffect(() => {
         const fetch_ = () =>
-            authFetch('/api/health').then(r => r.ok ? r.json() : null).then(d => d && setHealth(d)).catch(() => {});
+            authFetch('/api/health')
+                .then(r => {
+                    setHealthAuthError(r.status === 401);
+                    return r.ok ? r.json() : null;
+                })
+                .then(d => d && setHealth(d))
+                .catch(() => {});
         fetch_();
         const id = setInterval(fetch_, 5000);
         return () => clearInterval(id);
@@ -196,14 +207,22 @@ export default function DevPanel({ usageStats, apiStatus, apiStats, latency, pla
 
             {/* ── SYNC ── */}
             <Section title="SYNC" icon="⟳">
-                <div className="dp-row">
-                    <span className="dp-lbl">Cycle #</span>
-                    <span className="dp-val">{syncCycle}</span>
-                </div>
-                <div className="dp-row">
-                    <span className="dp-lbl">Last batch</span>
-                    <span className="dp-val">{lastBatch} planes <span className="dp-dim">{lastBatchMs}ms</span></span>
-                </div>
+                {healthAuthError ? (
+                    <div className="dp-row">
+                        <span className="dp-val dp-dim">Admin login required to view sync stats</span>
+                    </div>
+                ) : (
+                    <>
+                        <div className="dp-row">
+                            <span className="dp-lbl">Cycle #</span>
+                            <span className="dp-val">{syncCycle}</span>
+                        </div>
+                        <div className="dp-row">
+                            <span className="dp-lbl">Last batch</span>
+                            <span className="dp-val">{lastBatch} planes <span className="dp-dim">{lastBatchMs}ms</span></span>
+                        </div>
+                    </>
+                )}
                 {uptime !== null && (
                     <div className="dp-row">
                         <span className="dp-lbl">Uptime</span>

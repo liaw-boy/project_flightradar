@@ -64,7 +64,14 @@ export const dataManager = {
         if (cached) return cached;
 
         try {
-            const response = await fetch(`/api/route/${icao24}`);
+            // Without ?callsign, the backend has nothing to key its static/
+            // dictionary lookups on and falls straight to spatial inference,
+            // which only ever fills departureAirport — arrival stays null,
+            // and that non-null departureAirport was silently satisfying the
+            // "should we try the external fallback" check below, so the
+            // external route lookup never ran either.
+            const qs = callsign ? `?callsign=${encodeURIComponent(callsign)}` : '';
+            const response = await fetch(`/api/route/${icao24}${qs}`);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             let data = await response.json();
 

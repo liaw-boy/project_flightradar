@@ -467,39 +467,56 @@ export function getAircraftScale(plane) {
 }
 
 // Increment this when scale values or size curve changes — busts MapView scaleCacheRef
-export const ICON_SCALE_VERSION = 4;
+export const ICON_SCALE_VERSION = 5;
 
 /**
- * adsb.fi-style zoom-to-pixel curve.
+ * adsb.fi/FR24-style zoom-to-pixel curve.
  *
- * Tier 1 — Tactical Dot (zoom ≤ 4):  5 px  ← render loop draws arc(), NOT Path2D
- * Tier 2 — Small silhouette (z 5-8): 9-26 px
- * Tier 3 — Full silhouette  (z 9+):  30+ px, capped at 58 px
- *
- * All aircraft render at the same pixel size per zoom level — `_typeScale`
- * (the per-typecode catalog scale from getAircraftScale) is accepted for
- * call-site compatibility but intentionally unused. A previous version had
- * per-category size compression here (narrow vs wide vs jumbo); it was
- * removed. Re-add deliberately if per-type sizing is wanted again, rather
- * than reviving unused-but-still-threaded-through params.
+ * History:
+ *  - v4 and earlier: `base` (zoom 3-19 tier table) was capped at 58px and
+ *    THEN multiplied by `_SCALE_REF` (1.45), so the real on-screen max was
+ *    ~84px, not the 58px the old comment claimed. `_typeScale` was accepted
+ *    for call-site compatibility but never used — every aircraft type drew
+ *    at the same size for a given zoom.
+ *  - v5 (this version): two deliberate changes —
+ *      1) Curve compression: the whole zoom 3-19 curve is compressed to
+ *         roughly 60% of its old span. The zoom 3-4 floor stays ~15px
+ *         (barely moved) while the zoom 16-19 ceiling drops from ~84px to
+ *         ~53px. Mid-zoom values are interpolated proportionally.
+ *      2) Type differentiation: `_typeScale` (the per-typecode catalog scale
+ *         from `getAircraftScale`) is now actually applied. It is normalized
+ *         against the narrow-body baseline (A320/B738 catalog scale = 1.45,
+ *         i.e. 1.0×) and clamped to [0.85, 1.4] so jumbos/widebodies read
+ *         larger and light aircraft read smaller, without swinging as far
+ *         as FR24/tar1090's raw ratio would (deliberately conservative —
+ *         avoid a jarring one-shot size change for users).
  */
-const _SCALE_REF = 1.45; // B738 / A320 catalog scale — rendered as 1× base
-export function getDrawSize(_plane, zoom, _typeScale = 1.0) {
+const _SCALE_REF = 1.45; // B738 / A320 catalog scale — normalizes typeScale to 1.0×
+const _TYPE_SCALE_MIN = 0.85;
+const _TYPE_SCALE_MAX = 1.4;
+export function getDrawSize(_plane, zoom, _typeScale = _SCALE_REF) {
     let base;
-    if      (zoom <= 4)  base = 10; // min ~14px — always a recognizable shape, never a dot
-    else if (zoom <= 5)  base = 13; // ~19px
-    else if (zoom <= 6)  base = 15;
-    else if (zoom <= 7)  base = 21;
-    else if (zoom <= 8)  base = 26;
-    else if (zoom <= 9)  base = 30;
+    if      (zoom <= 4)  base = 15; // floor — always a recognizable shape, never a dot
+    else if (zoom <= 5)  base = 18;
+    else if (zoom <= 6)  base = 20;
+    else if (zoom <= 7)  base = 24;
+    else if (zoom <= 8)  base = 28;
+    else if (zoom <= 9)  base = 31;
     else if (zoom <= 10) base = 34;
-    else if (zoom <= 11) base = 38;
-    else if (zoom <= 12) base = 42;
-    else if (zoom <= 13) base = 46;
-    else                 base = Math.min(58, 46 + (zoom - 13) * 4);
+    else if (zoom <= 11) base = 37;
+    else if (zoom <= 12) base = 40;
+    else if (zoom <= 13) base = 43;
+    else if (zoom <= 14) base = 46;
+    else if (zoom <= 15) base = 49;
+    else                 base = Math.min(53, 49 + (zoom - 15) * 2); // ceiling ~53px
 
-    // Uniform size: all aircraft render at the same pixel size per zoom level.
-    return Math.round(base * _SCALE_REF);
+    // Normalize the catalog scale (e.g. AIRCRAFT_CATALOG[...].scale, 1.00-2.58)
+    // against the narrow-body baseline (1.45 → 1.0×), then clamp the
+    // differentiation range so size varies by type but stays subtle.
+    const normalized = _typeScale / _SCALE_REF;
+    const typeFactor = Math.min(_TYPE_SCALE_MAX, Math.max(_TYPE_SCALE_MIN, normalized));
+
+    return Math.round(base * typeFactor);
 }
 
 

@@ -20,7 +20,14 @@ export class FlightDataStore {
      * @param {number} backgroundPoints 每架背景飛機保留的點數 (預設 200)
      * @param {number} highResPoints 選中飛機保留的點數 (預設 10000)
      */
-    constructor(maxPlanes = 10000, backgroundPoints = 2000, highResPoints = 20000) {
+    // backgroundPoints previously defaulted to 2000 — 10x the value the doc
+    // comment above claims (200), and the actual driver of this store's
+    // memory footprint since it's multiplied by maxPlanes: 10000 * 2000 * 5
+    // floats * 4 bytes ≈ 381MB allocated up front regardless of how many
+    // aircraft are actually connected. Background (non-selected) aircraft
+    // trails don't need anywhere near that many points to look right on
+    // screen; 200 matches what the doc comment always said was intended.
+    constructor(maxPlanes = 10000, backgroundPoints = 200, highResPoints = 20000) {
         this.maxPlanes = maxPlanes;
         this.backgroundPoints = backgroundPoints;
         this.highResPoints = highResPoints;

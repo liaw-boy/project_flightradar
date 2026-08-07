@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo
 echo " =========================================="
 echo " AEROSTRAT Backend Engine v5.0.0"
-echo " Port 3001  /  MongoDB Local"
+echo " Port 3001  /  SQLite (backend/data/aerostrat.db)"
 echo " =========================================="
 echo
 
@@ -17,7 +17,7 @@ cd backend
 
 if [ ! -f ".env" ]; then
     echo " [ERROR] .env not found!"
-    echo " Please create .env with MONGODB_URI, PORT, OPENSKY credentials."
+    echo " Please create .env with PORT, JWT_SECRET, OPENSKY credentials."
     echo
     read -p "Press Enter to exit..."
     exit 1

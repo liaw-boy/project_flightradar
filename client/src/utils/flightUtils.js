@@ -274,37 +274,56 @@ const _ALT_STOPS = [
 ];
 
 /**
- * Returns the adsb.fi altitude gradient color for a given altitude (metres).
+ * SINGLE SOURCE OF TRUTH for aircraft icon color across the whole app.
+ * Both the on-map aircraft icons (MapView) and the bottom altitude legend
+ * (AltitudeLegend) must derive their colors from this function / the
+ * `_ALT_STOPS` ramp it reads from — never hardcode a separate palette.
  *
- * scheme = 'TACTICAL'       → uniform #ffce00 (legacy tactical yellow)
- * scheme = 'ALTITUDE'       → smooth HSL gradient (default, matches adsb.fi)
- * scheme = 'ALTITUDE_LIGHT' → dark grey gradient for light map backgrounds
+ * Priority order (highest wins):
+ *   1. Emergency (squawk 7500/7600/7700) → fixed alarm red, ignores altitude entirely.
+ *   2. Ground / parked                    → the ramp's own GND stop (orange), not an
+ *                                            unrelated grey — so a taxiing aircraft's
+ *                                            color always matches the legend's "GND" swatch.
+ *   3. Airborne                           → smooth HSL interpolation across `_ALT_STOPS`.
+ *
+ * scheme = 'TACTICAL'       → uniform #ffce00 (legacy tactical yellow, altitude-blind)
+ * scheme = 'ALTITUDE'       → smooth HSL gradient (default, matches adsb.fi / the legend)
+ * scheme = 'ALTITUDE_LIGHT' → same hue ramp, desaturated/darkened for legibility on a
+ *                              light basemap — hue still matches the legend at every
+ *                              altitude, only saturation/lightness differ.
+ *
+ * Selection state is intentionally NOT handled here: callers should keep this
+ * function's color as the icon fill and layer a separate outline/glow for
+ * "selected", so the altitude-color meaning of the icon is never obscured.
  */
 export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'ALTITUDE') {
     if (isEmergency) return '#ef4444';
     if (scheme === 'TACTICAL') return '#F0C040';
 
-    // Light map mode — dark grey tones so planes are visible on light backgrounds
-    if (scheme === 'ALTITUDE_LIGHT') {
-        if (onGround || altitude === 'GROUND') return '#6b7280'; // ground: medium grey
-        const alt = parseFloat(altitude);
-        if (isNaN(alt) || alt <= 0) return '#6b7280';
-        // Map altitude to dark grey range: low=#374151, high=#111827
-        const pct = Math.min(1, alt / 12000);
-        const l = Math.round(40 - pct * 22); // 40% → 18% lightness
-        return `hsl(220,15%,${l}%)`;
+    const isLight = scheme === 'ALTITUDE_LIGHT';
+    const stops = _ALT_STOPS;
+
+    // Ground stop lightness/saturation are tuned per-scheme for contrast against
+    // the basemap, but the HUE always comes from the same GND stop as the legend.
+    const toCss = (h, s, l) => isLight
+        ? `hsl(${Math.round(h)},${Math.round(s * 0.75)}%,${Math.max(26, Math.round(l * 0.62))}%)`
+        : `hsl(${Math.round(h)},${Math.round(s)}%,${Math.round(l)}%)`;
+
+    if (onGround || altitude === 'GROUND') {
+        const g = stops[0];
+        return toCss(g.h, g.s, g.l);
     }
 
-    if (onGround || altitude === 'GROUND') return '#94a3b8'; // slate — parked / taxiing
-
     const alt = parseFloat(altitude);
-    if (isNaN(alt) || alt <= 0) return '#94a3b8';
+    if (isNaN(alt) || alt <= 0) {
+        const g = stops[0];
+        return toCss(g.h, g.s, g.l);
+    }
 
-    const stops = _ALT_STOPS;
     // Clamp to range
     if (alt >= stops[stops.length - 1].alt) {
         const s = stops[stops.length - 1];
-        return `hsl(${s.h},${s.s}%,${s.l}%)`;
+        return toCss(s.h, s.s, s.l);
     }
     // Find bracketing stops
     let lo = stops[0], hi = stops[1];
@@ -319,7 +338,7 @@ export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'ALTI
     const h = ((lo.h + t * dh) % 360 + 360) % 360;
     const s = lo.s + t * (hi.s - lo.s);
     const l = lo.l + t * (hi.l - lo.l);
-    return `hsl(${Math.round(h)},${Math.round(s)}%,${Math.round(l)}%)`;
+    return toCss(h, s, l);
 }
 
 

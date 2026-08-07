@@ -17,7 +17,7 @@ export default defineConfig({
     workers: 1,
     reporter: [
         ['list'],
-        ['html', { outputFolder: '/home/lbw/project_aerostrat/client/pw-screenshots/prod-run/report', open: 'never' }],
+        ['html', { outputFolder: './pw-screenshots/prod-run/report', open: 'never' }],
     ],
     use: {
         baseURL: 'https://flyradar.spkuan.cc',
@@ -27,7 +27,7 @@ export default defineConfig({
         headless: true,
         viewport: { width: 1400, height: 900 },
     },
-    outputDir: '/home/lbw/project_aerostrat/client/pw-screenshots/prod-run/artifacts',
+    outputDir: './pw-screenshots/prod-run/artifacts',
     projects: [
         {
             name: 'chromium',

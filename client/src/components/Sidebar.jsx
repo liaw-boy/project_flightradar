@@ -9,7 +9,6 @@ import { useI18n } from '../hooks/useI18n';
 import { logToServer, logger } from '../utils/logger';
 import { dataManager } from '../services/dataManager';
 import { flightDetailsCache } from '../services/flightDetailsCache';
-import TimePlayer from './TimePlayer';
 import MiniRouteMap from './SidebarMiniMap';
 import { AltitudeChart, FlightProgressInline, FlightProgress } from './SidebarFlightInfo';
 import './Sidebar.css';
@@ -177,6 +176,43 @@ export default function Sidebar({
         return () => { active = false; };
     }, [icao24]); // [v7.0] Only re-fetch on new plane, not on displayRegistration change
 
+    // [Photo Fix] The initial fetch above only ever has `hex` — the live tracking
+    // feed's plane objects never carry a `registration` field (ADS-B state vectors
+    // don't transmit it), so photoRegRef.current was always null in production and
+    // the backend's registration-priority lookup (which has a meaningfully better
+    // hit-rate for GA/re-registered aircraft) was never actually reachable.
+    // Once the fusion API resolves a real registration, retry ONCE — but only if
+    // the hex-only lookup came back empty, so already-successful photos never
+    // re-fetch (no perf regression vs. the original v7.0 fix).
+    const photoRetriedRef = useRef(null);
+    useEffect(() => {
+        if (isFetching) return;
+        if (photos.length > 0) return;
+        const reg = aircraft.registration;
+        if (!reg || reg === 'Unknown' || reg === 'N/A') return;
+
+        const retryKey = `${icao24}:${reg}`;
+        if (photoRetriedRef.current === retryKey) return;
+        photoRetriedRef.current = retryKey;
+
+        let active = true;
+        dataManager.getPhotos(icao24, reg)
+            .then(results => {
+                if (!active) return;
+                const formatted = (results || []).slice(0, 1).map(p => ({
+                    url: p.thumbnail_large?.src || p.thumbnail?.src || p.link || null,
+                    photographer: p.photographer || 'Planespotters.net'
+                })).filter(h => h.url);
+                if (formatted.length > 0) {
+                    setPhotos(formatted);
+                    setCurrentPhotoIdx(0);
+                    setIsImageLoaded(false);
+                }
+            })
+            .catch(() => {});
+        return () => { active = false; };
+    }, [icao24, aircraft.registration, isFetching, photos.length]);
+
     const nextPhoto = (e) => {
         e.stopPropagation();
         setIsImageLoaded(false); // [v6.6] Reset for seamless transition
@@ -236,7 +272,18 @@ export default function Sidebar({
     const dataAge = Math.max(0, nowUnix - (plane.lastContact || nowUnix));
     const contactTime = new Date((plane.lastContact || nowUnix) * 1000).toLocaleTimeString();
     const fr24Url = `https://www.flightradar24.com/${plane.callsign}`;
-    const airlineName = getAirlineName(plane.callsign);
+    // operatorName (defined above) is the real, backend-enriched airline —
+    // sourced from Mictronics/adsbdb operator data, populated for ~21% of
+    // live traffic today (limited by upstream registry coverage, not a bug).
+    // getAirlineName() is a client-side fallback: a ~30-entry hardcoded
+    // callsign-prefix table. The "Airline" field was reading ONLY the weak
+    // fallback and never checking operatorName at all, so it stayed blank
+    // for every aircraft not in that 30-airline table even when the richer
+    // operator data was sitting right there, already computed, unused.
+    const airlineName = operatorName || getAirlineName(plane.callsign);
+    const nearestAirport = (typeof plane.lat === 'number' && typeof plane.lng === 'number')
+        ? getNearestAirport(plane.lat, plane.lng)
+        : null;
     const posSourceMap = { 0: 'ADS-B', 1: 'ASTERIX', 2: 'MLAT', 3: 'FLARM' };
 
     return (
@@ -273,6 +320,22 @@ export default function Sidebar({
 
                 </div>
                 <div className="sb-header-actions">
+                    {onToggleTrack && (
+                        <button
+                            type="button"
+                            onClick={onToggleTrack}
+                            title={trackMode ? t('trackOff') : t('trackOn')}
+                            aria-pressed={!!trackMode}
+                            style={{
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: trackMode ? '#22d3ee' : 'var(--color-text-dim, #64748b)',
+                                padding: '4px', display: 'flex', alignItems: 'center',
+                                transition: 'color 0.2s', borderRadius: '6px',
+                            }}
+                        >
+                            <MapPin size={20} fill={trackMode ? 'currentColor' : 'none'} />
+                        </button>
+                    )}
                     <ShareButton icao24={icao24} />
                     <div className="sb-close" onClick={onClose}><X size={20} /></div>
                 </div>
@@ -567,6 +630,27 @@ export default function Sidebar({
                         <DataRow label={t('lastContact')} value={contactTime} />
                         <DataRow label={t('dataAge')} value={`${dataAge}s`} />
                     </div>
+                )}
+
+                {/* openSections had a 'nearest' slot reserved from the start
+                    (useState default above), but no section was ever built
+                    for it — getNearestAirport() was imported and unused. */}
+                {nearestAirport && (
+                    <>
+                        <div className={`sb-section-title accordion ${openSections.nearest ? 'open' : ''}`} onClick={() => toggleSection('nearest')}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--color-text-primary)' }}>
+                                <div className="sb-section-icon"><MapPin size={14} strokeWidth={2.5} /></div>
+                                {t('nearestAirport')}
+                            </span>
+                            <span className={`chevron ${openSections.nearest ? 'open' : ''}`}></span>
+                        </div>
+                        {openSections.nearest && (
+                            <div className="sb-section-content">
+                                <DataRow label={t('airport')} value={`${nearestAirport.airport.name || nearestAirport.airport.icao} (${nearestAirport.airport.icao})`} />
+                                <DataRow label={t('distance')} value={`${nearestAirport.distance} km`} />
+                            </div>
+                        )}
+                    </>
                 )}
 
                 <a href={fr24Url} target="_blank" rel="noopener noreferrer" className="route-btn" onClick={() => logToServer(`FR24 track: ${plane.callsign}`, 'info')}>

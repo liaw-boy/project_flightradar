@@ -166,10 +166,17 @@ export default function AuthModal({ onClose }) {
 
     return (
         <div ref={modalRef} className="auth-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-            <div className="auth-modal">
+            <div className="auth-modal" role="dialog" aria-modal="true" aria-label="Sign in">
 
                 {/* ══ LEFT — Plane Scene ══ */}
-                <div className="auth-left">
+                {/* This decorative panel is full-bleed (100% width/height, same as
+                    .auth-overlay), so the overlay's "click background to close"
+                    handler (line ~168, e.target === e.currentTarget) never actually
+                    fires — there is no overlay pixel left uncovered for a user to
+                    click. Everything in here is aria-hidden decoration, so treating
+                    a click on it the same as a backdrop click matches what a user
+                    clicking "empty-looking space" expects. */}
+                <div className="auth-left" onClick={onClose}>
                     {/* Runway SVG — runway-x:85% runway-y:49% scale:1.0 opacity:0.4 */}
                     <div className="auth-runway" aria-hidden="true">
                         <svg viewBox="0 0 500 900" width="500" height="900" style={{overflow:'visible',display:'block'}}>

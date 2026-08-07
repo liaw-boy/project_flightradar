@@ -49,12 +49,19 @@
     pointer-events: none;
     z-index: 0;
     filter: brightness(1.4) saturate(0.4) contrast(0.9);
+    /* [FIX] Never let the decorative banner reach under the action icons
+       (track / share / close). Positioned elements always paint above
+       static in-flow siblings regardless of z-index, so this width cap
+       plus the fade mask keeps it clear of sb-header-actions. */
+    max-width: 140px;
+    -webkit-mask-image: linear-gradient(to left, black 55%, transparent 100%);
+    mask-image: linear-gradient(to left, black 55%, transparent 100%);
 }
 
 .sb-header-watermark img {
     height: 100%;
     width: auto;
-    max-width: 180px;
+    max-width: 140px;
     object-fit: contain;
 }
 
@@ -115,6 +122,15 @@
     align-items: center;
     gap: 4px;
     flex-shrink: 0;
+    /* [FIX] Without an explicit position, this static sibling painted
+       BEHIND the position:absolute .sb-header-watermark banner (CSS
+       stacking order always puts positioned elements above in-flow
+       static content, no matter the DOM order or the banner's z-index:0).
+       That let the airline banner visually cover the track/share/close
+       icons. Establish a stacking context above the watermark (0) and
+       the title block (1) so the action buttons are always on top. */
+    position: relative;
+    z-index: 2;
 }
 
 .sb-close {

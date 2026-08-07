@@ -150,6 +150,19 @@ const translations = {
         statsThrottle: 'Dynamic Throttle',
         statsNoAirline: 'No airline data',
         statsNoType: 'No type data',
+        // TopBar user menu — was hardcoded Chinese regardless of language toggle
+        login: 'Sign In',
+        newFlight: 'Log New Flight',
+        myFlights: 'Flight History',
+        showMyRoutes: 'Show My Routes',
+        hideMyRoutes: 'Hide My Routes',
+        adminPanel: 'Admin Panel',
+        logout: 'Sign Out',
+        // Sidebar track-lock toggle
+        trackOn: 'Keep map centered on this aircraft',
+        trackOff: 'Stop tracking on map',
+        // PlaneList column header
+        callsign: 'CALLSIGN',
     },
     cn: {
         // Dashboard
@@ -259,6 +272,16 @@ const translations = {
         statsThrottle: '動態降頻',
         statsNoAirline: '無航空公司資料',
         statsNoType: '無機型資料',
+        login: '登入',
+        newFlight: '新增航班記錄',
+        myFlights: '歷史紀錄',
+        showMyRoutes: '顯示我的航線',
+        hideMyRoutes: '隱藏我的航線',
+        adminPanel: '管理後台',
+        logout: '登出',
+        trackOn: '在地圖上持續追蹤這架飛機',
+        trackOff: '停止追蹤',
+        callsign: '呼號',
     },
 };
 

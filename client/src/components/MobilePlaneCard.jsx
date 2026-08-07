@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { dataManager } from '../services/dataManager';
+import { flightDetailsCache } from '../services/flightDetailsCache';
 import './MobilePlaneCard.css';
 
 export default function MobilePlaneCard({ plane, icao24, metadata, route, onClose, onExpand }) {
@@ -24,12 +25,30 @@ export default function MobilePlaneCard({ plane, icao24, metadata, route, onClos
 
     useEffect(() => {
         if (!icao24) return;
+        let active = true;
         dataManager.getPhotos(icao24, photoRegRef.current || undefined)
             .then(results => {
+                if (!active) return;
                 const first = results?.[0];
-                if (first) setPhotoUrl(first.thumbnail_large?.src || first.thumbnail?.src || null);
+                if (first) {
+                    setPhotoUrl(first.thumbnail_large?.src || first.thumbnail?.src || null);
+                    return;
+                }
+                // [Photo Fix] plane.registration is never populated by the live tracking
+                // feed, so the lookup above was always hex-only. Sidebar/HoverCard share
+                // a resolved-registration cache (populated once the fusion API responds
+                // for this plane elsewhere in the UI) — check it passively, no extra call.
+                const cachedReg = flightDetailsCache.get(icao24)?.aircraft?.registration;
+                if (cachedReg && cachedReg !== 'Unknown' && cachedReg !== 'N/A') {
+                    dataManager.getPhotos(icao24, cachedReg).then(retryResults => {
+                        if (!active) return;
+                        const retryFirst = retryResults?.[0];
+                        if (retryFirst) setPhotoUrl(retryFirst.thumbnail_large?.src || retryFirst.thumbnail?.src || null);
+                    }).catch(() => {});
+                }
             })
             .catch(() => {});
+        return () => { active = false; };
     }, [icao24]);
 
     // 往上滑 → 展開詳細；往下滑 → 關閉

@@ -61,8 +61,11 @@ export async function enrichPlaneDetails(hex) {
             }
             resolvedCount++;
         }
+        // found.type is an ADS-B signal-source label (adsb_icao/tisb_other/...),
+        // not an aircraft type — same bug already fixed backend-side in
+        // normalizeAcRecord(). Only found.t / found.typecode are ever real.
         resolvedPlanes[hexKey] = {
-            typecode: (found.t || found.type || found.typecode || '').toUpperCase(),
+            typecode: (found.t || found.typecode || '').toUpperCase(),
             registration: (found.r || found.registration || '').toUpperCase()
         };
         return resolvedPlanes[hexKey];
