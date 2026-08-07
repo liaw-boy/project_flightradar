@@ -175,7 +175,7 @@ async function syncRoutes() {
                     await RouteDictionary.bulkWrite(ops, { ordered: false });
                     totalInserted += ops.length;
                     console.log(`[OSINT] Inserted ${totalInserted} routes so far...`);
-                    await sleep(100); // throttle: prevent sustained MongoDB CPU spike
+                    await sleep(100); // throttle: pace bulk writes into in-memory RouteDictionary
                 } catch (e) {
                     if (e.code !== 11000) console.error('[OSINT] Bulk write error:', e.message);
                 }
