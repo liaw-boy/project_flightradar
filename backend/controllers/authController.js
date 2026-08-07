@@ -7,6 +7,12 @@ const SALT_ROUNDS  = 10;
 const TOKEN_TTL    = '7d';
 const COOKIE_NAME  = 'aerostrat_token';
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
+// Lock verification to the single algorithm we actually sign with. Without
+// this, jwt.verify() accepts whatever `alg` the token header claims —
+// including 'none' on old jsonwebtoken versions, or (if the secret were ever
+// swapped for an RSA public key elsewhere) an attacker-forged HS256 token
+// signed with that public key as an HMAC key ("algorithm confusion").
+const JWT_ALGORITHMS = ['HS256'];
 
 // Pre-hashed dummy — equalizes login response time to prevent user-enumeration.
 let DUMMY_HASH = '$2b$10$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
@@ -150,7 +156,7 @@ function authMiddleware(req, res, next) {
     if (!token) return res.status(401).json({ error: 'authentication required' });
 
     try {
-        req.user = jwt.verify(token, getJwtSecret());
+        req.user = jwt.verify(token, getJwtSecret(), { algorithms: JWT_ALGORITHMS });
         next();
     } catch {
         res.status(401).json({ error: 'invalid or expired token' });
@@ -177,7 +183,7 @@ async function refresh(req, res) {
 
     if (!token) return res.status(401).json({ error: 'no token' });
     try {
-        const payload = jwt.verify(token, getJwtSecret());
+        const payload = jwt.verify(token, getJwtSecret(), { algorithms: JWT_ALGORITHMS });
         const user    = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
         if (!user) return res.status(401).json({ error: 'user not found' });
         const newToken = signToken(user);

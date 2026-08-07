@@ -93,7 +93,7 @@
     --topbar-h:    60px;
     --panel-gap:   clamp(10px, 1vw, 16px);
     --hud-w:       clamp(220px, 16vw, 280px);
-    --sidebar-w:   clamp(320px, 22vw, 440px);
+    --sidebar-w:   clamp(375px, 26vw, 515px);
     --carousel-h:  clamp(160px, 13vw, 220px);
 }
 
@@ -199,6 +199,19 @@ body,
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================================
+   Keyboard focus — global. Previously only a handful of individual
+   <input> elements had any :focus style, and those used bare :focus
+   (fires on mouse clicks too), so keyboard-only users navigating
+   through buttons, tabs, and map controls had no visible indicator
+   of where focus was at all.
+   ============================================================ */
+:focus-visible {
+    outline: 2px solid var(--accent, #22d3ee);
+    outline-offset: 2px;
+    border-radius: 2px;
 }
 
 /* ============================================================
