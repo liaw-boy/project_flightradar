@@ -219,13 +219,27 @@ function loadShapes(arr) {
     }
 }
 
-/** Populate airports from array (server.js loads from Airport DB/JSON) */
+/**
+ * Populate airports from array (server.js loads from Airport DB/JSON).
+ *
+ * server.js calls this AFTER the module's own init() has already populated
+ * airportByIcao/airportByIata with entries shaped { lat, lon }. The incoming
+ * array here (sourced from data/processed/airports_global.json) uses { lat,
+ * lng } instead — passing those objects through as-is silently overwrote
+ * the correctly-shaped `lon` field with nothing, leaving every entry
+ * without a `lon` key. Every consumer that reads `.lon` (e.g.
+ * flightController's depCoords resolution) got `undefined` back with no
+ * error. Normalize to the { lat, lon } shape this module's API contract
+ * promises, without mutating the source objects.
+ */
 function loadAirports(arr) {
     for (const a of arr) {
         const icao = (a.icao || '').toUpperCase();
         const iata = (a.iata || '').toUpperCase();
-        if (icao) airportByIcao.set(icao, a);
-        if (iata) airportByIata.set(iata, a);
+        const lon  = a.lon != null ? a.lon : a.lng;
+        const entry = { ...a, lon };
+        if (icao) airportByIcao.set(icao, entry);
+        if (iata) airportByIata.set(iata, entry);
     }
 }
 
