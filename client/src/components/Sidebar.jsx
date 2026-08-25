@@ -48,7 +48,7 @@ function ShareButton({ icao24 }) {
 
 // ─── Main Sidebar Component ────────────────────────────────────────────────────
 export default function Sidebar({
-    plane, icao24, metadata, route, trackPoints, playbackTime, onPlaybackChange,
+    plane, icao24, metadata, route, trackPoints,
     flightHistoryRef, onClose, trackMode, onToggleTrack
 }) {
     const { t } = useI18n();
@@ -73,47 +73,77 @@ export default function Sidebar({
     const [isLoadingDetails, setIsLoadingDetails] = useState(true);
 
     useEffect(() => {
-        let isMounted = true;
+        // AbortController — not just a isMounted flag — so switching planes
+        // actually cancels the in-flight request for the previously selected
+        // one instead of leaving it to complete uselessly in the background
+        // (wastes bandwidth/backend load and can still race the new fetch).
+        const controller = new AbortController();
         setIsLoadingDetails(true);
+        // Reset fusionData immediately so a fast reselect never shows the
+        // PREVIOUS plane's route/aircraft details under the new plane's
+        // header for even one frame; the icao24-match guard below (`aircraft`/
+        // `rawRoute`) is the real fix for that, this is just belt-and-braces.
         setFusionData(null);
-        
+
         const callsignParam = getSafeCallsignParam(plane);
         const cached = flightDetailsCache.get(icao24);
         if (!callsignParam) {
             if (cached) { setFusionData(cached); }
             setIsLoadingDetails(false);
-            return () => { isMounted = false; };
+            return () => controller.abort();
         }
         if (cached) {
             setFusionData(cached);
             setIsLoadingDetails(false);
-            // re-fetch in background to keep cache fresh
-            fetch(`/api/flight/complete-details/${icao24}/${callsignParam}`)
-                .then(r => r.json()).then(data => { flightDetailsCache.set(icao24, data); }).catch(() => {});
-            return () => { isMounted = false; };
+            // Re-fetch in background to keep the cache fresh AND actually
+            // update what's on screen — previously this only wrote back to
+            // flightDetailsCache, so the user stayed looking at the stale
+            // cached entry until they happened to reselect the plane a
+            // THIRD time. Guard with the abort signal so a quick reselect
+            // during this background refresh doesn't clobber the new plane.
+            fetch(`/api/flight/complete-details/${icao24}/${callsignParam}`, { signal: controller.signal })
+                .then(r => r.json())
+                .then(data => {
+                    flightDetailsCache.set(icao24, data);
+                    if (!controller.signal.aborted) setFusionData(data);
+                })
+                .catch(() => {});
+            return () => controller.abort();
         }
 
-        fetch(`/api/flight/complete-details/${icao24}/${callsignParam}`)
+        fetch(`/api/flight/complete-details/${icao24}/${callsignParam}`, { signal: controller.signal })
             .then(res => res.json())
             .then(data => {
-                if (isMounted) {
-                    flightDetailsCache.set(icao24, data);
+                flightDetailsCache.set(icao24, data);
+                if (!controller.signal.aborted) {
                     setFusionData(data);
                     setIsLoadingDetails(false);
                 }
             })
             .catch(err => {
+                if (err.name === 'AbortError') return; // expected — plane changed before this resolved
                 logger.error('UI', `Fusion API error for ${icao24}: ${err.message}`);
-                if (isMounted) setIsLoadingDetails(false);
+                if (!controller.signal.aborted) setIsLoadingDetails(false);
             });
-        return () => { isMounted = false; };
+        return () => controller.abort();
     }, [icao24, plane.callsign]);
 
-    const aircraft = fusionData?.aircraft || {};
+    // Guard against the one-render window where `icao24` (from the parent's
+    // already-updated selection) has moved on to a new plane but `fusionData`
+    // still holds the previous plane's response — e.g. between the parent
+    // re-rendering with the new selection and this component's own effect
+    // above resetting fusionData to null on the next tick. Without this,
+    // the new plane's header/position briefly renders next to the OLD
+    // plane's route/aircraft/photo. `hex` is always present on a successful
+    // /api/flight/complete-details response.
+    const fusionMatchesSelection = fusionData && fusionData.hex === (icao24 || '').toLowerCase();
+    const safeFusionData = fusionMatchesSelection ? fusionData : null;
+
+    const aircraft = safeFusionData?.aircraft || {};
     // Guard: if the API returned a route with status "Arrived" but the plane is currently
     // airborne, the data belongs to the PREVIOUS flight (callsign was reused).
     // Discard it and show no route info so we don't mislead the user.
-    const rawRoute = fusionData?.route || {};
+    const rawRoute = safeFusionData?.route || {};
     const isStaleArrivedRoute =
         rawRoute.flightStatus === 'Arrived' && !plane.onGround;
     const routeInfo = isStaleArrivedRoute ? {} : rawRoute;
@@ -590,7 +620,7 @@ export default function Sidebar({
                     <div className="sb-section-content">
                         {/* Secondary info rows */}
                         <DataRow label={t('position')} value={plane.lat != null && plane.lng != null ? `${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}` : 'N/A'} />
-                        <DataRow label="Flight No." value={fusionData?.route?.flightNumber || plane.callsign || '---'} />
+                        <DataRow label="Flight No." value={safeFusionData?.route?.flightNumber || plane.callsign || '---'} />
                         <DataRow label={t('source')} value={posSourceMap[plane.positionSource] || 'ADS-B'} />
 
                         {flightHistoryRef?.current && (

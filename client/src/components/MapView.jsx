@@ -3,7 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getAirlineLogoUrl, getAirlineBannerUrl, normalizeLongitude, wrapLngToMap, predictPosition, getAltitudeColor, initAirportDatabase } from '../utils/flightUtils';
 import { processTrailPath } from '../utils/trailSpline';
-import { getAircraftScale, getDrawSize, getDynamicImage, prewarmExactSvg, ICON_SCALE_VERSION } from '../utils/aircraftIcons';
+import { getAircraftScale, getDrawSize, getDynamicImage, getDynamicImageBBox, prewarmExactSvg, ICON_SCALE_VERSION } from '../utils/aircraftIcons';
 import { dataManager } from '../services/dataManager';
 import { enrichPlaneDetails, getEnrichedData } from '../services/staticOsintCache';
 import HoverCard from './HoverCard';
@@ -12,7 +12,6 @@ import { logger } from '../utils/logger';
 import PlaneCanvasLayer from './PlaneCanvasLayer';
 import AltitudeLegend from './AltitudeLegend';
 import {
-    _greatCirclePoints,
     FR24_BASE_PX,
     haversineKm,
     vectorPathsMap,
@@ -42,13 +41,10 @@ export default function MapView({
     colorScheme = 'TACTICAL',
     mapLayer = 'dark',
     trackMode = false,
-    playbackTime = null,
     t,
     translateMetar,
     syncViewport,
     depCoords = null,
-    userRoutes = null,
-    showUserRoutes = false,
 }) {
     const [hoveredPlane, setHoveredPlane] = useState(null);
     const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
@@ -78,12 +74,10 @@ export default function MapView({
     const fpsWindowRef   = useRef(performance.now());
     const fpsRef         = useRef(0);
     const airportLayerRef = useRef(null);
-    const userRoutesLayerRef = useRef(null);
     const airportMarkersLoadedRef = useRef(false);
     const airportMarkersMapRef = useRef(new Map());
     const tileLayerRef = useRef(null);     // [v2.9.0] current tile layer
     const trackModeRef = useRef(trackMode);  // [v3.0] ref for animation loop
-    const playbackTimeRef = useRef(playbackTime); // [v3.1] ref for animation loop
     const trackPointsRef = useRef(trackPoints);   // [v3.1] ref for animation loop
     const onUsageUpdateRef = useRef(onUsageUpdate);
     const colorSchemeRef = useRef(colorScheme);
@@ -112,7 +106,6 @@ export default function MapView({
         }
     }, [trackMode]);
 
-    useEffect(() => { playbackTimeRef.current = playbackTime; }, [playbackTime]);
     useEffect(() => { trackPointsRef.current = trackPoints; }, [trackPoints]);
     useEffect(() => { onUsageUpdateRef.current = onUsageUpdate; }, [onUsageUpdate]);
     useEffect(() => { colorSchemeRef.current = colorScheme; }, [colorScheme]);
@@ -422,7 +415,6 @@ export default function MapView({
         }).catch(err => logger.error('INIT', `Failed to load airports: ${err.message}`));
 
         airportLayerRef.current = L.layerGroup();
-        userRoutesLayerRef.current = L.layerGroup().addTo(map);
         updateAirportVisibility(map);
 
         return () => {
@@ -797,8 +789,6 @@ export default function MapView({
             const currentPlanes = planesDictRef.current || {};
             const currentPlanesKeys = Object.keys(currentPlanes);
             const currentSelected = selectedIcao24Ref.current;
-            const pbTime = playbackTimeRef.current;
-            let isPlaybackActive = false;
 
             // Calculate a safe delta-time for animations, capped at 100ms
             // to prevent "teleportation" after switching tabs
@@ -885,32 +875,6 @@ export default function MapView({
                 }
             });
 
-            // Playback override for selected plane
-            if (pbTime !== null && currentSelected && currentPlanes[currentSelected]) {
-                const pts = trackPointsRef.current;
-                if (pts && pts.length >= 2) {
-                    let lo = 0, hi = pts.length - 1;
-                    while (lo < hi - 1) {
-                        const mid = Math.floor((lo + hi) / 2);
-                        if (pts[mid][0] <= pbTime) lo = mid;
-                        else hi = mid;
-                    }
-                    const p0 = pts[lo];
-                    const p1 = pts[hi];
-                    let lat, lng;
-                    if (p1[0] === p0[0]) {
-                        lat = p0[1]; lng = p0[2];
-                    } else {
-                        const t = Math.max(0, Math.min(1, (pbTime - p0[0]) / (p1[0] - p0[0])));
-                        lat = p0[1] + (p1[1] - p0[1]) * t;
-                        lng = p0[2] + (p1[2] - p0[2]) * t;
-                    }
-                    currentPlanes[currentSelected].renderLat = lat;
-                    currentPlanes[currentSelected].renderLng = lng;
-                    isPlaybackActive = true;
-                }
-            }
-
             // Smart Camera Pan — only follow when plane drifts near viewport edge.
             // "Near edge" = plane is within 15% of viewport width/height from the border.
             if (currentSelected && currentPlanes[currentSelected] && !userInteractingRef.current) {
@@ -923,9 +887,9 @@ export default function MapView({
                     planePx.x < edgeMarginX || planePx.x > mapSz.x - edgeMarginX ||
                     planePx.y < edgeMarginY || planePx.y > mapSz.y - edgeMarginY;
 
-                if (nearEdge || isPlaybackActive) {
+                if (nearEdge) {
                     map.panTo([sp.renderLat ?? sp.lat, sp.renderLng ?? sp.lng],
-                        { animate: true, duration: isPlaybackActive ? 0.1 : 0.6, easeLinearity: 0.5 });
+                        { animate: true, duration: 0.6, easeLinearity: 0.5 });
                 }
             }
 
@@ -1448,8 +1412,39 @@ export default function MapView({
                             && !plane.onGround
                             && !plane.isEmergency;
                         const dynImg = tier2ColorMatches ? getDynamicImage(activeTypecode, isSelected) : null;
-                        if (dynImg && dynImg.complete) {
-                            // ── Tier 2: 1:1 Exact SVG (pre-warmed, has built-in white outline)
+                        const dynBBox = dynImg ? getDynamicImageBBox(activeTypecode) : null;
+                        if (dynImg && dynImg.complete && dynBBox) {
+                            // ── Tier 2: 1:1 Exact SVG (pre-warmed, has built-in white outline) ──
+                            // Scale by the measured ink bbox (not a fixed drawSize×drawSize
+                            // stretch) so this tier matches Tier 3's sizing — these scraped
+                            // SVGs have the same wildly inconsistent viewBox padding the
+                            // catalog shapes had (see _measureSvgViewBoxAndInk).
+                            const { vb, ink } = dynBBox;
+                            const maxDim = Math.max(ink[2], ink[3]) || 1;
+                            const canvasScale = drawSize / maxDim;
+                            ctx.save();
+                            ctx.globalAlpha = opacity;
+                            ctx.translate(ptX, ptY);
+                            ctx.rotate(angleRad);
+                            ctx.scale(canvasScale, canvasScale);
+                            ctx.translate(-(ink[0] + ink[2] / 2), -(ink[1] + ink[3] / 2));
+                            // The rasterized image's own pixel (0,0) corresponds to the SVG's
+                            // viewBox top-left corner — i.e. SVG-space (vb[0], vb[1]), not
+                            // (0,0) — since the ink[]/vb[] coordinates above are both in the
+                            // SVG's native user-space. Drawing at local (0,0) instead of
+                            // (vb[0], vb[1]) silently shifted the whole image by the viewBox's
+                            // origin offset. Harmless for near-symmetric viewBoxes (most types,
+                            // origin close to -width/2), but severe for asymmetric ones — e.g.
+                            // C172's viewBox="-35 -36 80 80" against an 11×8 ink region shifted
+                            // the rendered icon ~35-36 units off from the plane's actual anchor
+                            // point, which combined with the correct-but-large scale factor
+                            // (needed to blow the tiny ink region up to drawSize) made it look
+                            // like a huge, misplaced icon rather than a normally-sized one.
+                            ctx.drawImage(dynImg, vb[0], vb[1], vb[2], vb[3]);
+                            ctx.restore();
+                        } else if (dynImg && dynImg.complete) {
+                            // Measurement unavailable (parse failure) — fall back to the old
+                            // fixed-square draw rather than dropping to Tier 3 unnecessarily.
                             ctx.save();
                             ctx.globalAlpha = opacity;
                             ctx.translate(ptX, ptY);
@@ -1660,32 +1655,6 @@ export default function MapView({
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
         };
     }, [mapInstance]); // Starts ONLY when map is ready. Size (1) is stable after first mount.
-
-    // ── 個人路線弧線 overlay ────────────────────────────────────────────────────
-    useEffect(() => {
-        const layer = userRoutesLayerRef.current;
-        if (!layer) return;
-        layer.clearLayers();
-        if (!showUserRoutes || !userRoutes || userRoutes.length === 0) return;
-
-        const GOLD = '#c4a260';
-
-        for (const r of userRoutes) {
-            const pts = _greatCirclePoints(r.dep_lat, r.dep_lng, r.arr_lat, r.arr_lng, 64);
-            L.polyline(pts, {
-                color: GOLD,
-                weight: 1.5,
-                opacity: 0.55,
-                dashArray: '6 4',
-            }).addTo(layer);
-            L.circleMarker([r.dep_lat, r.dep_lng], {
-                radius: 3, color: GOLD, fillColor: GOLD, fillOpacity: 0.85, weight: 1,
-            }).addTo(layer);
-            L.circleMarker([r.arr_lat, r.arr_lng], {
-                radius: 3, color: GOLD, fillColor: GOLD, fillOpacity: 0.85, weight: 1,
-            }).addTo(layer);
-        }
-    }, [userRoutes, showUserRoutes]);
 
     return (
         <div ref={mapContainerRef} className="map-container">

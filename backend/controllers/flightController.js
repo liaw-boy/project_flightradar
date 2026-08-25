@@ -25,6 +25,19 @@ function makeRateLimitedLogger(maxPerWindow = 3, windowMs = 60000) {
 const logAdsbFiFail = makeRateLimitedLogger(3);
 const logHexDbFail  = makeRateLimitedLogger(3);
 
+// FAA registry "operator" names frequently belong to owner-trusts, banks,
+// leasing companies, private individuals, or clubs rather than airlines.
+// Reject these before using them as an airline_name fallback so we don't
+// surface e.g. "BANK OF UTAH TRUSTEE" as the operating carrier.
+const NON_AIRLINE_NAME_PATTERN = /\b(TRUSTEE|TRUST|BANK|LLC|L L C|HOLDINGS?|OWNER|CORP(ORATION)?|LEASING|LEASE|FINANCE|CAPITAL|FUND|INC\.?|CO\.?,?\s*LTD|LAW OFFICE|AERO CLUB|FLYING CLUB|EQUESTRIAN|INSTITUTE OF TECHNOLOGY|UNIVERSITY)\b/i;
+const KNOWN_AIRLINE_EXCEPTIONS = /\b(UNITED AIRLINES|SOUTHWEST AIRLINES|DELTA AIR LINES|ALASKA AIRLINES|FEDERAL EXPRESS|SOUTHERN AIRWAYS)\b/i;
+
+function isLikelyAirlineName(name) {
+    if (!name || typeof name !== 'string') return false;
+    if (KNOWN_AIRLINE_EXCEPTIONS.test(name)) return true;
+    return !NON_AIRLINE_NAME_PATTERN.test(name);
+}
+
 // ICAO 3-letter prefix → airline name (client-side mirror for server-side fallback)
 const CALLSIGN_PREFIX_AIRLINES = {
     // Taiwan
@@ -641,7 +654,13 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
             arrival_terminal:   routeInfo.arrival_terminal   || null,
             arrival_gate:       routeInfo.arrival_gate       || null,
             flightStatus:       routeInfo.flightStatus       || null,
-            airline_name:       routeInfo.airline_name       || null,
+            // AeroDataBox is the only source of airline_name and has a single,
+            // unpooled API key (no rotation) — when its monthly quota is
+            // exhausted this returns null 100% of the time with no fallback.
+            // Fall back to the airline already resolved for aircraftInfo
+            // (Mictronics operator, then the 30-entry callsign-prefix table)
+            // rather than showing nothing.
+            airline_name:       routeInfo.airline_name       || ((aircraftInfo.airline !== 'Unknown' && isLikelyAirlineName(aircraftInfo.airline)) ? aircraftInfo.airline : null),
             destination_weather: routeInfo.destination_weather || null,
             updatedAt: new Date()
         };

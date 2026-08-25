@@ -30,7 +30,6 @@ const staticMaps    = require('./db/staticMaps');
 const { AircraftShape } = staticMaps;
 // AircraftRegistry → in-memory Map (circuit-breaker state, no persistence needed)
 const _registryCache = new Map(); // icao24 → { apiStatus, blockedUntil, ...metadata }
-const _sessionCache = new Map(); // callsign → { departure_airport, arrival_airport, ... }
 const AircraftRegistry = {
     findOne: (q) => Promise.resolve(_registryCache.get((q?.icao24 || '').toLowerCase()) || null),
     findOneAndUpdate: (filter, update) => {
@@ -56,9 +55,6 @@ const Airport = {
 const { crawlFlightSchedules } = require('./crawler');
 const NodeCache = require('node-cache');
 const flightController = require('./controllers/flightController');
-const authCtrl         = require('./controllers/authController');
-const userFlightsCtrl  = require('./controllers/userFlightsController');
-const { passport: oauthPassport, oauthSuccess, oauthFailure, configStatus } = require('./controllers/oauthController');
 const AEROSTRAT_VERSION = 'v10.5-Hybrid';
 const AccountPool = require('./accountPool');
 
@@ -375,37 +371,9 @@ app.use('/api/lookup', lookupLimiter);
 app.use(cookieParser());
 app.use(express.json());
 
-// ── Auth rate limiter: 5 attempts / minute / IP to prevent brute force ──────
-const loginLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many login attempts, please wait a minute.' },
-    keyGenerator: (req) => ipKeyGenerator(req.ip),
-});
-
-const registerLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, // 1 hour window
-    max: 5,                    // 5 registrations per IP per hour
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many registration attempts, please try again later.' },
-    keyGenerator: (req) => ipKeyGenerator(req.ip),
-});
-
-const refreshLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many refresh requests.' },
-    keyGenerator: (req) => ipKeyGenerator(req.ip),
-});
-
-// ── Monitor login rate limiter: 5 attempts / minute / IP — same policy as
-// the user login endpoint. The /monitor backend can delete users and grant
-// admin, so brute force here is at least as dangerous as the user login path. ──
+// ── Monitor login rate limiter: 5 attempts / minute / IP — the /monitor
+// backend can inspect internal DB/sync status, so brute force here still
+// matters even though the user-account login system has been removed. ──
 const monitorLoginLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 5,
@@ -415,71 +383,7 @@ const monitorLoginLimiter = rateLimit({
     keyGenerator: (req) => ipKeyGenerator(req.ip),
 });
 
-// ── User Auth ────────────────────────────────────────────────────────────────
-app.post('/api/auth/register', registerLimiter, authCtrl.register);
-app.post('/api/auth/login',    loginLimiter, authCtrl.login);
-app.post('/api/auth/refresh',  refreshLimiter, authCtrl.refresh);
-app.post('/api/auth/logout',   authCtrl.logout);
-app.get( '/api/auth/me',       authCtrl.authMiddleware, authCtrl.me);
-
-// ── Admin API ────────────────────────────────────────────────────────────────
-const { authMiddleware: am, adminMiddleware: adm, superAdminMiddleware: sadm } = authCtrl;
 const db = require('./db/sqlite');
-
-// List all users (admin)
-app.get('/api/admin/users', am, adm, (req, res) => {
-    const users = db.prepare(
-        'SELECT id, username, email, is_admin, is_superadmin, avatar_color, created_at FROM users ORDER BY id'
-    ).all();
-    res.json({ users });
-});
-
-// Delete a user — superadmin cannot be deleted by anyone
-app.delete('/api/admin/users/:id', am, sadm, (req, res) => {
-    const targetId = Number(req.params.id);
-    if (targetId === req.user.id) return res.status(400).json({ error: 'cannot delete yourself' });
-    const target = db.prepare('SELECT id, is_superadmin FROM users WHERE id = ?').get(targetId);
-    if (!target) return res.status(404).json({ error: 'user not found' });
-    if (target.is_superadmin) return res.status(403).json({ error: 'cannot delete superadmin' });
-    db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
-    res.json({ ok: true });
-});
-
-// Toggle admin status — only superadmin may grant/revoke; superadmin's own status is immutable
-app.put('/api/admin/users/:id/admin', am, sadm, (req, res) => {
-    const targetId = Number(req.params.id);
-    const target = db.prepare('SELECT id, is_admin, is_superadmin FROM users WHERE id = ?').get(targetId);
-    if (!target) return res.status(404).json({ error: 'user not found' });
-    if (target.is_superadmin) return res.status(403).json({ error: 'superadmin status is immutable' });
-    const newVal = target.is_admin ? 0 : 1;
-    db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(newVal, targetId);
-    res.json({ ok: true, is_admin: newVal });
-});
-
-// ── OAuth ─────────────────────────────────────────────────────────────────────
-app.use(oauthPassport.initialize());
-app.get('/api/auth/config', configStatus);
-// Google
-app.get('/api/auth/google',
-    oauthPassport.authenticate('google', { scope: ['profile', 'email'], session: false }));
-app.get('/api/auth/google/callback',
-    oauthPassport.authenticate('google', { session: false, failureRedirect: '/?oauth_error=google_failed' }),
-    oauthSuccess);
-// Facebook
-app.get('/api/auth/facebook',
-    oauthPassport.authenticate('facebook', { scope: ['email'], session: false }));
-app.get('/api/auth/facebook/callback',
-    oauthPassport.authenticate('facebook', { session: false, failureRedirect: '/?oauth_error=facebook_failed' }),
-    oauthSuccess);
-
-// ── Personal Flight Tracking ─────────────────────────────────────────────────
-const mw = authCtrl.authMiddleware;
-app.get(   '/api/flights/my',       mw, userFlightsCtrl.list);
-app.post(  '/api/flights/my',       mw, userFlightsCtrl.create);
-app.put(   '/api/flights/my/:id',   mw, userFlightsCtrl.update);
-app.delete('/api/flights/my/:id',   mw, userFlightsCtrl.remove);
-app.get(   '/api/flights/my/stats', mw, userFlightsCtrl.stats);
-app.get(   '/api/flights/my/map',   mw, userFlightsCtrl.mapData);
 
 // ── Flight lookup helpers (no auth required, uses local VRS DB) ──────────────
 app.get('/api/lookup/callsign/:cs', async (req, res) => {
@@ -708,22 +612,7 @@ app.get('/api/flights/live', async (req, res) => {
         }
 
         console.log(`📡 [LIVE] Primary Telemetry (${sourceName}) Success: ${rawPlanes.length} planes`);
-
-        // [HOTFIX] Use pre-loaded session cache (global variable)
-        const enrichedPlanes = rawPlanes.map(plane => {
-            const callsignUpper = (plane.callsign || '').toUpperCase();
-            const session = _sessionCache.get(callsignUpper);
-            if (session) {
-                return {
-                    ...plane,
-                    departure_airport: session.departure_airport,
-                    arrival_airport: session.arrival_airport
-                };
-            }
-            return plane;
-        });
-
-        return res.json({ source: sourceName, planes: enrichedPlanes, timestamp: Date.now() });
+        return res.json({ source: sourceName, planes: rawPlanes, timestamp: Date.now() });
 
     } catch (primaryErr) {
         console.warn(`⚠️ [LIVE] Primary Telemetry Failed (${primaryErr.message}). Switching to fallback...`);
@@ -1441,11 +1330,6 @@ a:hover{opacity:.75}
       <a class="sb-nav-item" href="#api" onclick="setActive(this)">
         <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span> API Analytics
       </a>
-      <div class="sb-divider"></div>
-      <div class="sb-section-lbl">Admin</div>
-      <a class="sb-nav-item" href="#users" onclick="setActive(this);loadUsers()">
-        <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> Users
-      </a>
     </nav>
     <div class="sb-footer">AEROSTRAT Hybrid Dynamics</div>
   </aside>
@@ -1477,7 +1361,6 @@ a:hover{opacity:.75}
       <a href="#sync">Sync</a>
       <a href="#sessions">Sessions</a>
       <a href="#api">API</a>
-      <a href="#users" onclick="loadUsers()">Users</a>
     </nav>
 
     <!-- Scroll area -->
@@ -1617,17 +1500,6 @@ a:hover{opacity:.75}
             <span class="card-badge" id="api-badge">—</span>
           </div>
           <div class="card-body" id="api-body"></div>
-        </div>
-
-        <!-- Users Management -->
-        <div id="users" class="card">
-          <div class="card-hd">
-            <span class="card-title">User Management</span>
-            <button class="mon-btn" onclick="loadUsers()" style="margin-left:auto">Refresh</button>
-          </div>
-          <div class="card-body">
-            <div id="users-table-wrap"><div style="color:var(--td);font-size:13px">Click the section to load users.</div></div>
-          </div>
         </div>
       </div>
 
@@ -2002,62 +1874,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const el = document.getElementById(id);
     if (el) observer.observe(el);
   });
-  // Auto-load users table on page ready
-  loadUsers();
 });
 
 refresh();
 setInterval(refresh, 5000);
-
-// ── Users admin ──────────────────────────────────────────────────
-async function loadUsers() {
-  const wrap = document.getElementById('users-table-wrap');
-  if (!wrap) return;
-  wrap.innerHTML = '<div style="color:var(--td);font-size:13px;padding:20px">Loading...</div>';
-  try {
-    const r = await fetch('/monitor/api/users');
-    if (!r.ok) throw new Error(await r.text());
-    const { users } = await r.json();
-    if (!users.length) { wrap.innerHTML = '<div style="color:var(--td);padding:20px">No users found.</div>'; return; }
-    const rows = users.map(u => \`
-      <tr id="urow-\${u.id}">
-        <td style="color:var(--td)">\${u.id}</td>
-        <td style="font-weight:600;color:var(--t)">\${u.username}</td>
-        <td style="color:var(--td)">\${u.email || '—'}</td>
-        <td>
-          \${u.is_superadmin ? '<span style="color:#f59e0b;font-weight:700">⭐ Superadmin</span>' : u.is_admin ? '<span style="color:#a9dfd8;font-weight:700">Admin</span>' : '<span style="color:var(--td)">User</span>'}
-        </td>
-        <td style="color:var(--td);font-size:11px">\${new Date(u.created_at*1000).toLocaleDateString()}</td>
-        <td>
-          \${u.is_superadmin ? '' : u.is_admin
-            ? \`<button class="mon-btn mon-btn-warning" onclick="toggleAdmin(\${u.id})">Remove Admin</button>\`
-            : \`<button class="mon-btn" onclick="toggleAdmin(\${u.id})">Make Admin</button>\`
-          }
-          \${u.is_superadmin ? '' : \`<button class="mon-btn mon-btn-danger" onclick="deleteUser(\${u.id}, '\${u.username}')">Delete</button>\`}
-        </td>
-      </tr>\`).join('');
-    wrap.innerHTML = \`<table class="mon-table"><thead><tr>
-      <th>ID</th><th>Username</th><th>Email</th><th>Role</th><th>Joined</th><th>Actions</th>
-    </tr></thead><tbody>\${rows}</tbody></table>\`;
-  } catch(e) {
-    wrap.innerHTML = \`<div style="color:#f87171;padding:20px">Error: \${e.message}</div>\`;
-  }
-}
-
-async function deleteUser(id, name) {
-  if (!confirm(\`Delete user "\${name}"? This cannot be undone.\`)) return;
-  const r = await fetch(\`/monitor/api/users/\${id}\`, { method: 'DELETE' });
-  const j = await r.json();
-  if (j.ok) { document.getElementById(\`urow-\${id}\`)?.remove(); }
-  else alert('Error: ' + (j.error || 'unknown'));
-}
-
-async function toggleAdmin(id) {
-  const r = await fetch(\`/monitor/api/users/\${id}/admin\`, { method: 'PUT' });
-  const j = await r.json();
-  if (j.ok) loadUsers();
-  else alert('Error: ' + (j.error || 'unknown'));
-}
 </script>
 </body>
 </html>`;
@@ -2096,21 +1916,10 @@ function requireMonitorAuth(req, res, next) {
     next();
 }
 
-// Accepts monitor session cookie, httpOnly JWT cookie, or Bearer JWT header
+// Gated purely by the /monitor password session now that the JWT
+// user-account system has been removed.
 function requireAdminAccess(req, res, next) {
     if (isMonitorAuthed(req)) return next();
-    // Read JWT from httpOnly cookie (browser) or Authorization header (API clients)
-    const COOKIE_NAME = 'aerostrat_token';
-    const cookieToken = req.cookies?.[COOKIE_NAME];
-    const header = req.headers.authorization || '';
-    const headerToken = header.startsWith('Bearer ') ? header.slice(7) : null;
-    const token = cookieToken || headerToken;
-    if (token) {
-        try {
-            const payload = require('jsonwebtoken').verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
-            if (payload.is_admin) return next();
-        } catch {}
-    }
     return res.status(401).json({ error: 'Unauthorized' });
 }
 
@@ -2153,19 +1962,10 @@ function getLoginHtml(error) {
 </html>`;
 }
 
-// Helper: check monitor session OR JWT admin cookie
+// Monitor session cookie is the only admin gate now that the JWT
+// user-account system has been removed.
 function isAdminAuthed(req) {
-    if (isMonitorAuthed(req)) return true;
-    const COOKIE_NAME = 'aerostrat_token';
-    const cookieToken = req.cookies?.[COOKIE_NAME];
-    const header = req.headers.authorization || '';
-    const headerToken = header.startsWith('Bearer ') ? header.slice(7) : null;
-    const token = cookieToken || headerToken;
-    if (!token) return false;
-    try {
-        const payload = require('jsonwebtoken').verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
-        return !!payload.is_admin;
-    } catch { return false; }
+    return isMonitorAuthed(req);
 }
 
 app.get('/monitor', (req, res) => {
@@ -2276,32 +2076,6 @@ app.get('/monitor/api/db-status', requireMonitorAuth, (req, res) => {
             _all:       syncLog.getAll(),
         },
     });
-});
-
-app.get('/monitor/api/users', requireMonitorAuth, (req, res) => {
-    const users = db.prepare(
-        'SELECT id, username, email, is_admin, is_superadmin, avatar_color, created_at FROM users ORDER BY id'
-    ).all();
-    res.json({ users });
-});
-
-app.delete('/monitor/api/users/:id', requireMonitorAuth, (req, res) => {
-    const id = Number(req.params.id);
-    const target = db.prepare('SELECT id, is_superadmin FROM users WHERE id = ?').get(id);
-    if (!target) return res.status(404).json({ error: 'user not found' });
-    if (target.is_superadmin) return res.status(403).json({ error: 'cannot delete superadmin' });
-    db.prepare('DELETE FROM users WHERE id = ?').run(id);
-    res.json({ ok: true });
-});
-
-app.put('/monitor/api/users/:id/admin', requireMonitorAuth, (req, res) => {
-    const id = Number(req.params.id);
-    const user = db.prepare('SELECT id, is_admin, is_superadmin FROM users WHERE id = ?').get(id);
-    if (!user) return res.status(404).json({ error: 'user not found' });
-    if (user.is_superadmin) return res.status(403).json({ error: 'superadmin status is immutable' });
-    const newVal = user.is_admin ? 0 : 1;
-    db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(newVal, id);
-    res.json({ ok: true, is_admin: newVal });
 });
 
 // Public ping — no auth required, used by health checks and tests
@@ -5604,21 +5378,6 @@ function triggerBackgroundResolution(hex, callsign) {
 async function startServer() {
     // 1. Build Metadata Index (Instant SILHOUETTE support)
     await initAircraftMetadataIndex();
-
-    // 1b. Pre-load session cache for routing enrichment
-    const startCacheLoad = Date.now();
-    const Database = require('better-sqlite3');
-    const cacheDb = new Database(path.join(__dirname, 'data', 'aerostrat.db'), { readonly: true });
-    const stmt = cacheDb.prepare('SELECT callsign, departure_airport, arrival_airport FROM flight_sessions WHERE callsign IS NOT NULL LIMIT 500000');
-    const sessions = stmt.all();
-    for (const session of sessions) {
-        if (session.callsign) {
-            _sessionCache.set((session.callsign || '').toUpperCase(), session);
-        }
-    }
-    cacheDb.close();
-    const cacheLoadTime = Date.now() - startCacheLoad;
-    console.log(`✅ [CACHE] Loaded ${_sessionCache.size} flight sessions in ${cacheLoadTime}ms`);
 
     // 2. Start HTTP & WS
     const server = http.createServer(app);

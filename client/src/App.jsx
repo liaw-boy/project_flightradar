@@ -9,9 +9,6 @@ import TopBar from './components/TopBar';
 import MapView from './components/MapView';
 import PlaneList from './components/PlaneList';
 import StatsPanel from './components/StatsPanel';
-import AuthModal from './components/AuthModal';
-import MyFlightsPanel from './components/MyFlightsPanel';
-import AdminPanel from './components/AdminPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useFlightData } from './hooks/useFlightData';
 import { useI18n } from './hooks/useI18n';
@@ -21,7 +18,6 @@ import { logToServer, logger } from './utils/logger';
 import { dataManager } from './services/dataManager';
 import { initAircraftShapes } from './utils/aircraftIcons';
 import { trackStore } from './store/FlightDataStore';
-import { authStore, apiFlightMapData } from './store/authStore';
 import { flightDetailsCache } from './services/flightDetailsCache';
 import './App.css';
 
@@ -30,21 +26,11 @@ function parseUrlParams() {
     const params = new URLSearchParams(window.location.search);
     return {
         icao:  params.get('icao'),
-        panel: params.get('panel'),   // 'admin' | 'my-flights' | 'new-flight' | 'auth'
         stats: params.get('stats') === '1',
         lat:   params.get('lat')  ? parseFloat(params.get('lat'))    : null,
         lng:   params.get('lng')  ? parseFloat(params.get('lng'))    : null,
         zoom:  params.get('zoom') ? parseInt(params.get('zoom'), 10) : null,
     };
-}
-
-function setUrlPanel(panel) {
-    const params = new URLSearchParams(window.location.search);
-    if (panel) params.set('panel', panel);
-    else params.delete('panel');
-    params.delete('icao'); // panel 和 icao 互斥
-    const qs = params.toString();
-    window.history.pushState({ panel: panel || null }, '', qs ? `?${qs}` : window.location.pathname);
 }
 
 function setUrlStats(on) {
@@ -91,48 +77,6 @@ export default function App() {
         renderLimit: 0,
         throttleFactor: 1.0
     });
-
-
-    // ── Auth modals ────────────────────────────────────────────
-    const [showAuthModal, setShowAuthModal]         = useState(false);
-    const [showMyFlights, setShowMyFlights]         = useState(false);
-    const [myFlightsInitialView, setMyFlightsInitialView] = useState('list');
-    const [myFlightsMode, setMyFlightsMode]         = useState('modal');
-    const [showAdmin, setShowAdmin]                 = useState(false);
-    const [authUser, setAuthUser]                   = useState(authStore.getUser());
-    const [userRoutes, setUserRoutes]               = useState(null);
-    const [showUserRoutes, setShowUserRoutes]       = useState(false);
-
-    useEffect(() => authStore.subscribe(({ user }) => setAuthUser(user)), []);
-
-    // 登入 / 登出時自動重新拉取個人路線
-    useEffect(() => {
-        if (authUser) {
-            apiFlightMapData().then(data => setUserRoutes(data.routes || [])).catch(() => setUserRoutes([]));
-        } else {
-            setUserRoutes(null);
-            setShowUserRoutes(false);
-        }
-    }, [authUser]);
-
-    // If the session expires (authStore._set(null, null) — a 401 from any
-    // authenticated call) while a login-gated panel is open, close it and
-    // prompt for login instead of leaving a now-broken panel on screen.
-    // AdminPanel and MyFlightsPanel both only reach that _set() call on 401
-    // as of this fix; previously AdminPanel's local authFetch never called
-    // it at all, so this effect had nothing to react to for that panel.
-    useEffect(() => {
-        if (authUser) return;
-        if (showAdmin) {
-            setShowAdmin(false);
-            setUrlPanel('auth');
-            setShowAuthModal(true);
-        } else if (showMyFlights) {
-            setShowMyFlights(false);
-            setUrlPanel('auth');
-            setShowAuthModal(true);
-        }
-    }, [authUser, showAdmin, showMyFlights]);
 
     // [v3.0] Theme system (dark = default, light = optional)
     const [theme, setTheme] = useState(() => {
@@ -210,13 +154,6 @@ export default function App() {
     const [trackMode, setTrackMode] = useState(false);
     const handleToggleTrackMode = useCallback(() => setTrackMode(p => !p), []);
 
-    // [v4.2.0] TimePlayer playback state — null means live, unix timestamp means historical
-    const [playbackTime, setPlaybackTime] = useState(null);
-    const handlePlaybackChange = useCallback((unixTime) => {
-        setPlaybackTime(unixTime);
-    }, []);
-
-
 
     const mapInstanceRef = useRef(null);
 
@@ -279,17 +216,7 @@ export default function App() {
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (e.key === 'Escape') {
-                // A modal/panel overlay owns Escape while it's open — it closes
-                // itself (see each component's own Escape handler). Without this
-                // guard, this global listener ALSO fired handleDeselectPlane()
-                // on every Escape press, so closing e.g. MyFlightsPanel with Esc
-                // silently deselected whatever plane was tracked on the map
-                // underneath — a side effect the user never asked for and that
-                // AuthModal's Esc (which also this same listener races against)
-                // made inconsistent depending on which overlay was open.
-                if (!showAuthModal && !showMyFlights && !showAdmin) {
-                    handleDeselectPlane();
-                }
+                handleDeselectPlane();
             }
             // Ctrl+D — toggle developer monitor panel
             if (e.ctrlKey && e.key === 'd') {
@@ -311,7 +238,7 @@ export default function App() {
         // production with "Cannot access 'handleDeselectPlane' before
         // initialization" the moment this component first rendered.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [showAuthModal, showMyFlights, showAdmin]);
+    }, []);
 
 
     // 初始化飛機形狀 (從後端 API 載入 SVG 輪廓)
@@ -329,23 +256,9 @@ export default function App() {
         return () => clearTimeout(timer);
     }, []);
 
-    // 從 URL ?panel= / ?stats= 自動開啟對應面板（帶 auth 檢查）
+    // 從 URL ?stats= 自動開啟統計面板
     useEffect(() => {
-        const { panel, stats } = parseUrlParams();
-        const user = authStore.getUser();
-        if (panel === 'admin') {
-            // 只有 superadmin 才能開管理員面板；非 admin 導向登入
-            if (user?.is_superadmin) setShowAdmin(true);
-            else { setUrlPanel(null); if (!user) setShowAuthModal(true); }
-        } else if (panel === 'my-flights') {
-            if (user) { setMyFlightsInitialView('list'); setMyFlightsMode('page'); setShowMyFlights(true); }
-            else { setUrlPanel(null); setShowAuthModal(true); }
-        } else if (panel === 'new-flight') {
-            if (user) { setMyFlightsInitialView('form'); setMyFlightsMode('modal'); setShowMyFlights(true); }
-            else { setUrlPanel(null); setShowAuthModal(true); }
-        } else if (panel === 'auth') {
-            setShowAuthModal(true);
-        }
+        const { stats } = parseUrlParams();
         if (stats) setShowStats(true);
     }, []);
 
@@ -400,7 +313,6 @@ export default function App() {
                 setTrackPoints([]);
                 setSelectedMetadata(null);
                 setSelectedRoute(null);
-                setPlaybackTime(null);
             }
             setSelectedIcao24(icao24);
             setShowFullSidebar(false);
@@ -431,24 +343,31 @@ export default function App() {
             };
 
             // Background Metadata + Route (Non-blocking with 5s Timeout)
+            // Guard every setState with trailOwnerRef, same as the track fetch
+            // above — without it, a slow response for plane A that resolves
+            // AFTER the user has already selected plane B overwrites B's
+            // metadata/route with A's stale data (the exact "上一次快取的資料"
+            // flash the user reported).
             fetchWithTimeout(dataManager.getMetadata(icao24))
                 .then(data => {
+                    if (trailOwnerRef.current !== icao24) return;
                     if (data && !data.noData) setSelectedMetadata(data);
                     else setSelectedMetadata({ noData: true });
                 })
                 .catch(e => {
                     logger.warn('UI', `Metadata fetch failed for ${icao24}: ${e.message}`);
-                    setSelectedMetadata({ noData: true });
+                    if (trailOwnerRef.current === icao24) setSelectedMetadata({ noData: true });
                 });
 
             fetchWithTimeout(dataManager.getRoute(icao24, plane.callsign))
                 .then(data => {
+                    if (trailOwnerRef.current !== icao24) return;
                     if (data && !data.noData) setSelectedRoute(data);
                     else setSelectedRoute({ noData: true });
                 })
                 .catch(e => {
                     logger.warn('UI', `Route fetch failed for ${plane.callsign}: ${e.message}`);
-                    setSelectedRoute({ noData: true });
+                    if (trailOwnerRef.current === icao24) setSelectedRoute({ noData: true });
                 });
 
             // Update URL with pushState so back button works
@@ -470,7 +389,6 @@ export default function App() {
         setSelectedRoute(null);
         setDepCoords(null);
         setTrackMode(false);
-        setPlaybackTime(null);
         setShowSidebar(false);
         trackStore.setSelected(null);
     }, [sendWorkerMessage]);
@@ -488,20 +406,38 @@ export default function App() {
     // Result is also stored in flightDetailsCache so Sidebar can reuse it without a second request.
     useEffect(() => {
         if (!selectedIcao24) return;
+
+        // Sidebar's own effect fetches the exact same endpoint off the same
+        // selection change — check the shared cache first so a reselect of
+        // a recently-viewed plane doesn't fire a second redundant request
+        // (this previously always fetched, even when Sidebar's own
+        // cache-hit path had just populated the same entry).
+        const alreadyCached = flightDetailsCache.get(selectedIcao24);
+        if (alreadyCached) {
+            const coords = alreadyCached?.route?.depCoords;
+            if (coords?.lat && coords?.lng) setDepCoords(coords);
+            return;
+        }
+
         const plane = planesDict[selectedIcao24];
         const callsign = plane?.callsign;
         if (!callsign) return;
         const callsignParam = (callsign.trim() && callsign !== selectedIcao24.toUpperCase())
             ? callsign.trim() : 'N/A';
-        fetch(`/api/flight/complete-details/${selectedIcao24}/${callsignParam}`)
+        const controller = new AbortController();
+        fetch(`/api/flight/complete-details/${selectedIcao24}/${callsignParam}`, { signal: controller.signal })
             .then(r => r.ok ? r.json() : null)
             .then(data => {
                 if (!data) return;
                 flightDetailsCache.set(selectedIcao24, data); // share with Sidebar — avoids N+1
+                // Guard against a stale response landing after the user has
+                // already moved on to a different plane (or deselected).
+                if (controller.signal.aborted) return;
                 const coords = data?.route?.depCoords;
                 if (coords?.lat && coords?.lng) setDepCoords(coords);
             })
             .catch(() => {});
+        return () => controller.abort();
     }, [selectedIcao24]);
 
     // Expose select/deselect for E2E tests (does not affect production behaviour)
@@ -539,22 +475,7 @@ export default function App() {
     // Browser Back / Forward — wired here so planesDictRef is already declared
     useEffect(() => {
         const handlePopState = () => {
-            const { icao, panel } = parseUrlParams();
-            const user = authStore.getUser();
-
-            if (panel === 'admin' && user?.is_superadmin) {
-                setShowAdmin(true); setShowMyFlights(false); setShowAuthModal(false);
-            } else if (panel === 'my-flights' && user) {
-                setMyFlightsInitialView('list'); setMyFlightsMode('page');
-                setShowMyFlights(true); setShowAdmin(false); setShowAuthModal(false);
-            } else if (panel === 'new-flight' && user) {
-                setMyFlightsInitialView('form'); setMyFlightsMode('modal');
-                setShowMyFlights(true); setShowAdmin(false); setShowAuthModal(false);
-            } else if (panel === 'auth') {
-                setShowAuthModal(true);
-            } else {
-                setShowAdmin(false); setShowMyFlights(false); setShowAuthModal(false);
-            }
+            const { icao } = parseUrlParams();
 
             if (icao) {
                 const plane = planesDictRef.current?.[icao];
@@ -605,43 +526,6 @@ export default function App() {
         }, []),
     });
 
-    if (showAdmin) {
-        return <AdminPanel onClose={() => { setShowAdmin(false); setUrlPanel(null); }} />;
-    }
-
-    // New flight form → standalone full page, no map bleedthrough.
-    // Gated on myFlightsMode === 'page' too: this used to fire for ANY
-    // form view regardless of mode, so TopBar's "新增航班記錄" button
-    // (which explicitly sets mode 'modal') always got silently upgraded
-    // to a full-page takeover — setMyFlightsMode('modal') had no observable
-    // effect. The real modal-mode form render already exists below (the
-    // <MyFlightsPanel initialView={myFlightsInitialView} mode={myFlightsMode}>
-    // block), so modal callers just need to reach it instead of being
-    // intercepted here.
-    if (showMyFlights && myFlightsInitialView === 'form' && myFlightsMode === 'page') {
-        return (
-            <div className="app app--new-flight">
-                <MyFlightsPanel
-                    initialView="form"
-                    mode="page"
-                    onClose={() => {
-                        setShowMyFlights(false);
-                        setUrlPanel(null);
-                        if (authUser) {
-                            apiFlightMapData().then(d => setUserRoutes(d.routes || [])).catch(() => {});
-                        }
-                    }}
-                    prefillFromPlane={selectedPlane ? {
-                        icao24:        selectedPlane.icao24,
-                        callsign:      selectedPlane.callsign || '',
-                        aircraft_type: selectedPlane.type_code || selectedPlane.aircraft_type || '',
-                        registration:  selectedPlane.registration || '',
-                    } : null}
-                />
-            </div>
-        );
-    }
-
     return (
         <div className="app">
             <LoadingScreen visible={loading} />
@@ -662,13 +546,10 @@ export default function App() {
                 colorScheme={colorScheme}
                 mapLayer={mapLayer}
                 trackMode={trackMode}
-                playbackTime={playbackTime}
                 syncViewport={syncViewport}
                 t={t}
                 translateMetar={translateMetar}
                 depCoords={depCoords}
-                userRoutes={userRoutes}
-                showUserRoutes={showUserRoutes}
             />
 
             <TopBar
@@ -684,15 +565,6 @@ export default function App() {
                 onFilterChange={handleFilterChange}
                 mapLayer={mapLayer}
                 onMapLayerChange={handleMapLayerChange}
-                onOpenAuth={() => { setShowAuthModal(true); setUrlPanel('auth'); }}
-                onOpenMyFlights={() => { setMyFlightsInitialView('list'); setMyFlightsMode('page');  setShowMyFlights(true); setUrlPanel('my-flights'); }}
-                onOpenNewFlight={() => { setMyFlightsInitialView('form'); setMyFlightsMode('modal'); setShowMyFlights(true); setUrlPanel('new-flight'); }}
-
-                onOpenAdmin={() => { if (authUser?.is_superadmin) { setShowAdmin(true); setUrlPanel('admin'); } }}
-                authUser={authUser}
-                showUserRoutes={showUserRoutes}
-                onToggleUserRoutes={() => setShowUserRoutes(v => !v)}
-                hasUserRoutes={!!(userRoutes && userRoutes.length > 0)}
                 theme={theme}
                 onToggleTheme={handleToggleTheme}
                 onRecenter={handleRecenter}
@@ -771,8 +643,6 @@ export default function App() {
                             metadata={selectedMetadata}
                             route={selectedRoute}
                             trackPoints={trackPoints}
-                            playbackTime={playbackTime}
-                            onPlaybackChange={handlePlaybackChange}
                             flightHistoryRef={flightHistoryRef}
                             onClose={isMobile ? () => setShowFullSidebar(false) : handleDeselectPlane}
                             trackMode={trackMode}
@@ -793,41 +663,6 @@ export default function App() {
                     planeCount={planeCount}
                 />
             )}
-
-            {/* ── Auth / MyFlights Modals ── */}
-            {showAuthModal && (
-                <ErrorBoundary>
-                    <AuthModal onClose={() => { setShowAuthModal(false); setUrlPanel(null); }} />
-                </ErrorBoundary>
-            )}
-
-            {showMyFlights && (
-                <ErrorBoundary>
-                <MyFlightsPanel
-                    initialView={myFlightsInitialView}
-                    mode={myFlightsMode}
-                    onClose={() => {
-                        setShowMyFlights(false);
-                        setUrlPanel(null);
-                        // 關閉時重新拉取路線，確保新增的航班反映在地圖上
-                        if (authUser) {
-                            apiFlightMapData().then(d => setUserRoutes(d.routes || [])).catch(() => {});
-                        }
-                    }}
-                    prefillFromPlane={selectedPlane ? {
-                        icao24:        selectedPlane.icao24,
-                        callsign:      selectedPlane.callsign || '',
-                        aircraft_type: selectedPlane.type_code || selectedPlane.aircraft_type || '',
-                        registration:  selectedPlane.registration || '',
-                        flight_number: selectedPlane.flight_number || selectedPlane.callsign || '',
-                        flight_date:   new Date().toISOString().slice(0, 10),
-                        dep_icao:      selectedRoute?.departureAirport || '',
-                        arr_icao:      selectedRoute?.arrivalAirport || '',
-                    } : null}
-                />
-                </ErrorBoundary>
-            )}
-
         </div>
     );
 }

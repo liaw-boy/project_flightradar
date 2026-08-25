@@ -12,15 +12,6 @@ async function get(path) {
     return { status: res.status, body: await res.json().catch(() => null) };
 }
 
-async function post(path, payload) {
-    const res = await fetch(`${BASE}${path}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-    });
-    return { status: res.status, body: await res.json().catch(() => null) };
-}
-
 // ─────────────────────────────────────────────
 // 1. INFRASTRUCTURE
 // ─────────────────────────────────────────────
@@ -168,32 +159,6 @@ describe('5. Aircraft Metadata', () => {
 });
 
 // ─────────────────────────────────────────────
-// 6. AUTHENTICATION
-// ─────────────────────────────────────────────
-describe('6. Auth Endpoints', () => {
-    test('POST /api/auth/login with bad credentials → 4xx', async () => {
-        const { status } = await post('/api/auth/login', { email: 'nobody@test.com', password: 'wrongpassword' });
-        // 400 = user not found, 401 = wrong password, 429 = rate limited (from prior test run)
-        expect([400, 401, 429]).toContain(status);
-    });
-
-    test('GET /api/auth/me without token → 401', async () => {
-        const { status } = await get('/api/auth/me');
-        expect(status).toBe(401);
-    });
-
-    test('POST /api/auth/register with missing fields → 400', async () => {
-        const { status } = await post('/api/auth/register', { email: '' });
-        expect(status).toBe(400);
-    });
-
-    test('GET /api/auth/config → 200', async () => {
-        const { status } = await get('/api/auth/config');
-        expect(status).toBe(200);
-    });
-});
-
-// ─────────────────────────────────────────────
 // 7. ADMIN / PROTECTED ENDPOINTS
 // ─────────────────────────────────────────────
 describe('7. Protected Endpoints (no auth)', () => {
@@ -207,18 +172,8 @@ describe('7. Protected Endpoints (no auth)', () => {
         expect(status).toBe(401);
     });
 
-    test('GET /api/admin/users → 401 without auth', async () => {
-        const { status } = await get('/api/admin/users');
-        expect(status).toBe(401);
-    });
-
     test('GET /api/ingestion/status → 401 without auth', async () => {
         const { status } = await get('/api/ingestion/status');
-        expect(status).toBe(401);
-    });
-
-    test('GET /api/flights/my → 401 without auth', async () => {
-        const { status } = await get('/api/flights/my');
         expect(status).toBe(401);
     });
 });
@@ -260,22 +215,6 @@ describe('9. Airline & Static Resources', () => {
         const res = await fetch(`${BASE}/favicon.svg`);
         expect(res.status).toBe(200);
     });
-});
-
-// ─────────────────────────────────────────────
-// 10. RATE LIMITING
-// ─────────────────────────────────────────────
-describe('10. Rate Limiting', () => {
-    test('Login endpoint is rate-limited after many failed attempts', async () => {
-        const attempts = [];
-        for (let i = 0; i < 12; i++) {
-            attempts.push(post('/api/auth/login', { email: 'ratelimit@test.com', password: 'wrong' }));
-        }
-        const results = await Promise.all(attempts);
-        const statuses = results.map(r => r.status);
-        // At least some should be 429 (rate limited)
-        expect(statuses.some(s => s === 429 || s === 401)).toBe(true);
-    }, 15000);
 });
 
 // ─────────────────────────────────────────────

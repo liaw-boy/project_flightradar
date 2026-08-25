@@ -77,12 +77,26 @@ export const vectorPathsMap = new Map();
     const entries = Object.entries(paths);
     const measured = (typeof document !== 'undefined') ? _measurePathBBoxes(entries) : new Map();
     entries.forEach(([key, entry]) => {
-        const declaredVb = (entry.vb || "0 0 500 500").split(/\s+/).map(Number);
-        const realBBox = measured.get(key);
-        vectorPathsMap.set(key, {
-            path: new Path2D(entry.d),
-            vb: realBBox || declaredVb, // fall back to declared viewBox if measurement failed
-        });
+        // A single malformed `d` string threw here for years without a
+        // try/catch — since this runs inside a plain forEach, that
+        // exception aborted the whole loop and silently left every catalog
+        // key AFTER the failing one (alphabetically/insertion-order later,
+        // including CATEGORY_FALLBACK.DEFAULT = "A320" if it came after)
+        // missing from vectorPathsMap. Any plane resolving to one of those
+        // missing keys then fell through to MapView's Tier 4 circle
+        // fallback even though resolveTypecodeKey() had already returned a
+        // "guaranteed" catalog key. One bad entry should never take down
+        // every entry after it.
+        try {
+            const declaredVb = (entry.vb || "0 0 500 500").split(/\s+/).map(Number);
+            const realBBox = measured.get(key);
+            vectorPathsMap.set(key, {
+                path: new Path2D(entry.d),
+                vb: realBBox || declaredVb, // fall back to declared viewBox if measurement failed
+            });
+        } catch (e) {
+            console.error(`[AircraftIcons] Failed to build Path2D for catalog key "${key}" — this plane type will show as a fallback dot:`, e);
+        }
     });
 }
 

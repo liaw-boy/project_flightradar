@@ -551,6 +551,55 @@ function _persistMiss(tc) {
     } catch (_) {}
 }
 
+// Measures the real ink bounding box (and native viewBox) of a raw fetched
+// SVG's content, using the same technique mapViewUtils.js's
+// _measurePathBBoxes uses for the static AIRCRAFT_CATALOG — these scraped
+// GitHub SVGs have exactly the same declared-viewBox-padding problem
+// (some fill ~99% of their box, others ~6-50%), but the Tier-2 draw call
+// (ctx.drawImage into a fixed drawSize×drawSize square) never accounted
+// for that, so it reintroduced the same wildly-inconsistent-size bug that
+// was fixed for Tier 3 (Path2D) in the vectorPathsMap ink-bbox pass.
+// Returns { vb: [0,0,w,h], ink: [x,y,w,h] } or null if unmeasurable.
+function _measureSvgViewBoxAndInk(svgText) {
+    if (typeof document === 'undefined') return null;
+    try {
+        const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+        const root = doc.documentElement;
+        if (!root || root.tagName !== 'svg' || root.querySelector('parsererror')) return null;
+
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const measureSvg = document.createElementNS(svgNS, 'svg');
+        measureSvg.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;visibility:hidden;';
+        const group = document.createElementNS(svgNS, 'g');
+        // Move (not clone) every child of the fetched <svg> into our headless
+        // measuring <svg>, preserving any nested transforms/groups as-is.
+        while (root.firstChild) group.appendChild(root.firstChild);
+        measureSvg.appendChild(group);
+        document.body.appendChild(measureSvg);
+
+        const b = group.getBBox();
+        document.body.removeChild(measureSvg);
+        if (!(b.width > 0 && b.height > 0)) return null;
+
+        // Native declared size: prefer viewBox, fall back to width/height attrs,
+        // and finally to the measured ink box itself if neither is present.
+        const viewBoxAttr = root.getAttribute('viewBox');
+        let vb;
+        if (viewBoxAttr) {
+            vb = viewBoxAttr.trim().split(/[\s,]+/).map(Number);
+        } else {
+            const w = parseFloat(root.getAttribute('width'))  || (b.x + b.width);
+            const h = parseFloat(root.getAttribute('height')) || (b.y + b.height);
+            vb = [0, 0, w, h];
+        }
+        if (vb.length !== 4 || vb.some(n => !isFinite(n)) || vb[2] <= 0 || vb[3] <= 0) return null;
+
+        return { vb, ink: [b.x, b.y, b.width, b.height] };
+    } catch (_) {
+        return null;
+    }
+}
+
 function _buildGhImage(svgText, color, isSelected = false) {
     // Strip any existing fill/stroke attributes (except fill="none" for outlines)
     // then inject a CSS rule that forces all fill to our desired color.
@@ -601,9 +650,16 @@ export function prewarmExactSvg(typecode) {
                 _persistMiss(tc); // remember across page refreshes
                 return;
             }
+            // Measure once (both color variants share identical geometry) —
+            // falls back to a null bbox if measurement fails, in which case
+            // MapView draws this typecode's Tier 2 image the old (uncorrected,
+            // square-stretch) way rather than skip it entirely.
+            const measured = _measureSvgViewBoxAndInk(text);
             exactImageCache.set(tc, {
                 normal:   _buildGhImage(text, '#F0C040', false),
                 selected: _buildGhImage(text, '#FFD700', true),
+                vb:  measured ? measured.vb  : null,
+                ink: measured ? measured.ink : null,
             });
         })
         .catch(() => { clearTimeout(timeout); exactImageCache.set(tc, null); _persistMiss(tc); })
@@ -622,6 +678,21 @@ export function getDynamicImage(typecode, isSelected = false) {
     const entry = exactImageCache.get(typecode.toUpperCase());
     if (!entry) return null;
     return isSelected ? entry.selected : entry.normal;
+}
+
+/**
+ * Returns { vb: [0,0,w,h], ink: [x,y,w,h] } for a pre-warmed Tier 2 image,
+ * or null if not yet available / measurement failed. Used to scale the
+ * raster image by its real ink content instead of stretching it into a
+ * fixed square (see _measureSvgViewBoxAndInk for why this matters — same
+ * inconsistent-viewBox-padding problem the Tier 3 catalog had).
+ * O(1) Map lookup — safe to call inside the 60fps animate() loop.
+ */
+export function getDynamicImageBBox(typecode) {
+    if (!typecode) return null;
+    const entry = exactImageCache.get(typecode.toUpperCase());
+    if (!entry || !entry.vb || !entry.ink) return null;
+    return { vb: entry.vb, ink: entry.ink };
 }
 
 /**

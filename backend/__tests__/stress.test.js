@@ -7,9 +7,6 @@
 
 const BASE = 'http://localhost:3000';
 
-// Shared cookie jar for authenticated requests
-let authCookie = '';
-
 async function get(path, cookie = '') {
     const headers = {};
     if (cookie) headers['Cookie'] = cookie;
@@ -19,46 +16,6 @@ async function get(path, cookie = '') {
     });
     return { status: res.status, body: await res.json().catch(() => null), headers: res.headers };
 }
-
-async function post(path, payload, cookie = '') {
-    const headers = { 'Content-Type': 'application/json' };
-    if (cookie) headers['Cookie'] = cookie;
-    const res = await fetch(`${BASE}${path}`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(15000),
-    });
-    return { status: res.status, body: await res.json().catch(() => null), headers: res.headers };
-}
-
-// ─────────────────────────────────────────────
-// 0. 取得認證 Cookie
-// loginLimiter is IP-scoped and shared with every other test file hitting
-// this server in the same run — if an earlier file (e.g. api.test.js's own
-// burst test) already used up the window, retry once the window resets
-// instead of failing the whole suite on a false-positive rate-limit hit.
-// ─────────────────────────────────────────────
-beforeAll(async () => {
-    let res;
-    for (let attempt = 0; attempt < 3; attempt++) {
-        res = await fetch(`${BASE}/api/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: 'stress_tester', password: 'StressTest2026!' }),
-            signal: AbortSignal.timeout(10000),
-        });
-        if (res.status !== 429) break;
-        const resetSecs = Number(res.headers.get('ratelimit-reset')) || 60;
-        await new Promise(r => setTimeout(r, (resetSecs + 1) * 1000));
-    }
-    const setCookie = res.headers.get('set-cookie');
-    if (setCookie) {
-        authCookie = setCookie.split(';')[0]; // aerostrat_token=...
-    }
-    expect(res.status).toBe(200);
-    expect(authCookie).toContain('aerostrat_token');
-}, 130000);
 
 // ─────────────────────────────────────────────
 // 1. 並發地圖請求（模擬 N 個用戶同時開啟地圖）
@@ -143,29 +100,6 @@ describe('Concurrency: SSE Connections', () => {
 });
 
 // ─────────────────────────────────────────────
-// 4. 認證用戶並發請求
-// ─────────────────────────────────────────────
-describe('Concurrency: Authenticated Requests', () => {
-    test('10 concurrent /api/auth/me with cookie — all 200', async () => {
-        const N = 10;
-        const tasks = Array.from({ length: N }, () => get('/api/auth/me', authCookie));
-        const results = await Promise.all(tasks);
-        const failures = results.filter(r => r.status !== 200);
-        expect(failures).toHaveLength(0);
-    }, 15000);
-
-    test('Mixed authenticated + unauthenticated requests do not interfere', async () => {
-        const authTasks   = Array.from({ length: 5 }, () => get('/api/auth/me', authCookie));
-        const publicTasks = Array.from({ length: 5 }, () => get('/api/ping'));
-        const results = await Promise.all([...authTasks, ...publicTasks]);
-        const authFails  = results.slice(0, 5).filter(r => r.status !== 200);
-        const pubFails   = results.slice(5).filter(r => r.status !== 200);
-        expect(authFails).toHaveLength(0);
-        expect(pubFails).toHaveLength(0);
-    }, 15000);
-});
-
-// ─────────────────────────────────────────────
 // 5. 速率限制驗證（系統應保護自己）
 // ─────────────────────────────────────────────
 describe('Rate Limiting Under Load', () => {
@@ -175,19 +109,6 @@ describe('Rate Limiting Under Load', () => {
         const results = await Promise.all(tasks);
         const got429 = results.filter(r => r.status === 429);
         expect(got429).toHaveLength(0); // ping should not be rate-limited
-    }, 30000);
-
-    test('Burst login attempts trigger 429 (rate limiter is active)', async () => {
-        const N = 15;
-        const tasks = Array.from({ length: N }, () =>
-            post('/api/auth/login', { username: 'noone_xxx', password: 'wrong' })
-        );
-        const results = await Promise.all(tasks);
-        const statuses = results.map(r => r.status);
-        const has429 = statuses.some(s => s === 429);
-        // Rate limiter should kick in within 15 rapid requests
-        expect(has429).toBe(true);
-        console.log(`  Login burst statuses: ${[...new Set(statuses)].join(', ')}`);
     }, 30000);
 });
 

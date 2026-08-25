@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Clock, Activity, Settings, Globe, Search, X, User, LogOut, BookOpen, Route, ShieldCheck, Plus, Sun, Moon } from 'lucide-react';
+import { Clock, Activity, Settings, Globe, Search, X, Sun, Moon } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
-import { authStore } from '../store/authStore';
 import SearchBar from './SearchBar';
 import FilterPanel from './FilterPanel';
 import AeroIcon from './AeroIcon';
@@ -20,14 +19,6 @@ export default function TopBar({
     onFilterChange,
     mapLayer,
     onMapLayerChange,
-    onOpenAuth,
-    onOpenMyFlights,
-    onOpenNewFlight,
-    onOpenAdmin,
-    authUser,
-    showUserRoutes = false,
-    onToggleUserRoutes,
-    hasUserRoutes = false,
     theme,
     onToggleTheme,
     onRecenter,
@@ -37,21 +28,7 @@ export default function TopBar({
     const [showSettings, setShowSettings] = useState(false);
     const [showMobileSearch, setShowMobileSearch] = useState(false);
     const [dataFreshness, setDataFreshness] = useState(null);
-    const currentUser = authUser ?? null;
-    const [showUserMenu, setShowUserMenu] = useState(false);
     const settingsRef = useRef(null);
-    const userMenuRef = useRef(null);
-
-    useEffect(() => {
-        if (!showUserMenu) return;
-        const handler = (e) => {
-            if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
-                setShowUserMenu(false);
-            }
-        };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, [showUserMenu]);
 
     useEffect(() => {
         const interval = setInterval(() => {
@@ -171,54 +148,6 @@ export default function TopBar({
                         </div>
                     )}
                 </div>
-
-                {/* ── 用戶按鈕 ── */}
-                {currentUser ? (
-                    <div className="settings-dropdown-wrapper" ref={userMenuRef}>
-                        <button
-                            className={`tb-btn tb-user-btn ${showUserMenu ? 'active' : ''}`}
-                            onClick={() => setShowUserMenu(v => !v)}
-                            title={currentUser.username}
-                        >
-                            <User size={14} />
-                            <span className="tb-username">{currentUser.username}</span>
-                        </button>
-                        {showUserMenu && (
-                            <div className="settings-popover user-menu-popover">
-                                <button className="user-menu-item" onClick={() => { setShowUserMenu(false); onOpenNewFlight?.(); }}>
-                                    <Plus size={14} /> {t('newFlight')}
-                                </button>
-                                <button className="user-menu-item" onClick={() => { setShowUserMenu(false); onOpenMyFlights?.(); }}>
-                                    <BookOpen size={14} /> {t('myFlights')}
-                                </button>
-                                {hasUserRoutes && (
-                                    <button
-                                        className={`user-menu-item${showUserRoutes ? ' active' : ''}`}
-                                        onClick={() => { onToggleUserRoutes?.(); setShowUserMenu(false); }}
-                                    >
-                                        <Route size={14} /> {showUserRoutes ? t('hideMyRoutes') : t('showMyRoutes')}
-                                    </button>
-                                )}
-                                {!!currentUser?.is_superadmin && (
-                                    <>
-                                        <div className="user-menu-divider" />
-                                        <button className="user-menu-item admin" onClick={() => { setShowUserMenu(false); onOpenAdmin?.(); }}>
-                                            <ShieldCheck size={14} /> {t('adminPanel')}
-                                        </button>
-                                    </>
-                                )}
-                                <div className="user-menu-divider" />
-                                <button className="user-menu-item danger" onClick={() => { authStore.logout(); setShowUserMenu(false); }}>
-                                    <LogOut size={14} /> {t('logout')}
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                ) : (
-                    <button className="tb-btn tb-login-btn" onClick={() => onOpenAuth?.()}>
-                        <User size={14} /> {t('login')}
-                    </button>
-                )}
             </div>
         </div>
     );
