@@ -463,7 +463,8 @@ export function useFlightData(mapRef, options = {}) {
         }
         const sortedHistory = [...history].sort((a, b) => a[0] - b[0]);
 
-        // [v3.1] Return full tuple for TimePlayer from local history
+        // Pad to the same 6-field tuple shape as the API path above, so
+        // callers don't need to branch on which source the track came from.
         return sortedHistory.slice(latestSegmentStartIdx).map((p) => [
             p[0], p[1], p[2], null, null, null
         ]);

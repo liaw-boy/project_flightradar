@@ -4,8 +4,6 @@ import { AlertTriangle, X } from 'lucide-react';
 import './ConfirmDialog.css';
 
 export default function ConfirmDialog({ title, message, variant = 'danger', confirmLabel = '確認', onConfirm, onCancel }) {
-    // The only overlay in the app without Escape support — every other modal
-    // (AuthModal, and now MyFlightsPanel) closes on Escape.
     useEffect(() => {
         const onKeyDown = (e) => { if (e.key === 'Escape') onCancel(); };
         window.addEventListener('keydown', onKeyDown);
