@@ -2984,6 +2984,13 @@ process.on('uncaughtException', (err) => {
 
 process.on('SIGTERM', () => {
     logger.info('PROCESS', 'SIGTERM received — graceful shutdown initiated');
-    // Allow in-flight requests to complete; PM2 will wait up to kill_timeout
+    // aerostrat.service (systemd, Restart=always, RestartSec=5) sends SIGTERM
+    // on every restart/stop, so this fires far more often than a one-off
+    // deploy. Close the SQLite handle before exiting instead of relying on
+    // process.exit() to tear it down implicitly — the next process (systemd's
+    // auto-respawn, or an operator-started instance overlapping it) opens the
+    // same WAL file within seconds, and a handle left dangling widens the
+    // window for lock contention between the two.
+    try { db.close(); } catch (_) { /* already closed or never opened */ }
     process.exit(0);
 });
