@@ -20,8 +20,8 @@ cd backend
 npm install --omit=dev
 cd ..
 
-echo "[4/4] Reloading PM2..."
-pm2 reload aerostrat
+echo "[4/4] Restarting via systemd..."
+systemctl --user restart aerostrat.service
 
 echo "=== Done ==="
-pm2 status aerostrat
+systemctl --user status aerostrat.service --no-pager

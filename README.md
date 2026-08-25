@@ -140,7 +140,7 @@ AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系�
 | express-rate-limit | 8 | API 速率限制 |
 | node-cron | 4 | 定時任務（METAR、DB 清理） |
 | msgpack-lite | — | 二進制序列化（伺服器端） |
-| PM2 | — | 程序管理 |
+| systemd | — | 程序管理（`aerostrat.service`，見 [docs/deploy.md](docs/deploy.md)） |
 
 ### 資料傳輸協議
 | 通道 | 協議 | 資料 |
@@ -185,7 +185,7 @@ project_aerostrat/
 
 ### 環境需求
 - Node.js 20+
-- PM2（選用，生產環境推薦）
+- systemd（生產環境用 `aerostrat.service` 管理程序，見 [docs/deploy.md](docs/deploy.md)）
 
 ### 1. 複製並安裝
 
@@ -219,14 +219,16 @@ cd client && npm run dev
 # 後端 → http://localhost:3000
 ```
 
-### 4. Build 並以 PM2 運行
+### 4. Build 並啟動正式站
 
 ```bash
 cd client && npm run build
 cd ..
-pm2 start backend/ecosystem.config.js
+systemctl --user restart aerostrat.service
 # 訪問 http://localhost:3000
 ```
+
+> 詳細重啟/部署流程、為何不能手動 `kill` + `node server.js &`，見 [docs/deploy.md](docs/deploy.md)。
 
 ---
 
@@ -266,10 +268,12 @@ NODE_ENV=production
 
 ## 部署
 
+詳細流程（含正式站絕對不能手動 `kill`+`node server.js &` 的原因）見 [docs/deploy.md](docs/deploy.md)。
+
 ### 使用 deploy.sh（推薦）
 
 ```bash
-# 自動：git pull → npm build → pm2 reload
+# 自動：git pull → npm build → systemctl --user restart aerostrat.service
 ./deploy.sh
 ```
 
@@ -289,7 +293,7 @@ git pull origin main
 cd client && npm install && npm run build
 
 # 3. 重啟後端
-pm2 reload aerostrat
+systemctl --user restart aerostrat.service
 ```
 
 ---
