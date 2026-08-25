@@ -2,10 +2,7 @@ const config = require('./config');
 const logger = require('./logger');
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const cors = require('cors');
 const compression = require('compression');
-const helmet = require('helmet');
-const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -194,16 +191,11 @@ const PORT = config.PORT;
 // ==========================================
 // Middleware
 // ==========================================
-const _allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:3005')
-    .split(',').map(s => s.trim()).filter(Boolean);
-app.use(cors({
-    origin: (origin, cb) => {
-        // Allow same-origin requests (no Origin header) and whitelisted origins
-        if (!origin || _allowedOrigins.includes(origin)) return cb(null, true);
-        cb(new Error(`CORS: origin '${origin}' not allowed`));
-    },
-    credentials: true,
-}));
+const { corsMiddleware, helmetMiddleware } = require('./middleware/security');
+const { apiLimiter, fusionLimiter, lookupLimiter, monitorLoginLimiter } = require('./middleware/rateLimiters');
+const { registerFrontendStatic, registerSvgRoutes, registerAirlineAssetRoutes } = require('./routes/staticAssets');
+
+app.use(corsMiddleware);
 app.use(compression()); // [v2.9.0] Gzip
 app.use(logger.httpMiddleware); // [LOG] HTTP request logging (skips high-freq endpoints)
 
@@ -216,172 +208,24 @@ app.use(logger.httpMiddleware); // [LOG] HTTP request logging (skips high-freq e
 // headers. Confirmed live via `curl -I` against both the document and an API
 // route before this fix: the API response carried the full helmet header
 // set, the document response carried none of it.
-// img-src includes map tile providers (CartoCD, ArcGIS, OpenTopoMap) + Planespotters CDN for aircraft photos.
-// script-src keeps 'unsafe-inline' because Vite injects module-preload inline scripts at build time.
-// connect-src 'self' covers same-origin XHR, fetch, SSE, and WebSocket (ws/wss same-origin).
-// [Photo Fix] airport-data.com was missing here even though /api/photos/:icao24's
-// fallback chain (and adsbdb's url_photo, wired in as a further fallback in
-// flightController.js) both return airport-data.com image URLs. The backend was
-// successfully fetching and returning those URLs, but the browser silently
-// blocked every <img src> pointed at them — no network request, no onload, no
-// error surfaced to the app — so the sidebar just sat on its loading/placeholder
-// state forever for any aircraft whose only hit came from that source.
-app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc:            ["'self'"],
-            scriptSrc:             ["'self'", "'unsafe-inline'"],
-            styleSrc:              ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-            fontSrc:               ["'self'", "https://fonts.gstatic.com"],
-            imgSrc:                ["'self'", "data:", "blob:",
-                                    "https://*.cartocdn.com",
-                                    "https://server.arcgisonline.com",
-                                    "https://tile.opentopomap.org",
-                                    "https://*.planespotters.net",
-                                    // Planespotters serves its actual photo images from a
-                                    // completely different domain than its API host — not a
-                                    // subdomain of planespotters.net, so the entry above never
-                                    // covered it. Every real photo the API successfully found
-                                    // was silently dropped by the browser's own CSP enforcement.
-                                    "https://*.plnspttrs.net",
-                                    "https://airport-data.com"],
-            connectSrc:            ["'self'"],
-            workerSrc:             ["'self'", "blob:"],
-            frameSrc:              ["'none'"],
-            objectSrc:             ["'none'"],
-            baseUri:               ["'self'"],
-        },
-    },
-    crossOriginEmbedderPolicy: false, // Needed for Leaflet tile img cross-origin
-    // The /api/svg, /airline-logos, /airline-banners routes below explicitly
-    // set Access-Control-Allow-Origin: * for cross-origin embedding — helmet's
-    // default Cross-Origin-Resource-Policy: same-origin would silently block
-    // that regardless of the ACAO header (CORP is enforced independently by
-    // the browser), so it's relaxed globally to match that existing intent.
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-}));
+app.use(helmetMiddleware);
 
 // [v5.0.0] Production static file serving — built frontend from public-react/
 // In development, Vite dev server handles the frontend on port 3005.
 // In production (Docker), serve the pre-built React app directly.
-const publicReactPath = path.join(__dirname, '..', 'public-react');
-if (fs.existsSync(publicReactPath)) {
-    // Assets (hashed filenames) — long cache; index.html — no cache
-    app.use('/assets', express.static(path.join(publicReactPath, 'assets'), { maxAge: '7d' }));
-    app.use(express.static(publicReactPath, { maxAge: 0, etag: false }));
-    // Express 5 wildcard syntax: serve index.html for all non-API routes (SPA fallback)
-    app.get('/{*path}', (req, res, next) => {
-        const p = req.path;
-        if (p.startsWith('/api') || p.startsWith('/ws') || p.startsWith('/monitor')
-            || p.startsWith('/airline-logos') || p.startsWith('/airline-banners')) return next();
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.sendFile(path.join(publicReactPath, 'index.html'));
-    });
-    logger.info('SERVER', `Serving built frontend from ${publicReactPath}`);
-}
-
-// Serve latest built CSS at stable path for login-layout adjuster tool
-app.get('/app.css', (req, res) => {
-    try {
-        const assetsDir = path.join(__dirname, '..', 'public-react', 'assets');
-        const cssFile = require('fs').readdirSync(assetsDir).find(f => /^index-.*\.css$/.test(f));
-        if (cssFile) {
-            res.setHeader('Content-Type', 'text/css');
-            res.sendFile(path.join(assetsDir, cssFile));
-        } else res.status(404).send('');
-    } catch { res.status(404).send(''); }
-});
-
-// [v5.0.1] Serve favicon.svg to System Monitor and other backend routes
-app.get('/favicon.svg', (req, res) => {
-    const faviconPath = path.join(__dirname, '..', 'client', 'public', 'favicon.svg');
-    if (fs.existsSync(faviconPath)) {
-        res.setHeader('Content-Type', 'image/svg+xml');
-        res.sendFile(faviconPath);
-    } else {
-        res.status(404).send('Not Found');
-    }
-});
+registerFrontendStatic(app, __dirname);
 
 // [v12.5] Aircraft SVG silhouettes served locally (avoids GitHub CDN 404s/rate-limits)
-// Known-missing types get a generic jet silhouette instead of a 404 to suppress console noise.
-app.use('/api/svg', express.static(path.join(__dirname, 'public/svg'), {
-    maxAge: '7d',
-    fallthrough: true,
-    setHeaders: (res) => { res.setHeader('Access-Control-Allow-Origin', '*'); }
-}));
-app.get('/api/svg/:typecode', (req, res) => {
-    // Fallback: serve generic jet SVG for unknown typecodes — suppresses 404 noise
-    const fallback = path.join(__dirname, 'public/svg/A320.svg');
-    if (fs.existsSync(fallback)) {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Cache-Control', 'public, max-age=86400');
-        res.sendFile(fallback);
-    } else {
-        res.status(204).end(); // no content, still 2xx
-    }
-});
+registerSvgRoutes(app, __dirname);
 
 // Airline logos/banners (Jxck-S/airline-logos, ICAO-named PNGs)
-app.use('/airline-logos', express.static(path.join(__dirname, 'public/airline-logos'), {
-    maxAge: '30d',
-    fallthrough: true,
-    setHeaders: (res) => { res.setHeader('Access-Control-Allow-Origin', '*'); }
-}));
-app.use('/airline-banners', express.static(path.join(__dirname, 'public/airline-banners'), {
-    maxAge: '30d',
-    fallthrough: true,
-    setHeaders: (res) => { res.setHeader('Access-Control-Allow-Origin', '*'); }
-}));
-// 204 fallback for missing ICAO PNG (suppress 404 log spam)
-app.get('/airline-logos/*splat', (req, res) => res.status(204).end());
-app.get('/airline-banners/*splat', (req, res) => res.status(204).end());
+registerAirlineAssetRoutes(app, __dirname);
 
-
-// General API rate limiter
-const apiLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 600,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many requests, please wait a moment.' },
-    skip: (req) => ['/api/events', '/api/flights/live', '/api/flight-details'].some(p => req.path.startsWith(p)),
-});
 app.use('/api', apiLimiter);
-
-// Strict limiter for expensive fusion endpoints (fan out to 5 external APIs)
-const fusionLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 40,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many detail requests, please slow down.' },
-});
 app.use('/api/flight/complete-details', fusionLimiter);
-
-// Strict limiter for lookup endpoints
-const lookupLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 60,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many lookup requests.' },
-});
 app.use('/api/lookup', lookupLimiter);
 app.use(cookieParser());
 app.use(express.json());
-
-// ── Monitor login rate limiter: 5 attempts / minute / IP — the /monitor
-// backend can inspect internal DB/sync status, so brute force here still
-// matters even though the user-account login system has been removed. ──
-const monitorLoginLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many login attempts, please wait a minute.' },
-    keyGenerator: (req) => ipKeyGenerator(req.ip),
-});
 
 const db = require('./db/sqlite');
 
