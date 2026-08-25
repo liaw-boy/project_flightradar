@@ -12,6 +12,10 @@ const http = require('http');
 const zlib = require('zlib');
 const readline = require('readline');
 const { initWebSocketServer, broadcastPlanes, broadcastTelemetry, broadcastTrackPoint, getActiveViewports, getClientCount } = require('./socketEngine');
+const {
+    masterStateMap, sourceHealth, airportSpatialGrid, aircraftMetadataIndex,
+    lastGlobalStatesMap, getGlobalPlanesCache, setGlobalPlanesCache,
+} = require('./state/appState');
 // ── New store layer (replaces MongoDB models) ───────────────────────────
 const Aircraft      = require('./db/aircraftStore');
 const Route         = require('./db/routeStore');
@@ -123,8 +127,6 @@ function getTime() {
 // ==========================================
 // [v11.0] Fast Startup Metadata Index (500k records)
 // ==========================================
-const aircraftMetadataIndex = new Map(); // icao24 -> typecode
-
 async function initAircraftMetadataIndex() {
     const csvPath = path.join(__dirname, 'data', 'aircraft.csv.gz');
     if (!fs.existsSync(csvPath)) {
@@ -259,7 +261,7 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
     const csIcao = toIcaoCallsign(cs);
 
     // Layer 0: Live planes cache — get registration + typecode for this callsign
-    const livePlane = globalPlanesCache.states.find(p =>
+    const livePlane = getGlobalPlanesCache().states.find(p =>
         p.callsign && (p.callsign.toUpperCase() === cs || (csIcao && p.callsign.toUpperCase() === csIcao))
     );
     const liveRegistration = livePlane?.registration || null;
@@ -861,7 +863,7 @@ app.get('/api/events', (req, res) => {
     console.log(`${getTime()} 📡 [SSE] Client connected. Total: ${sseClients.size}`);
 
     // 立即發送当前資料快照
-    res.write(`data: ${JSON.stringify({ type: 'connected', time: globalPlanesCache.time, count: globalPlanesCache.states.length })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'connected', time: getGlobalPlanesCache().time, count: getGlobalPlanesCache().states.length })}\n\n`);
 
     // 心跳機制：每 5 秒發送 data 訊息（comment ping 不觸發 onmessage，改用 data）
     const heartbeat = setInterval(() => {
@@ -1065,17 +1067,10 @@ function calculateRecommendedInterval() {
 
 // ==========================================
 // [v11.0] Multi-Source Polling Engine — Shared State
+// (masterStateMap/sourceHealth/airportSpatialGrid/aircraftMetadataIndex/
+// lastGlobalStatesMap/globalPlanesCache now live in ./state/appState)
 // ==========================================
-let globalPlanesCache = { states: [], time: 0 };
-let lastGlobalStatesMap = new Map(); // icao24 -> state (用於偵測起飛/降落)
-
-// ── Master state map with TTL ──────────────────────────────────────────────
-// All three tiers write here. pruneAndBroadcast() serialises to globalPlanesCache.
-const masterStateMap = new Map();  // icao24 → { ...state, _lastSeen: ms }
 const PLANE_TTL_MS = 90_000;       // 90s without update → remove from map
-
-// ── Centralised circuit breakers & source health ──────────────────────────
-const sourceHealth = {};  // key → { cbUntil, consecutiveFails, lastOk, lastCount, lastLatency }
 const SOURCE_CB_MS = 5 * 60_000;  // 5 min backoff on 429/503
 const cbOpen  = k => (sourceHealth[k]?.cbUntil || 0) > Date.now();
 const cbTrip  = (k, ms = SOURCE_CB_MS) => {
@@ -1292,14 +1287,14 @@ function pruneAndBroadcast() {
         if ((p._lastSeen || 0) < cutoff) masterStateMap.delete(id);
     }
     const states = Array.from(masterStateMap.values());
-    globalPlanesCache = { states, time: Math.floor(Date.now() / 1000), stale: false };
+    setGlobalPlanesCache({ states, time: Math.floor(Date.now() / 1000), stale: false });
     _broadcastDirty = true; // picked up by the flush ticker below
 }
 
 setInterval(() => {
     if (!_broadcastDirty) return;
     _broadcastDirty = false;
-    broadcastPlanes(globalPlanesCache.states, globalPlanesCache.time);
+    broadcastPlanes(getGlobalPlanesCache().states, getGlobalPlanesCache().time);
 }, BROADCAST_INTERVAL_MS);
 
 // ==========================================
@@ -1308,7 +1303,6 @@ setInterval(() => {
 // 複雜度：建立 O(n)，查詢 O(k) k≈5~15 >> 比全量掃描快 ~1000 倍
 // ==========================================
 const GRID_SIZE = 1; // 每格 1 度
-let airportSpatialGrid = new Map(); // key: 'lat_lng' -> [airport, ...]
 
 function buildAirportGrid() {
     airportSpatialGrid.clear();
@@ -1543,7 +1537,7 @@ registerHealthRoutes(app, {
     requireAdminAccess, syncLog, accountPool, rawAccounts: _rawAccounts, activeSessions,
     ingestionStats, sourceHealth, apiStats, TrackPoint, FlightSession,
     getMasterStateMap: () => masterStateMap,
-    getGlobalPlanesCache: () => globalPlanesCache,
+    getGlobalPlanesCache,
     getCpuUsage: () => _currentCpuUsage,
     backendDir: __dirname,
 });
@@ -1897,7 +1891,7 @@ async function fetchGlobalBaseline() {
 
         if (states.length === 0) {
             logger.warn('SYNC', 'Global baseline: all sources failed — using stale cache');
-            globalPlanesCache.stale = true;
+            getGlobalPlanesCache().stale = true;
             return;
         }
 
@@ -1911,7 +1905,7 @@ async function fetchGlobalBaseline() {
 
     } catch (e) {
         logger.error('SYNC', `Global baseline error: ${e.message}`);
-        globalPlanesCache.stale = true;
+        getGlobalPlanesCache().stale = true;
     } finally {
         _baselineRunning = false;
     }
@@ -2188,7 +2182,7 @@ async function fetchGlobalPlanes() {
     // [v10.3] Global cycle every 2nd tick (20s) — adsb.lol/adsb.fi have no hard daily quota.
     // adsb.fi snapshot (feeder IP): ~6260 ac global. adsb.lol fallback: ~5270 ac global.
     const isGlobalCycle = syncCycleCount % 2 === 0 || lastOpenSkyFetchTime === 0; // ~every 20s
-    logger.debug('SYNC', `Cycle #${syncCycleCount} started | cached: ${(globalPlanesCache.states || []).length} planes`);
+    logger.debug('SYNC', `Cycle #${syncCycleCount} started | cached: ${(getGlobalPlanesCache().states || []).length} planes`);
 
     try {
         let mergedStates = [];
@@ -2262,11 +2256,11 @@ async function fetchGlobalPlanes() {
             }
 
             if (!gotGlobal) {
-                mergedStates = globalPlanesCache.states || [];
+                mergedStates = getGlobalPlanesCache().states || [];
                 sourceTags.push('Cache');
             }
         } else {
-            mergedStates = [...(globalPlanesCache.states || [])];
+            mergedStates = [...(getGlobalPlanesCache().states || [])];
             sourceTags.push('Cache');
         }
 
@@ -2510,17 +2504,17 @@ app.get('/api/planes/bbox', async (req, res) => {
 
     // [v4.4.0 Optimization] Ultra-fast minimalist filter
     // Enrichment is now handled in the background (fetchGlobalPlanes)
-    const planesInBBox = (globalPlanesCache.states || []).filter(p => {
+    const planesInBBox = (getGlobalPlanesCache().states || []).filter(p => {
         return p.lat >= minLat && p.lat <= maxLat &&
             p.lng >= minLng && p.lng <= maxLng;
     });
 
     res.json({
-        time: globalPlanesCache.time,
-        globalLastUpdate: globalPlanesCache.time,
+        time: getGlobalPlanesCache().time,
+        globalLastUpdate: getGlobalPlanesCache().time,
         states: planesInBBox,
         source: 'global_cache_prestitched',
-        stale: !!globalPlanesCache.stale,
+        stale: !!getGlobalPlanesCache().stale,
         stats: apiStats // [v4.3.6] Restore API stats for HUD synchronization
     });
 });
