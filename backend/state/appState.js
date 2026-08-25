@@ -17,6 +17,9 @@ const sourceHealth = {};           // key → { cbUntil, consecutiveFails, lastO
 const airportSpatialGrid = new Map(); // key: 'lat_lng' -> [airport, ...]
 const aircraftMetadataIndex = new Map(); // icao24 -> typecode
 const lastGlobalStatesMap = new Map(); // icao24 -> state (用於偵測起飛/降落)
+const activeSessions = new Map();  // [Flight Sessions] icao24 -> { sessionId, callsign, lastSeen, onGround }
+const lastStoredPoint = new Map(); // [Track Dedup] icao24 -> { lat, lng, altitude, heading, velocity, ts }
+const ingestionStats = { totalPoints: 0, totalBatches: 0, sessionsCreated: 0, sessionsClosed: 0, lastBatchSize: 0, lastBatchMs: 0 };
 
 let _globalPlanesCache = { states: [], time: 0 };
 function getGlobalPlanesCache() { return _globalPlanesCache; }
@@ -28,6 +31,9 @@ module.exports = {
     airportSpatialGrid,
     aircraftMetadataIndex,
     lastGlobalStatesMap,
+    activeSessions,
+    lastStoredPoint,
+    ingestionStats,
     getGlobalPlanesCache,
     setGlobalPlanesCache,
 };
