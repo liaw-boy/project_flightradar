@@ -1041,114 +1041,6 @@ app.get('/monitor/api/db-status', requireMonitorAuth, (req, res) => {
     });
 });
 
-// Public ping — no auth required, used by health checks and tests
-app.get('/api/ping', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
-
-// Shared with the startup catch-up checks below — a single definition so the
-// freshness badge and the "should I resync on boot" decision can't drift.
-const DATA_FRESHNESS_THRESHOLDS = {
-    mictronics: 9 * 24 * 3600 * 1000,   // 9 days (weekly job)
-    vrs:        2 * 24 * 3600 * 1000,   // 2 days (daily job)
-    tdx:        25 * 3600 * 1000,        // 25 hours (daily at 4am)
-    metar:      2 * 3600 * 1000,        // 2 hours (runs every 1 hour)
-};
-
-// Data freshness — public, used by frontend to show persistent stale badges
-// A job is "stale" if it has never succeeded, or last success was >THRESHOLD ago
-app.get('/api/data-freshness', (req, res) => {
-    const THRESHOLDS = DATA_FRESHNESS_THRESHOLDS;
-    const all  = syncLog.getAll();
-    const now  = Date.now();
-    const jobs = {};
-    let   anyStale = false;
-
-    for (const [job, threshold] of Object.entries(THRESHOLDS)) {
-        const entry   = all[job] || {};
-        const lastOk  = entry.lastSuccess ? new Date(entry.lastSuccess).getTime() : null;
-        const ageMs   = lastOk ? now - lastOk : null;
-        const stale   = ageMs === null || ageMs > threshold;
-        if (stale) anyStale = true;
-        jobs[job] = {
-            stale,
-            lastSuccess: entry.lastSuccess || null,
-            ageDays:     ageMs !== null ? Math.floor(ageMs / 86400000) : null,
-            error:       entry.error || null,
-            consecutiveFails: entry.consecutiveFails || 0,
-        };
-    }
-
-    res.json({ anyStale, jobs });
-});
-
-app.get('/api/health', requireAdminAccess, (req, res) => {
-    const dbPath = path.join(__dirname, 'data', 'aerostrat.db');
-    let dbSize = 0;
-    try { if (fs.existsSync(dbPath)) dbSize = fs.statSync(dbPath).size; } catch(_) {}
-
-    // [v12.8] Extended Hardware Stats
-    const cpus = os.cpus();
-    const cpuModel = cpus.length > 0 ? cpus[0].model.replace(/\s+/g, ' ') : 'Unknown';
-    const cpuCores = cpus.length;
-    
-    let diskUsage = { total: 0, free: 0, used: 0 };
-    try {
-        const stats = fs.statfsSync('/');
-        diskUsage.total = Number(stats.bsize) * Number(stats.blocks);
-        diskUsage.free = Number(stats.bsize) * Number(stats.bfree);
-        diskUsage.used = diskUsage.total - diskUsage.free;
-    } catch (_) {}
-
-    res.json({
-        status: 'ok',
-        uptime: process.uptime(),
-        cacheSize: masterStateMap?.size ?? globalPlanesCache.states?.length ?? 0,
-        activeAccount: accountPool.getCurrentUser(),
-        totalAccounts: _rawAccounts.length,
-        activeSessions: activeSessions.size,
-        ingestion: ingestionStats,
-        performance: {
-            process: {
-                memory: process.memoryUsage(),
-                cpu: process.cpuUsage()
-            },
-            system: {
-                load: os.loadavg(),
-                cpuUsage: _currentCpuUsage,
-                freeMem: os.freemem(),
-                totalMem: os.totalmem(),
-                cpuModel,
-                cpuCores,
-                arch: os.arch(),
-                platform: os.platform(),
-                disk: diskUsage
-            }
-        },
-        storage: {
-            dbSize,
-            dbPath: 'backend/data/aerostrat.db'
-        },
-        timestamp: new Date().toISOString()
-    });
-});
-
-
-app.get('/api/ingestion/status', requireAdminAccess, async (req, res) => {
-    let trackPointCount = null;
-    let sessionCount = null;
-    try {
-        trackPointCount = await TrackPoint.estimatedDocumentCount();
-        sessionCount = await FlightSession.estimatedDocumentCount();
-    } catch (_) { }
-    res.json({
-        ...ingestionStats,
-        activeSessions: activeSessions.size,
-        trackPointsInDB: trackPointCount,
-        activeSessionsInDB: sessionCount,
-        globalCachePlanes: globalPlanesCache.states?.length || 0,
-        globalCacheStale: globalPlanesCache.stale || false
-    });
-});
-
 // ==========================================
 // API 請求計數器
 // ==========================================
@@ -1165,26 +1057,6 @@ var apiStats = {
     // accounts 動態從 pool 讀取，不再在此儲存
     get accounts() { return accountPool.getStats(); },
 };
-
-app.get('/api/stats', requireAdminAccess, function (req, res) {
-    res.json({
-        totalCalls: apiStats.totalCalls,
-        stateCalls: apiStats.stateCalls,
-        metadataCalls: apiStats.metadataCalls,
-        cacheHits: apiStats.cacheHits,
-        accounts: accountPool.getStats(),
-        errors: apiStats.errors,
-        lastError: apiStats.lastError,
-        lastErrorTime: apiStats.lastErrorTime,
-        lastSuccessTime: apiStats.lastSuccessTime,
-        uptimeMinutes: Math.round((Date.now() - apiStats.startTime) / 60000),
-        recommendedInterval: Math.round(accountPool.getRecommendedInterval(15000) / 1000),
-        activeAccount: accountPool.getCurrentUser(),
-        // [v11.0] Per-source health for DevPanel
-        sourceHealth,
-        totalPlanes: masterStateMap?.size ?? globalPlanesCache.states?.length ?? 0,
-    });
-});
 
 // calculateRecommendedInterval 委派給 accountPool（保留名稱供舊呼叫點使用）
 function calculateRecommendedInterval() {
@@ -1665,6 +1537,16 @@ async function fetchAdsbFi(lat, lon, dist = 250) {
  */
 // [v6.0] Ingestion telemetry counters
 const ingestionStats = { totalPoints: 0, totalBatches: 0, sessionsCreated: 0, sessionsClosed: 0, lastBatchSize: 0, lastBatchMs: 0 };
+
+const { registerHealthRoutes, DATA_FRESHNESS_THRESHOLDS } = require('./routes/health');
+registerHealthRoutes(app, {
+    requireAdminAccess, syncLog, accountPool, rawAccounts: _rawAccounts, activeSessions,
+    ingestionStats, sourceHealth, apiStats, TrackPoint, FlightSession,
+    getMasterStateMap: () => masterStateMap,
+    getGlobalPlanesCache: () => globalPlanesCache,
+    getCpuUsage: () => _currentCpuUsage,
+    backendDir: __dirname,
+});
 
 async function ingestTrackPoints(states, timeUnix) {
     if (!states || states.length === 0) return;
