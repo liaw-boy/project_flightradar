@@ -574,7 +574,7 @@ export default function App() {
                 onToggleBoard={() => setShowBoard(v => !v)}
             />
 
-            {showBoard && <FlightBoard onClose={() => setShowBoard(false)} />}
+            {showBoard && <FlightBoard onClose={() => setShowBoard(false)} isMobile={isMobile} />}
 
             {/* Right Status Column */}
             <div className="right-hud">

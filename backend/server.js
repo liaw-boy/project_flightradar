@@ -2736,8 +2736,11 @@ startMetarSync();
 // 機場起降看板 (FIDS Board) — 每 5 分鐘更新
 // ==========================================
 const { registerFidsRoutes } = require('./routes/fids');
-const { startFidsBoardSync, getFidsBoard, listBoardAirports } = require('./services/fidsBoard');
-registerFidsRoutes(app, { getFidsBoard, listBoardAirports });
+const { startFidsBoardSync, queryFlights, getStats, listBoardAirports } = require('./services/fidsBoard');
+function getAirportInfo(code) {
+    return code ? globalAirportsDB[code] : null;
+}
+registerFidsRoutes(app, { queryFlights, getStats, listBoardAirports, getAirportInfo });
 startFidsBoardSync();
 
 // ── API 404 firewall — must stay last among /api/* routes ──────────────────

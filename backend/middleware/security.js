@@ -42,7 +42,9 @@ const helmetMiddleware = helmet({
                                     // covered it. Every real photo the API successfully found
                                     // was silently dropped by the browser's own CSP enforcement.
                                     "https://*.plnspttrs.net",
-                                    "https://airport-data.com"],
+                                    "https://airport-data.com",
+                                    // FlightBoard airline logos (avs.io)
+                                    "https://pics.avs.io"],
             connectSrc:            ["'self'"],
             workerSrc:             ["'self'", "blob:"],
             frameSrc:              ["'none'"],
