@@ -31,6 +31,17 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
     // Fallback: adsb.fi snapshot (if adsb.lol fails)
     let _baselineRunning = false;
 
+    // A single failed cycle (one source hiccup) is normal and already handled by
+    // the per-source circuit breakers. This tracks the harder failure: adsb.lol,
+    // adsb.fi-snap, AND the OpenSky fallback all empty in the same cycle — the
+    // whole tier is dark, not just one upstream. Escalates to an ERROR-level,
+    // throttled alert once that's been true for several consecutive cycles, so
+    // it's visible without a human having to notice the map went stale.
+    let _consecutiveTotalOutageCycles = 0;
+    const TOTAL_OUTAGE_ALERT_THRESHOLD = 3;       // ~15s of zero data at the 5s poll interval
+    const TOTAL_OUTAGE_ALERT_THROTTLE_MS = 5 * 60_000; // re-announce at most once per 5 min while it persists
+    let _lastTotalOutageAlertAt = 0;
+
     async function fetchGlobalBaseline() {
         if (_baselineRunning) return;
         _baselineRunning = true;
@@ -103,8 +114,19 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
             if (states.length === 0) {
                 logger.warn('SYNC', 'Global baseline: all sources failed — using stale cache');
                 getGlobalPlanesCache().stale = true;
+
+                _consecutiveTotalOutageCycles++;
+                if (_consecutiveTotalOutageCycles >= TOTAL_OUTAGE_ALERT_THRESHOLD) {
+                    const now = Date.now();
+                    if (now - _lastTotalOutageAlertAt >= TOTAL_OUTAGE_ALERT_THROTTLE_MS) {
+                        _lastTotalOutageAlertAt = now;
+                        const outageSec = _consecutiveTotalOutageCycles * 5;
+                        logger.error('ALERT', `Global baseline dark for ${outageSec}s+ — adsb.lol, adsb.fi-snap, AND OpenSky fallback all failed this cycle. Map is serving stale data.`);
+                    }
+                }
                 return;
             }
+            _consecutiveTotalOutageCycles = 0;
 
             // OpenSky carries no typecode/registration/operator — merge so the
             // enrichment already collected from adsb.lol survives the outage.
