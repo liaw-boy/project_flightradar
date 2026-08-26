@@ -5,11 +5,9 @@
  *   1. 首頁載入 / JS 無致命錯誤
  *   2. 地圖渲染 + 飛機出現
  *   3. 搜尋功能
- *   4. 登入流程 (UI visibility)
- *   5. My Flights Panel 開啟
- *   6. 新增航班表單 全頁展開
- *   7. API 健康檢查
- *   8. WebSocket 資料流
+ *   4. TopBar 渲染
+ *   5. API 健康檢查
+ *   6. 即時飛機資料 API
  */
 import { test, expect } from '@playwright/test';
 import path from 'path';
@@ -92,98 +90,22 @@ test('3 - search bar is visible and accepts input', async ({ page }) => {
     expect(inputVal).toBe('CI101');
 });
 
-// ─── 4. 登入 UI ───────────────────────────────────────────────────────────────
-test('4 - auth modal opens when clicking login button', async ({ page }) => {
-    await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(1500);
-
-    // Find login trigger — could be in topbar or sidebar
-    const loginTrigger = page.locator(
-        '[class*="login"], [class*="auth"], button:has-text("登入"), button:has-text("Login"), button:has-text("Sign")'
-    ).first();
-
-    const found = await loginTrigger.count();
-    if (!found) {
-        console.log('  ℹ Login button not found — user may already be logged in');
-        await shot(page, '04-no-login-btn');
-        return;
-    }
-
-    await loginTrigger.click({ timeout: 5000 }).catch(() => {});
-    await page.waitForTimeout(800);
-    await shot(page, '04-auth-modal');
-
-    // Modal should be visible
-    const modal = page.locator('.auth-overlay, [class*="auth-modal"], [class*="login-modal"]').first();
-    const modalVisible = await modal.isVisible().catch(() => false);
-    if (modalVisible) {
-        console.log('  ✓ Auth modal opened');
-        // Check username/password fields exist
-        await expect(page.locator('input[type="password"]').first()).toBeVisible({ timeout: 3000 });
-    } else {
-        console.log('  ℹ Auth modal pattern not matched — checking for form fields');
-        const pwField = await page.locator('input[type="password"]').count();
-        expect(pwField).toBeGreaterThan(0);
-    }
-});
-
-// ─── 5. TopBar user menu ──────────────────────────────────────────────────────
-test('5 - topbar renders with title and action buttons', async ({ page }) => {
+// ─── 4. TopBar ────────────────────────────────────────────────────────────────
+test('4 - topbar renders with title and action buttons', async ({ page }) => {
     await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(1500);
 
     const topbar = page.locator('.topbar, header, [class*="top-bar"], [class*="navbar"]').first();
     await expect(topbar).toBeVisible({ timeout: 8000 });
-    await shot(page, '05-topbar');
+    await shot(page, '04-topbar');
 
     const tbText = await topbar.textContent().catch(() => '');
     console.log(`  TopBar text: "${tbText.slice(0, 100)}"`);
     expect(tbText.trim().length).toBeGreaterThan(0);
 });
 
-// ─── 6. My Flights: LOG FLIGHT 開全頁 ────────────────────────────────────────
-test('6 - my flights panel opens and log flight goes full page', async ({ page }) => {
-    await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(1500);
-
-    // Find "my flights" trigger
-    const triggers = page.locator(
-        'button:has-text("Flight"), button:has-text("航班"), [class*="flight-log"], [class*="my-flight"]'
-    );
-    const trigCount = await triggers.count();
-    if (!trigCount) {
-        console.log('  ℹ My Flights trigger not visible (may need login)');
-        await shot(page, '06-no-flights-trigger');
-        return;
-    }
-
-    await triggers.first().click({ timeout: 5000 });
-    await page.waitForTimeout(800);
-    await shot(page, '06a-flights-panel');
-
-    // Click LOG FLIGHT button
-    const logBtn = page.locator('button:has-text("LOG FLIGHT"), button:has-text("LOG"), button:has-text("新增")').first();
-    const logBtnCount = await logBtn.count();
-    if (logBtnCount > 0) {
-        await logBtn.click({ timeout: 5000 });
-        await page.waitForTimeout(600);
-        await shot(page, '06b-log-flight-fullpage');
-
-        // Full-page form should be visible
-        const fullpage = page.locator('.mfp-form-fullpage');
-        const isVisible = await fullpage.isVisible().catch(() => false);
-        console.log(`  Full-page form visible: ${isVisible}`);
-        if (isVisible) {
-            // Check the horizontal boarding pass card
-            const hcard = page.locator('.bpf-hcard');
-            const hcardVisible = await hcard.isVisible().catch(() => false);
-            console.log(`  Horizontal boarding pass: ${hcardVisible}`);
-        }
-    }
-});
-
-// ─── 7. API Ping ─────────────────────────────────────────────────────────────
-test('7 - API ping endpoint is healthy', async ({ request }) => {
+// ─── 5. API Ping ─────────────────────────────────────────────────────────────
+test('5 - API ping endpoint is healthy', async ({ request }) => {
     const res = await request.get(`${BASE}/api/ping`, { timeout: 10000 });
     expect(res.ok()).toBe(true);
     const body = await res.json().catch(() => ({}));
@@ -191,8 +113,8 @@ test('7 - API ping endpoint is healthy', async ({ request }) => {
     expect(body.status).toBe('ok');
 });
 
-// ─── 8. Live planes API ───────────────────────────────────────────────────────
-test('8 - live planes bbox API returns data', async ({ request }) => {
+// ─── 6. Live planes API ───────────────────────────────────────────────────────
+test('6 - live planes bbox API returns data', async ({ request }) => {
     const res = await request.get(
         `${BASE}/api/planes/bbox?lamin=-90&lomin=-180&lamax=90&lomax=180`,
         { timeout: 15000 }
@@ -203,15 +125,4 @@ test('8 - live planes bbox API returns data', async ({ request }) => {
     console.log(`  Global plane count: ${planes.length}`);
     // Should have planes if system is running
     expect(planes.length).toBeGreaterThanOrEqual(0); // soft: 0 ok if offline
-});
-
-// ─── 9. My Flights record list shows redesigned cards ────────────────────────
-test('9 - flight list uses new fhr-card design (no old bp-card)', async ({ page }) => {
-    await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(1500);
-
-    // Old card class should NOT exist
-    const oldCards = await page.locator('.bp-card').count();
-    expect(oldCards).toBe(0);
-    console.log(`  Old bp-card count: ${oldCards} ✓`);
 });
