@@ -268,6 +268,27 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
     const liveRegistration = livePlane?.registration || null;
     const liveTypecode     = livePlane?.typecode     || null;
 
+    // Ground-truth plausibility check — third-party schedule sources (adsbdb,
+    // VRS standing-data, OpenFlights) key routes purely by flight-number
+    // string, with no awareness of *today's* actual assignment. Airlines
+    // routinely reuse the same flight number for different city pairs across
+    // days/seasons, so these sources can confidently return a completely
+    // wrong route. When we can see the aircraft is physically sitting on the
+    // ground at a specific airport right now, that beats any schedule
+    // lookup that doesn't even mention that airport — reject and fall
+    // through instead of serving (and caching) an obviously wrong route.
+    let groundAirport = null;
+    if (livePlane?.onGround && typeof livePlane.lat === 'number' && typeof livePlane.lng === 'number') {
+        groundAirport = findNearestAirport(livePlane.lat, livePlane.lng, 5);
+    }
+    function isPlausibleRoute(depCode, arrCode) {
+        if (!groundAirport) return true; // nothing to cross-check against
+        const dep = (depCode || '').toUpperCase();
+        const arr = (arrCode || '').toUpperCase();
+        return dep === groundAirport.icao || dep === groundAirport.iata ||
+               arr === groundAirport.icao || arr === groundAirport.iata;
+    }
+
     // Layer 1: Route cache (today's real data — highest trust)
     let dbRoute = null;
     try {
@@ -275,6 +296,8 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
                   (csIcao ? await Route.findOne({ callsign: csIcao }) : null);
         // Reject stale spatial_inference entries — they're position guesses, not schedules
         if (dbRoute?.source === 'spatial_inference') dbRoute = null;
+        // Reject cached routes that contradict where the aircraft is sitting right now
+        if (dbRoute && !isPlausibleRoute(dbRoute.departureAirport, dbRoute.arrivalAirport)) dbRoute = null;
     } catch (_) {}
 
     const liveExtra = { registration: liveRegistration, typecode: liveTypecode };
@@ -301,7 +324,8 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
         if (adsbdbRes.ok) {
             const adsbdbData = await adsbdbRes.json();
             const fl = adsbdbData?.response?.flightroute;
-            if (fl?.origin?.icao_code && fl?.destination?.icao_code) {
+            if (fl?.origin?.icao_code && fl?.destination?.icao_code &&
+                isPlausibleRoute(fl.origin.icao_code, fl.destination.icao_code)) {
                 Route.findOneAndUpdate(
                     { callsign: cs },
                     { $set: { departureAirport: fl.origin.icao_code, arrivalAirport: fl.destination.icao_code, source: 'adsbdb', lastUpdated: new Date() } },
@@ -326,7 +350,7 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
     const vrsDep = vrsRoute?.from ? VrsDb.lookupAirport(vrsRoute.from) : null;
     const vrsArr = vrsRoute?.to   ? VrsDb.lookupAirport(vrsRoute.to)   : null;
 
-    if (vrsRoute?.from || vrsRoute?.to) {
+    if ((vrsRoute?.from || vrsRoute?.to) && isPlausibleRoute(vrsRoute?.from, vrsRoute?.to)) {
         return res.json({
             found:    true,
             dep_iata: toIata(vrsRoute.from),
@@ -341,7 +365,8 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
 
     // Layer 4: AeroDataBox live lookup
     const adData = await fetchRouteData(cs);
-    if (adData && (adData.origin_iata || adData.destination_iata)) {
+    if (adData && (adData.origin_iata || adData.destination_iata) &&
+        isPlausibleRoute(adData.origin_iata, adData.destination_iata)) {
         return res.json({
             found:    true,
             dep_iata: adData.origin_iata      !== 'N/A' ? adData.origin_iata      : null,
@@ -356,7 +381,7 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
 
     // Layer 5: OpenFlights (exact callsign match from schedules_global.json)
     const ofExact = openflightsGlobalDB[cs] || (csIcao ? openflightsGlobalDB[csIcao] : null);
-    if (ofExact?.dep && ofExact?.arr) {
+    if (ofExact?.dep && ofExact?.arr && isPlausibleRoute(ofExact.dep, ofExact.arr)) {
         return res.json({
             found:    true,
             dep_iata: ofExact.dep,
