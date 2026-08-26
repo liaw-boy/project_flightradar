@@ -44,7 +44,10 @@ parentPort.on('message', (rawJsonString) => {
                     squawk: plane[14] || '',
                     spi: plane[15] || false,
                     positionSource: plane[16] || 0,
-                    lastContact
+                    lastContact,
+                    // plane[3] = time_position; without it posTime is null and
+                    // isPositionUpdateTrustworthy() skips arbitration entirely.
+                    posTime: plane[3] != null ? plane[3] : null,
                 });
             }
         }
