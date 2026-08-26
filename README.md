@@ -48,17 +48,11 @@ AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系�
 
 *全文搜尋：輸入呼號 (CI101)、ICAO24 地址或機型代碼，即時定位；輸入時右側顯示清除按鈕*
 
-### 登入系統
-
-![登入](docs/images/04-auth.png)
-
-*登機證風格登入介面；支援帳號密碼、Google OAuth、Facebook OAuth*
-
 ### 頂部導航列
 
 ![頂部](docs/images/05-topbar.png)
 
-*點擊 AEROSTRAT logo 回到地圖預設中心 · 即時航班計數 · 使用者選單 · 個人航班記錄入口*
+*點擊 AEROSTRAT logo 回到地圖預設中心 · 即時航班計數*
 
 ---
 
@@ -70,10 +64,6 @@ AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系�
 - **3-Tier 渲染管線** — SVG 精確圖形 > Path2D 嵌入輪廓 > 戰術點陣，自動降級
 - **航跡追蹤** — 顯示歷史軌跡路徑，支援 24 小時歷史回放
 - **高度色彩圖例** — ALTITUDE / TACTICAL / MONO 三種配色方案，底部顯示 ALT 色帶標籤
-
-### 歷史回放
-- **TimePlayer** — 點擊側邊欄航跡後可進行歷史軌跡回放，10 倍速播放，支援拖曳時間軸
-- **24 小時快取** — 後端追蹤點以 SQLite 儲存，前端透過 WebSocket 拉取後離線播放
 
 ### 資料融合
 - **多源整合** — airplanes.live、ADSB-Fi、OpenSky 三重冗餘，自適應切換（Adaptive Primary Telemetry Resolver）
@@ -92,20 +82,16 @@ AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系�
 - **全文搜尋** — 呼號、ICAO24、機型、航空公司，支援快速清除（✕ 按鈕）
 - **Logo 回中心** — 點擊頂部 AEROSTRAT logo 即可飛回預設視角 (25.17°N, 121.44°E)
 
-### 個人航班記錄
-- **我的航班** — 登入後可新增、編輯、刪除個人飛行記錄
-- **登機證卡片** — 垂直卡片佈局，顯示 IATA 代碼、時間、機型、座位、國旗等資訊
-- **統計儀表板** — 個人總里程、最常搭機型 bar chart、常飛航線 Top 5、近期航班時間線
-- **資料連線狀態** — WebSocket 斷線超過 8 秒顯示 `LIVE LOST`；後台資料過期顯示 `DATA STALE`
+### 資料連線狀態
+- WebSocket 斷線超過 8 秒顯示 `LIVE LOST`；後台資料過期顯示 `DATA STALE`
 
 ### 行動裝置支援
 - **MobileSheet** — 底部滑出式面板，顯示飛機詳情與互動操作
 - **MobilePlaneCard** — 針對小螢幕最佳化的飛機資訊卡片
 - **響應式佈局** — 桌面側邊欄 / 手機底部 sheet 自動切換
 
-### 管理後台
-- **用戶管理** — 管理員可查看所有用戶、停用帳號、授予/撤銷管理員權限
-- **監控頁面** — 即時顯示 DB 列數、記憶體用量、API quota、各資料來源健康狀態（`/monitor`，密碼保護）
+### 系統監控
+- **監控頁面** — 即時顯示 DB 列數、記憶體用量、API quota、各資料來源健康狀態（`/monitor`，密碼保護，見 [docs/deploy.md](docs/deploy.md)）
 - **效能監控** — `PerformanceMonitor` 元件顯示即時 FPS 與 JS heap 使用量
 
 ### 多國語言
@@ -132,7 +118,7 @@ AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系�
 |------|------|------|
 | Node.js | 24 | 執行環境 |
 | Express | 5.2 | HTTP 伺服器 |
-| better-sqlite3 | 12 | 本地資料庫（航跡點、用戶、航班） |
+| better-sqlite3 | 12 | 本地資料庫（航跡點、航班 session） |
 | ws | 8 | WebSocket 伺服器（飛機即時推播） |
 | SSE | — | 異常事件推播（`/api/events`） |
 | helmet | 8 | 安全 HTTP headers |
@@ -147,7 +133,7 @@ AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系�
 |------|------|------|
 | 飛機即時位置 | WebSocket + MsgPack | 全機場景，每 5s 更新 |
 | 飛行異常告警 | SSE (`/api/events`) | 危險飛行狀態廣播 |
-| 航班詳情 / 用戶 API | HTTP REST | 按需查詢 |
+| 航班詳情 API | HTTP REST | 按需查詢 |
 
 ---
 
@@ -156,18 +142,24 @@ AEROSTRAT 是一款專為航空愛好者設計的全球實時監控平台。系�
 ```
 project_aerostrat/
 ├── backend/
-│   ├── server.js            # 主伺服器入口（含所有 API routes）
+│   ├── server.js            # 主伺服器入口（app 初始化 + route 掛載）
+│   ├── middleware/          # CORS/helmet/rate-limit、monitor session 驗證
+│   ├── routes/              # 靜態資源、health/stats 路由
+│   ├── services/            # 三層輪詢引擎、circuit breaker、狀態合併、METAR 同步等
+│   ├── state/                # 融合引擎共用狀態（appState.js）
+│   ├── views/                # /monitor 儀表板 HTML
+│   ├── utils/                # ICAO24/typecode/geo 等純函式
 │   ├── socketEngine.js      # WebSocket 引擎（飛機推播）
 │   ├── crawler.js           # 多源 ADS-B 資料抓取
 │   ├── accountPool.js       # OpenSky 帳號池管理
-│   ├── controllers/         # authController、userFlightsController 等
+│   ├── controllers/         # flightController
 │   ├── db/                  # SQLite 存取層（trackStore、metarStore 等）
 │   ├── workers/             # 背景任務
 │   ├── data/                # 機型、機場、航線等靜態資料
-│   └── __tests__/           # API 整合測試
+│   └── __tests__/           # 單元測試 + API 整合測試
 ├── client/
 │   ├── src/
-│   │   ├── components/      # React 元件（含 TimePlayer、MobileSheet、AdminPanel）
+│   │   ├── components/      # React 元件（MapView、Sidebar、TopBar、MobileSheet 等）
 │   │   ├── hooks/           # useI18n、useAnomalyStream、useFlightData 等
 │   │   ├── utils/           # 飛機圖示、渲染工具
 │   │   ├── services/        # DataManager、IndexedDB 快取
@@ -237,21 +229,22 @@ systemctl --user restart aerostrat.service
 `backend/.env` 設定：
 
 ```env
-# 必填
-JWT_SECRET=<長隨機字串，至少 32 字元>
+# 監控頁面密碼（/monitor 路徑，session-based）
+MONITOR_PASSWORD=<自設密碼>
 
-# OAuth（選填，不填則停用對應登入方式）
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-FACEBOOK_APP_ID=
-FACEBOOK_APP_SECRET=
-APP_URL=http://localhost:3000
+# OpenSky 帳號池（選填，最多 5 組；額度用盡時自動輪替）
+OPENSKY_USER1=
+OPENSKY_PASS1=
+OPENSKY_USER2=
+OPENSKY_PASS2=
 
 # API Keys（選填，增加資料來源）
 AERODATABOX_API_KEY=
+AIRLABS_API_KEY=
 
-# 監控頁面密碼（/monitor 路徑）
-MONITOR_PASSWORD=<自設密碼>
+# TDX（選填，台灣本地航班補充資料）
+TDX_CLIENT_ID=
+TDX_CLIENT_SECRET=
 
 # CORS（逗號分隔）
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3005
@@ -262,7 +255,7 @@ LOG_LEVEL=INFO
 NODE_ENV=production
 ```
 
-> **注意：** `JWT_SECRET` 未設定時伺服器拒絕啟動。不要使用預設值於生產環境。
+> 目前沒有登入/使用者系統，`.env` 沒有必填項——全部留空伺服器一樣能啟動，只是資料來源會減少。
 
 ---
 
@@ -311,12 +304,12 @@ npx playwright test tests/e2e/ux_flow.spec.js
 1. 首頁無致命 JS 錯誤
 2. 地圖渲染 + 飛機出現（15s 內）
 3. 搜尋欄可輸入 + 清除按鈕功能
-4. 登入 Modal 開啟
-5. 頂部導航列渲染 + Logo 回中心
-6. My Flights 面板 + 全頁表單（返回按鈕回列表）
-7. API Ping 健康檢查
-8. 即時飛機資料 API 回應
-9. 高度圖例 ALT 標籤顯示
+4. 頂部導航列渲染 + Logo 回中心
+5. API Ping 健康檢查
+6. 即時飛機資料 API 回應
+7. 高度圖例 ALT 標籤顯示
+
+> ⚠️ `ux_flow.spec.js` 裡的第 4、6 個測試案例（登入 Modal、My Flights 面板）測的是已在瘦身重構中移除的功能，尚未清理——會優雅降級成「找不到元素」而不是硬失敗，但已經測不到任何有意義的東西，需要之後找時間實際跑瀏覽器驗證後再改。
 
 ### 執行生產煙霧測試
 
