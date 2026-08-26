@@ -1660,6 +1660,48 @@ const ROUTE_CACHE_TTL = 1800000; // 30 分鐘
 
 // 快取變數與函式已在上方 loadGlobalData() 前方訝明
 
+// ── Recurring ground-truth audit ────────────────────────────────────────────
+// The plausibility check in /api/lookup/callsign/:cs and /api/route/:icao24
+// only fires when a client actually requests that route — a route cached
+// while the aircraft was still airborne never gets re-checked once it lands,
+// unless someone happens to look it up again before the 24h/30min TTLs
+// expire. This sweeps every currently-grounded aircraft and proactively
+// purges any cached route (in both Route/routeStore and the in-memory
+// routeCache) that contradicts where it's actually sitting, so a stale
+// entry self-heals on the next request instead of surviving until TTL.
+async function auditGroundedRouteCache() {
+    let checked = 0, purged = 0;
+    for (const [icao24, plane] of masterStateMap) {
+        if (!plane.onGround || !plane.callsign) continue;
+        const groundAirport = findGroundAirportForPlane(plane);
+        if (!groundAirport) continue;
+        checked++;
+
+        const cs = plane.callsign.toUpperCase().trim();
+
+        const dbRoute = await Route.findOne({ callsign: cs }).catch(() => null);
+        if (dbRoute?.departureAirport && dbRoute?.arrivalAirport &&
+            !isPlausibleRoute(groundAirport, dbRoute.departureAirport, dbRoute.arrivalAirport)) {
+            Route.invalidate(cs);
+            purged++;
+            logger.warn('ROUTE-AUDIT', `Purged Route cache for ${cs} (${icao24}): ${dbRoute.departureAirport}->${dbRoute.arrivalAirport} contradicts ground position ${groundAirport.icao}`);
+        }
+
+        const memCached = routeCache.get(icao24);
+        if (memCached?.data?.departureAirport &&
+            !isPlausibleRoute(groundAirport, memCached.data.departureAirport, memCached.data.arrivalAirport)) {
+            routeCache.delete(icao24);
+            purged++;
+            logger.warn('ROUTE-AUDIT', `Purged routeCache for ${icao24} (${cs}): ${memCached.data.departureAirport}->${memCached.data.arrivalAirport} contradicts ground position ${groundAirport.icao}`);
+        }
+    }
+    if (purged > 0) {
+        logger.info('ROUTE-AUDIT', `Checked ${checked} grounded aircraft, purged ${purged} stale cached route(s)`);
+    }
+}
+setInterval(auditGroundedRouteCache, 15 * 60 * 1000); // every 15 min
+setTimeout(auditGroundedRouteCache, 60_000); // first pass 60s after startup — let the fleet populate first
+
 app.get('/api/airports/list', async (req, res) => {
     if (!_cachedAirportList) await buildAirportListCache();
     // ETag 瀏覽器快取：若資料未變，回傳 304 Not Modified 節省頻寬
