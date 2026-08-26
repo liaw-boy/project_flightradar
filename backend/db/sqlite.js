@@ -8,7 +8,11 @@ const path = require('path');
 const fs = require('fs');
 
 const DB_DIR  = path.join(__dirname, '..', 'data');
-const DB_PATH = path.join(DB_DIR, 'aerostrat.db');
+// DB_PATH override lets a scratch instance run against its own file instead
+// of writing to the same aerostrat.db as the live systemd service — two
+// separate processes sharing one WAL-mode SQLite file caused the "database
+// disk image is malformed" corruption seen recurring on the hourly prune.
+const DB_PATH = process.env.AEROSTRAT_DB_PATH || path.join(DB_DIR, 'aerostrat.db');
 
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
 

@@ -67,9 +67,9 @@ journalctl --user -u aerostrat.service -f | grep "SYNC"
 
 ```bash
 cd backend
-PORT=3099 nohup node server.js > /tmp/scratch.log 2>&1 & disown
+PORT=3099 AEROSTRAT_DB_PATH=/tmp/aerostrat_scratch.db nohup node server.js > /tmp/scratch.log 2>&1 & disown
 ```
 
 驗證完，**只殺掉 scratch instance 自己的 PID**（用 `ss -ltnp | grep :3099` 確認 PID，不要用會誤殺其他 process 的模糊 pattern 比對），確認正式站（3000 port）沒被動到，才考慮用上面的標準流程重啟正式站。
 
-scratch instance 跟正式站共用同一個 SQLite 檔案（`backend/data/aerostrat.db`），所以驗證期間寫入的是真實資料，不是隔離的測試資料庫——這是預期行為，不是 bug。
+**務必帶上 `AEROSTRAT_DB_PATH`**，讓 scratch instance 寫自己獨立的 SQLite 檔案。早期版本讓 scratch 跟正式站共用同一個 `backend/data/aerostrat.db`（當時視為預期行為），但兩個獨立 process 在 WAL 模式下對同一檔案並發寫入，會在其中一方跑 checkpoint／VACUUM 或另一方交易未提交時造成實際的 page 損毀——2026-08-26 兩次 scratch 驗證（posTime 修復、FlightBoard 移植）之後，正式站在下一次整點 prune 都各自跳出一次 `database disk image is malformed`，時間點精準對應。`AEROSTRAT_DB_PATH` 未設定時預設仍是 `backend/data/aerostrat.db`（即正式站路徑），所以這個環境變數是必要、不是可選的。
