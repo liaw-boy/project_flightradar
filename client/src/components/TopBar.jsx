@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Clock, Activity, Settings, Globe, Search, X, Sun, Moon } from 'lucide-react';
+import { Clock, Activity, Settings, Globe, Search, X, Sun, Moon, LayoutList } from 'lucide-react';
 import { useI18n } from '../hooks/useI18n';
 import SearchBar from './SearchBar';
 import FilterPanel from './FilterPanel';
@@ -22,6 +22,8 @@ export default function TopBar({
     theme,
     onToggleTheme,
     onRecenter,
+    showBoard = false,
+    onToggleBoard,
 }) {
     const { t, lang, toggleLang } = useI18n();
     const [time, setTime] = useState('--:--:--');
@@ -113,6 +115,14 @@ export default function TopBar({
                 {/* 搜尋圖示（只在 ≤850px 且搜尋欄隱藏時顯示） */}
                 <button className="tb-btn tb-search-icon" onClick={() => setShowMobileSearch(true)} aria-label="Search">
                     <Search size={16} />
+                </button>
+
+                <button
+                    className={`tb-btn tb-icon-btn ${showBoard ? 'active' : ''}`}
+                    onClick={onToggleBoard}
+                    title={showBoard ? '回到地圖' : '機場起降看板'}
+                >
+                    <LayoutList size={16} />
                 </button>
 
                 <button

@@ -9,6 +9,7 @@ import TopBar from './components/TopBar';
 import MapView from './components/MapView';
 import PlaneList from './components/PlaneList';
 import StatsPanel from './components/StatsPanel';
+import FlightBoard from './components/FlightBoard';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useFlightData } from './hooks/useFlightData';
 import { useI18n } from './hooks/useI18n';
@@ -120,6 +121,7 @@ export default function App() {
     // [v4.2.0] Anomaly alerts from server SSE
     const [anomalyAlerts, setAnomalyAlerts] = useState([]);
     const [showStats, setShowStats] = useState(false);
+    const [showBoard, setShowBoard] = useState(false);
     // Single entry point for toggling the stats tab so ?stats= in the URL
     // never drifts from the actual panel state. This used to only happen via
     // a TopBar onToggleStats handler that TopBar never actually rendered a
@@ -568,7 +570,11 @@ export default function App() {
                 theme={theme}
                 onToggleTheme={handleToggleTheme}
                 onRecenter={handleRecenter}
+                showBoard={showBoard}
+                onToggleBoard={() => setShowBoard(v => !v)}
             />
+
+            {showBoard && <FlightBoard onClose={() => setShowBoard(false)} />}
 
             {/* Right Status Column */}
             <div className="right-hud">
