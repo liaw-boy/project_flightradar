@@ -268,26 +268,10 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
     const liveRegistration = livePlane?.registration || null;
     const liveTypecode     = livePlane?.typecode     || null;
 
-    // Ground-truth plausibility check — third-party schedule sources (adsbdb,
-    // VRS standing-data, OpenFlights) key routes purely by flight-number
-    // string, with no awareness of *today's* actual assignment. Airlines
-    // routinely reuse the same flight number for different city pairs across
-    // days/seasons, so these sources can confidently return a completely
-    // wrong route. When we can see the aircraft is physically sitting on the
-    // ground at a specific airport right now, that beats any schedule
-    // lookup that doesn't even mention that airport — reject and fall
-    // through instead of serving (and caching) an obviously wrong route.
-    let groundAirport = null;
-    if (livePlane?.onGround && typeof livePlane.lat === 'number' && typeof livePlane.lng === 'number') {
-        groundAirport = findNearestAirport(livePlane.lat, livePlane.lng, 5);
-    }
-    function isPlausibleRoute(depCode, arrCode) {
-        if (!groundAirport) return true; // nothing to cross-check against
-        const dep = (depCode || '').toUpperCase();
-        const arr = (arrCode || '').toUpperCase();
-        return dep === groundAirport.icao || dep === groundAirport.iata ||
-               arr === groundAirport.icao || arr === groundAirport.iata;
-    }
+    // Ground-truth plausibility check (see findGroundAirportForPlane/
+    // isPlausibleRoute above) — reject a resolved route that contradicts
+    // where the aircraft is physically sitting right now.
+    const groundAirport = findGroundAirportForPlane(livePlane);
 
     // Layer 1: Route cache (today's real data — highest trust)
     let dbRoute = null;
@@ -297,7 +281,7 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
         // Reject stale spatial_inference entries — they're position guesses, not schedules
         if (dbRoute?.source === 'spatial_inference') dbRoute = null;
         // Reject cached routes that contradict where the aircraft is sitting right now
-        if (dbRoute && !isPlausibleRoute(dbRoute.departureAirport, dbRoute.arrivalAirport)) dbRoute = null;
+        if (dbRoute && !isPlausibleRoute(groundAirport, dbRoute.departureAirport, dbRoute.arrivalAirport)) dbRoute = null;
     } catch (_) {}
 
     const liveExtra = { registration: liveRegistration, typecode: liveTypecode };
@@ -325,7 +309,7 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
             const adsbdbData = await adsbdbRes.json();
             const fl = adsbdbData?.response?.flightroute;
             if (fl?.origin?.icao_code && fl?.destination?.icao_code &&
-                isPlausibleRoute(fl.origin.icao_code, fl.destination.icao_code)) {
+                isPlausibleRoute(groundAirport, fl.origin.icao_code, fl.destination.icao_code)) {
                 Route.findOneAndUpdate(
                     { callsign: cs },
                     { $set: { departureAirport: fl.origin.icao_code, arrivalAirport: fl.destination.icao_code, source: 'adsbdb', lastUpdated: new Date() } },
@@ -350,7 +334,7 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
     const vrsDep = vrsRoute?.from ? VrsDb.lookupAirport(vrsRoute.from) : null;
     const vrsArr = vrsRoute?.to   ? VrsDb.lookupAirport(vrsRoute.to)   : null;
 
-    if ((vrsRoute?.from || vrsRoute?.to) && isPlausibleRoute(vrsRoute?.from, vrsRoute?.to)) {
+    if ((vrsRoute?.from || vrsRoute?.to) && isPlausibleRoute(groundAirport, vrsRoute?.from, vrsRoute?.to)) {
         return res.json({
             found:    true,
             dep_iata: toIata(vrsRoute.from),
@@ -366,7 +350,7 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
     // Layer 4: AeroDataBox live lookup
     const adData = await fetchRouteData(cs);
     if (adData && (adData.origin_iata || adData.destination_iata) &&
-        isPlausibleRoute(adData.origin_iata, adData.destination_iata)) {
+        isPlausibleRoute(groundAirport, adData.origin_iata, adData.destination_iata)) {
         return res.json({
             found:    true,
             dep_iata: adData.origin_iata      !== 'N/A' ? adData.origin_iata      : null,
@@ -381,7 +365,7 @@ app.get('/api/lookup/callsign/:cs', async (req, res) => {
 
     // Layer 5: OpenFlights (exact callsign match from schedules_global.json)
     const ofExact = openflightsGlobalDB[cs] || (csIcao ? openflightsGlobalDB[csIcao] : null);
-    if (ofExact?.dep && ofExact?.arr && isPlausibleRoute(ofExact.dep, ofExact.arr)) {
+    if (ofExact?.dep && ofExact?.arr && isPlausibleRoute(groundAirport, ofExact.dep, ofExact.arr)) {
         return res.json({
             found:    true,
             dep_iata: ofExact.dep,
@@ -1152,6 +1136,28 @@ function findNearestAirport(lat, lng, maxDist = 15) {
         }
     }
     return nearestAp;
+}
+
+// ── Ground-truth route plausibility ─────────────────────────────────────────
+// Third-party schedule sources (adsbdb, AirLabs, AeroDataBox, VRS standing-data,
+// OpenFlights) key routes purely by flight-number string, with no awareness of
+// *today's* actual assignment — airlines routinely reuse the same flight
+// number for different city pairs across days/seasons, so these sources can
+// confidently return a completely wrong route. When we can see the aircraft
+// is physically sitting on the ground at a specific airport right now, that
+// beats any schedule lookup that doesn't even mention that airport. Shared by
+// /api/lookup/callsign/:cs and /api/route/:icao24 — both resolve routes from
+// the same set of external sources and both need the same cross-check.
+function findGroundAirportForPlane(plane) {
+    if (!plane?.onGround || typeof plane.lat !== 'number' || typeof plane.lng !== 'number') return null;
+    return findNearestAirport(plane.lat, plane.lng, 5);
+}
+function isPlausibleRoute(groundAirport, depCode, arrCode) {
+    if (!groundAirport) return true; // nothing to cross-check against
+    const dep = (depCode || '').toUpperCase();
+    const arr = (arrCode || '').toUpperCase();
+    return dep === groundAirport.icao || dep === groundAirport.iata ||
+           arr === groundAirport.icao || arr === groundAirport.iata;
 }
 
 const { createPlaneSources } = require('./services/planeSources');
@@ -2012,6 +2018,11 @@ app.get('/api/route/:icao24', async (req, res, next) => {
     const queryCallsign = (req.query.callsign || '').toUpperCase();
     const cleanCallsign = queryCallsign.replace(/[^A-Z0-9]/g, '');
 
+    // Ground-truth plausibility check (see findGroundAirportForPlane/
+    // isPlausibleRoute near findNearestAirport) — reject a resolved route
+    // that contradicts where this aircraft is physically sitting right now.
+    const groundAirport = findGroundAirportForPlane(masterStateMap.get(icao24));
+
     // 1. Try static schedules and local routes first (Higher Priority)
     let searchCallsigns = [cleanCallsign];
     const resolved = resolveAirlineAlias(cleanCallsign);
@@ -2024,17 +2035,17 @@ app.get('/api/route/:icao24', async (req, res, next) => {
 
     for (const cs of searchCallsigns) {
         if (!cs) continue;
-        if (schedulesStaticDB[cs]) {
+        if (schedulesStaticDB[cs] && isPlausibleRoute(groundAirport, schedulesStaticDB[cs].dep, schedulesStaticDB[cs].arr)) {
             route = { dep: schedulesStaticDB[cs].dep, arr: schedulesStaticDB[cs].arr };
             matchSource = 'static_db';
             break;
         }
-        if (localRoutesDB[cs]) {
+        if (localRoutesDB[cs] && isPlausibleRoute(groundAirport, localRoutesDB[cs][0], localRoutesDB[cs][1])) {
             route = { dep: localRoutesDB[cs][0], arr: localRoutesDB[cs][1] };
             matchSource = 'local_dict';
             break;
         }
-        if (openflightsGlobalDB[cs]) {
+        if (openflightsGlobalDB[cs] && isPlausibleRoute(groundAirport, openflightsGlobalDB[cs].dep, openflightsGlobalDB[cs].arr)) {
             route = { dep: openflightsGlobalDB[cs].dep, arr: openflightsGlobalDB[cs].arr };
             matchSource = 'openflights';
             break;
@@ -2042,7 +2053,8 @@ app.get('/api/route/:icao24', async (req, res, next) => {
 
         // Route store cache — skip spatial_inference entries (they are position-guesses, not real routes)
         const dbRoute = await Route.findOne({ callsign: cs });
-        if (dbRoute && dbRoute.source !== 'spatial_inference' && dbRoute.departureAirport && dbRoute.arrivalAirport) {
+        if (dbRoute && dbRoute.source !== 'spatial_inference' && dbRoute.departureAirport && dbRoute.arrivalAirport &&
+            isPlausibleRoute(groundAirport, dbRoute.departureAirport, dbRoute.arrivalAirport)) {
             route = { dep: dbRoute.departureAirport, arr: dbRoute.arrivalAirport };
             matchSource = 'route_cache';
             break;
@@ -2064,8 +2076,12 @@ app.get('/api/route/:icao24', async (req, res, next) => {
     }
 
     // 2. In-memory short-term cache (noData results use shorter TTL so they retry sooner)
+    // Re-checked against ground truth on every read — the cache was written by
+    // an earlier request that may not have known the aircraft was on the
+    // ground yet (or wasn't, at write time), so a cached hit can go stale in
+    // the same way a fresh lookup can go wrong.
     const cached = routeCache.get(icao24);
-    if (cached) {
+    if (cached && isPlausibleRoute(groundAirport, cached.data?.departureAirport, cached.data?.arrivalAirport)) {
         const ttl = cached.data?.noData ? 120000 : ROUTE_CACHE_TTL; // noData: 2 min, good: 30 min
         if (Date.now() - cached.timestamp < ttl) {
             return res.json(cached.data);
@@ -2083,7 +2099,8 @@ app.get('/api/route/:icao24', async (req, res, next) => {
                 if (adsbdbRes.ok) {
                     const adsbdbData = await adsbdbRes.json();
                     const fl = adsbdbData?.response?.flightroute;
-                    if (fl?.origin?.icao_code && fl?.destination?.icao_code) {
+                    if (fl?.origin?.icao_code && fl?.destination?.icao_code &&
+                        isPlausibleRoute(groundAirport, fl.origin.icao_code, fl.destination.icao_code)) {
                         console.log(`✅ [ADSBDB] Route for ${cleanCallsign}: ${fl.origin.icao_code} → ${fl.destination.icao_code}`);
                         const result = {
                             icao24, callsign: cleanCallsign,
@@ -2116,7 +2133,7 @@ app.get('/api/route/:icao24', async (req, res, next) => {
                     const fl = alData?.response?.[0];
                     const dep = fl?.dep_icao || fl?.dep_iata;
                     const arr = fl?.arr_icao || fl?.arr_iata;
-                    if (dep && arr) {
+                    if (dep && arr && isPlausibleRoute(groundAirport, dep, arr)) {
                         console.log(`✅ [AIRLABS] Route for ${cleanCallsign}: ${dep} → ${arr}`);
                         const result = { icao24, callsign: cleanCallsign, departureAirport: dep, arrivalAirport: arr, source: 'airlabs' };
                         routeCache.set(icao24, { data: result, timestamp: Date.now() });
@@ -2136,7 +2153,8 @@ app.get('/api/route/:icao24', async (req, res, next) => {
         if (cleanCallsign) {
             const externalRoute = await fetchRouteData(cleanCallsign);
             if (externalRoute && externalRoute.origin_iata && externalRoute.destination_iata &&
-                externalRoute.destination_iata !== '---') {
+                externalRoute.destination_iata !== '---' &&
+                isPlausibleRoute(groundAirport, externalRoute.origin_iata, externalRoute.destination_iata)) {
                 console.log(`✅ [AERODATABOX] Route for ${cleanCallsign}: ${externalRoute.origin_iata} → ${externalRoute.destination_iata}`);
                 const result = {
                     icao24,
@@ -2155,6 +2173,26 @@ app.get('/api/route/:icao24', async (req, res, next) => {
                 ).catch(() => null);
                 return res.json(result);
             }
+        }
+
+        // --- Layer 3d: Live ground position — strictly better than Layer 4's
+        // historical-track inference below when we already know it. The
+        // aircraft's CURRENT position beats guessing from wherever its first
+        // stored track point happens to be, which can be stale or (as
+        // observed live: an aircraft parked at RCTP inferring VTBD) from an
+        // earlier, unrelated leg.
+        if (groundAirport) {
+            console.log(`✅ [GROUND] Live position: ${groundAirport.icao} for ${cleanCallsign}`);
+            const groundResult = {
+                icao24,
+                callsign: cleanCallsign,
+                departureAirport: groundAirport.icao,
+                arrivalAirport: null,
+                isInferred: true,
+                source: 'live_ground_position'
+            };
+            routeCache.set(icao24, { data: groundResult, timestamp: Date.now() });
+            return res.json(groundResult);
         }
 
         // --- Layer 4: Spatial inference — ONLY for low-altitude aircraft (just departed / about to land) ---
