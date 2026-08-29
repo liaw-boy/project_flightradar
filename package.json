@@ -2,12 +2,23 @@
   "name": "aerostrat-root",
   "version": "10.5.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan.bold,magenta.bold\" \"cd backend && npm start\" \"cd client && npm run dev\"",
+    "dev:electron": "concurrently -n \"BACKEND,FRONTEND,ELECTRON\" -c \"cyan.bold,magenta.bold,yellow.bold\" \"cd backend && npm start\" \"cd client && npm run dev\" \"wait-on http://localhost:3005 http://localhost:3000/api/ping && electron .\"",
     "check": "node check-env.js",
-    "setup": "./setup.bat"
+    "setup": "./setup.bat",
+    "build:client": "cd client && npm run build",
+    "prebuild:electron-data": "node backend/scripts/prebuild-electron-data.mjs",
+    "stage:backend-seed": "node electron/util/stage-backend-seed.mjs",
+    "build:electron:mac": "electron-builder --mac",
+    "build:electron": "npm run build:client && npm run prebuild:electron-data && npm run stage:backend-seed && npm run build:electron:mac"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "@electron/rebuild": "^3.7.0",
+    "concurrently": "^9.2.1",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^8.0.1"
   }
 }

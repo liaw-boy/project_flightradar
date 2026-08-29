@@ -224,6 +224,27 @@ systemctl --user restart aerostrat.service
 
 ---
 
+## macOS 桌面版
+
+不想架伺服器、不想碰終端機？到 [Releases](../../releases) 頁面下載 `.dmg` 就能用，前端、後端、SQLite 全部打包在一個 App 裡，開起來直接可以用,不需要另外裝 Node.js。
+
+- **Apple Silicon(M1/M2/M3/M4)** → 下載 `AeroStrat-<version>-arm64.dmg`
+- **Intel Mac** → 下載 `AeroStrat-<version>-x64.dmg`
+
+第一次開啟時,因為這是 unsigned build(沒有付費 Apple 開發者憑證做簽章/公證),macOS Gatekeeper 會擋下並顯示「AeroStrat 已損毀,無法打開」或類似訊息。這不是真的損毀,擇一操作即可:
+
+1. **右鍵(或按住 Control 點擊)App → 打開**,在跳出的對話框裡再按一次「打開」(僅第一次需要)。
+2. 或在終端機執行:
+   ```bash
+   xattr -cr /Applications/AeroStrat.app
+   ```
+
+App 資料(SQLite 資料庫、快取)會存放在 `~/Library/Application Support/AeroStrat/`,跟系統上其他 App 一樣,解除安裝時可以一併清掉。第一次啟動會花幾秒鐘準備本機資料,屬正常現象。
+
+想自己從原始碼打包,參考根目錄的 `electron/`、`electron-builder.yml`、`.github/workflows/release-macos.yml`;本機開發模式(帶 HMR)用 `npm run dev:electron`。
+
+---
+
 ## 環境變數
 
 `backend/.env` 設定：

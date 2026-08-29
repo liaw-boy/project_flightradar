@@ -2988,6 +2988,12 @@ async function startServer() {
     initWebSocketServer(server);
 
     server.listen(PORT, () => {
+        // Signals the Electron main process (which forks this file as a plain
+        // Node child via ELECTRON_RUN_AS_NODE) that the HTTP server is ready
+        // to accept requests. process.send is undefined under systemd/plain
+        // `node server.js`, so this is a no-op there.
+        if (process.send) process.send({ type: 'ready', port: PORT });
+
         const readyTime = new Date().toLocaleTimeString();
         const memMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
         console.log('');

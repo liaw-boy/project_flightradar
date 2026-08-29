@@ -1,0 +1,34 @@
+appId: cc.spkuan.aerostrat
+productName: AeroStrat
+directories:
+  output: dist-electron
+
+# Only the Electron shell itself goes into app.asar — no native deps, tiny.
+files:
+  - electron/**/*
+  - package.json
+  - "!node_modules"
+
+# The backend (Node server + node_modules, incl. the Electron-ABI-rebuilt
+# better-sqlite3) and the built frontend are shipped as a plain,
+# non-asar-packed resource tree, because:
+#   - better-sqlite3's native .node binary can't be dlopen'd from inside asar
+#   - the whole tree gets copied into userData on first launch anyway
+#     (electron/util/seedUserData.js), so packing it into asar buys nothing
+extraResources:
+  - from: backend-seed
+    to: backend-seed
+
+# No Apple Developer certificate in this project — ship unsigned/ad-hoc
+# signed builds. README documents the Gatekeeper workaround for users.
+mac:
+  identity: null
+  category: public.app-category.travel
+  target:
+    - target: dmg
+  # icon: electron/build/icon.icns   # TODO: add a 1024x1024 app icon and uncomment
+
+dmg:
+  writeUpdateInfo: false
+
+npmRebuild: false # native rebuild is run explicitly per-arch before staging (see .github/workflows/release-macos.yml)

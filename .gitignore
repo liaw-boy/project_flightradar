@@ -13,6 +13,10 @@ build/
 /public-react/
 !public-react/page-*.html
 backend/public/logs/
+
+# Electron packaging (macOS app) build artifacts
+/backend-seed/
+/dist-electron/
 database_backup/
 
 # Environments & Secrets
@@ -99,7 +103,11 @@ backend/data/aerostrat.db
 backend/data/aerostrat.db-shm
 backend/data/aerostrat.db-wal
 backend/data/aircraft_cache.json
-backend/data/raw_jonty.json
+
+# NOTE: backend/data/raw_jonty.json is intentionally NOT ignored (committed
+# to git) — it feeds merge_routes.js and has no known automated download
+# source, unlike the other files in this block. The Electron/macOS release
+# CI (backend/scripts/prebuild-electron-data.mjs) needs it checked out.
 
 # Training data (large binary/CSV datasets, not for git)
 training_data/
