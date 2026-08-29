@@ -1,6 +1,6 @@
 {
   "name": "aerostrat-root",
-  "version": "10.6.0",
+  "version": "10.6.1",
   "private": true,
   "description": "Real-time flight radar — live ADS-B tracking with a global map.",
   "author": "liawboy",
