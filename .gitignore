@@ -9,6 +9,7 @@ node_modules/
 npm-debug.log*
 dist/
 build/
+!electron/build/
 /public/
 /public-react/
 !public-react/page-*.html
@@ -76,6 +77,7 @@ test-results/
 !client/public/**/*.png
 !client/src/assets/**/*.png
 !backend/public/**/*.png
+!docs/images/**/*.png
 backend/public/svg/
 
 # Data Sources & Raw Assets
