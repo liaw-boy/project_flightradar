@@ -218,7 +218,7 @@ export default function MapView({
         // 加入右下角的縮放按鈕
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        tileLayerRef.current = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        tileLayerRef.current = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '',
         }).addTo(map);
@@ -531,11 +531,17 @@ export default function MapView({
     useEffect(() => {
         const map = mapRef.current;
         if (!map) return;
+        // [2026-08] CartoDB's free basemaps.cartocdn.com CDN now requires an
+        // API key (unauthenticated requests return an "API KEY REQUIRED"
+        // placeholder tile) — light/dark/street moved to key-free providers.
+        // Dark has no free no-key raster source, so it reuses the OSM tiles
+        // and gets a CSS invert filter (see the .map-tiles-dark rule toggled
+        // below) to approximate the old CartoDB dark_all look.
         const TILE_URLS = {
-            light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-            dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+            light: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            dark: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
             satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            street: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+            street: 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
             terrain: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
         };
         // Each provider's actual native tile ceiling — the layer object was
@@ -548,13 +554,14 @@ export default function MapView({
         // instead upscale the last real tile, so the user can still zoom in
         // smoothly instead of hitting a hard wall or broken tiles.
         const TILE_MAX_NATIVE_ZOOM = {
-            light: 20, dark: 20, satellite: 19, street: 20, terrain: 17,
+            light: 19, dark: 19, satellite: 19, street: 20, terrain: 17,
         };
         const url = TILE_URLS[mapLayer] || TILE_URLS.light;
         if (tileLayerRef.current) {
             tileLayerRef.current.options.maxNativeZoom = TILE_MAX_NATIVE_ZOOM[mapLayer] || 19;
             tileLayerRef.current.setUrl(url);
         }
+        map.getContainer().classList.toggle('map-tiles-dark', mapLayer === 'dark');
     }, [mapLayer]);
 
     // [v3.0] Track mode: update ref so animation loop sees latest value

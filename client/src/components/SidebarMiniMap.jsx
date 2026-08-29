@@ -87,14 +87,18 @@ const MiniRouteMap = React.memo(function MiniRouteMap({ depInfo, arrInfo }) {
         [arrInfo.lat, adjArrLng],
     ], [depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng, adjArrLng]);
 
-    const tileUrl = isDark
-        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-        : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+    // [2026-08] CartoDB's free basemaps.cartocdn.com CDN now requires an API
+    // key — both variants use the same key-free OSM tile, dark is CSS-inverted
+    // below (see .mini-map-dark) instead of using a real dark tile source.
+    const tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 
     if (!arcPoints.length) return null;
 
     return (
-        <div style={{ margin: '0 12px 12px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border)' }}>
+        <div
+            className={isDark ? 'mini-map-dark' : undefined}
+            style={{ margin: '0 12px 12px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border)' }}
+        >
             <MapContainer
                 key={isDark ? 'dark' : 'light'}
                 style={{ height: '145px', width: '100%' }}

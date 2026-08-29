@@ -32,7 +32,14 @@ const helmetMiddleware = helmet({
             styleSrc:              ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             fontSrc:               ["'self'", "https://fonts.gstatic.com"],
             imgSrc:                ["'self'", "data:", "blob:",
+                                    // [2026-08] CartoDB's free cartocdn.com tiles now require an
+                                    // API key we don't have — light/dark/street map layers moved
+                                    // to OSM standard + CyclOSM (see MapView.jsx/FilterPanel.jsx/
+                                    // SidebarMiniMap.jsx). *.cartocdn.com kept around in case it's
+                                    // reinstated with a key later; harmless to leave allowlisted.
                                     "https://*.cartocdn.com",
+                                    "https://*.tile.openstreetmap.org",
+                                    "https://*.tile-cyclosm.openstreetmap.fr",
                                     "https://server.arcgisonline.com",
                                     "https://tile.opentopomap.org",
                                     "https://*.planespotters.net",

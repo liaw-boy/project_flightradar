@@ -4,18 +4,24 @@ import { useI18n } from '../hooks/useI18n';
 import './FilterPanel.css';
 
 // [v3.0] Map tile layer definitions
+// [2026-08] CartoDB's anonymous basemaps.cartocdn.com CDN now requires an API
+// key — unauthenticated requests return a 256x256 "API KEY REQUIRED"
+// placeholder tile instead of a real map. Swapped light/dark/street to
+// key-free providers (OSM standard + CyclOSM); Dark applies a CSS invert
+// filter on top of the OSM tiles in MapView.jsx since there's no free
+// no-key dark raster tile source. Satellite/Terrain were unaffected.
 export const MAP_LAYERS = [
     {
         id: 'light',
         label: 'Light',
-        url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-        attribution: '© OpenStreetMap contributors, © CartoDB',
+        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        attribution: '© OpenStreetMap contributors',
     },
     {
         id: 'dark',
         label: 'Dark',
-        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-        attribution: '© OpenStreetMap contributors, © CartoDB',
+        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        attribution: '© OpenStreetMap contributors',
     },
     {
         id: 'satellite',
@@ -26,8 +32,8 @@ export const MAP_LAYERS = [
     {
         id: 'street',
         label: 'Street',
-        url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-        attribution: '© OpenStreetMap contributors, © CartoDB',
+        url: 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
+        attribution: '© OpenStreetMap contributors, © CyclOSM',
     },
     {
         id: 'terrain',
