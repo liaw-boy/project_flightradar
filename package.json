@@ -2,6 +2,8 @@
   "name": "aerostrat-root",
   "version": "10.6.0",
   "private": true,
+  "description": "Real-time flight radar — live ADS-B tracking with a global map.",
+  "author": "liawboy",
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan.bold,magenta.bold\" \"cd backend && npm start\" \"cd client && npm run dev\"",

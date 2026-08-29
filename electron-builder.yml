@@ -31,4 +31,9 @@ mac:
 dmg:
   writeUpdateInfo: false
 
+# electron-builder omits the arch suffix for x64 by default, which produced
+# "AeroStrat-10.6.0.dmg" (x64) vs "AeroStrat-10.6.0-arm64.dmg" in the first
+# release — inconsistent and easy to pick the wrong one. Force both.
+artifactName: "${productName}-${version}-${arch}.${ext}"
+
 npmRebuild: false # native rebuild is run explicitly per-arch before staging (see .github/workflows/release-macos.yml)
