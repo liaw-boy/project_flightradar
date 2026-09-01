@@ -68,6 +68,27 @@ def load_champion(device):
     return model, scaler, y_scaler
 
 
+def _atomic_write_bytes(path, write_fn):
+    """Write via a temp file in the same directory + os.replace, so a reader
+    (infer_server.py's mtime-poll reload watcher) never observes a partially
+    -written file, and a crash mid-write leaves the live file untouched
+    rather than corrupted."""
+    tmp_path = path + ".tmp"
+    write_fn(tmp_path)
+    os.replace(tmp_path, path)
+
+
+HISTORY_RETENTION = 14  # keep the last N promoted-model backups; prune older ones
+
+
+def _prune_history():
+    if not os.path.isdir(HISTORY_DIR):
+        return
+    backups = sorted(d for d in os.listdir(HISTORY_DIR) if os.path.isdir(os.path.join(HISTORY_DIR, d)))
+    for stale in backups[:-HISTORY_RETENTION]:
+        shutil.rmtree(os.path.join(HISTORY_DIR, stale), ignore_errors=True)
+
+
 def promote(candidate, scaler, y_scaler):
     os.makedirs(HISTORY_DIR, exist_ok=True)
     if os.path.exists(CHAMPION_MODEL_PATH):
@@ -78,11 +99,20 @@ def promote(candidate, scaler, y_scaler):
         shutil.copy(CHAMPION_SCALER_PATH, os.path.join(backup_dir, "scaler.json"))
         if os.path.exists(CHAMPION_Y_SCALER_PATH):
             shutil.copy(CHAMPION_Y_SCALER_PATH, os.path.join(backup_dir, "y_scaler.json"))
-    torch.save(candidate.state_dict(), CHAMPION_MODEL_PATH)
-    with open(CHAMPION_SCALER_PATH, "w") as f:
-        json.dump(scaler.to_json(), f)
-    with open(CHAMPION_Y_SCALER_PATH, "w") as f:
-        json.dump({"mins": y_scaler.mins.tolist(), "maxs": y_scaler.maxs.tolist(), "targets": ["dlat", "dlng", "daltitude"]}, f)
+        _prune_history()
+    # Scalers FIRST, model.pt LAST — infer_server.py's reload watcher polls
+    # only model.pt's mtime and then reloads all three together (see
+    # infer_server.py's _reload_watcher). Writing model.pt last guarantees
+    # that by the moment the watcher notices a change, the new scalers are
+    # already fully in place, so it can never load the new model paired
+    # with stale scalers. Each write is individually atomic via os.replace()
+    # so a crash mid-write never leaves a half-written file either.
+    _atomic_write_bytes(CHAMPION_SCALER_PATH, lambda p: json.dump(scaler.to_json(), open(p, "w")))
+    _atomic_write_bytes(
+        CHAMPION_Y_SCALER_PATH,
+        lambda p: json.dump({"mins": y_scaler.mins.tolist(), "maxs": y_scaler.maxs.tolist(), "targets": ["dlat", "dlng", "daltitude"]}, open(p, "w")),
+    )
+    _atomic_write_bytes(CHAMPION_MODEL_PATH, lambda p: torch.save(candidate.state_dict(), p))
 
 
 def main(args):
@@ -106,6 +136,15 @@ def main(args):
     x_val, y_val = build_windows(val_sessions)
     if x_train.shape[0] == 0 or x_val.shape[0] == 0:
         raise SystemExit("not enough windows for a train/val split -- widen --max-sessions")
+    # A too-small validation set makes the promotion threshold meaningless —
+    # a handful of noisy windows can produce a spurious >5% "improvement" by
+    # chance alone, promoting a genuinely worse model. Require a real sample.
+    MIN_VAL_WINDOWS = 200
+    if x_val.shape[0] < MIN_VAL_WINDOWS:
+        raise SystemExit(
+            f"only {x_val.shape[0]} validation windows (< {MIN_VAL_WINDOWS}) -- "
+            "promotion decision would not be statistically meaningful; widen --max-sessions/--row-scan"
+        )
 
     scaler = Scaler().fit(x_train)
     x_train_s = scaler.transform(x_train)
@@ -128,12 +167,55 @@ def main(args):
         "candidate_km_error": candidate_km,
     }
 
-    champion, champion_scaler, champion_y_scaler = load_champion(device)
+    # A NaN/inf error means training pathology (e.g. a NaN that slipped past
+    # the DB's IS NOT NULL filters -- SQLite doesn't reject NaN floats, only
+    # NULL). Never promote on a non-finite score, regardless of whether a
+    # champion exists -- this is the one check that must hold before EITHER
+    # promotion branch below, not just the cold-start one.
+    if not np.isfinite(candidate_km):
+        result["champion_km_error"] = None
+        result["promoted"] = False
+        result["error"] = f"candidate_km_error is not finite ({candidate_km!r}) -- refusing to promote"
+        print(f"REJECTED: {result['error']}")
+        os.makedirs(ARTIFACTS_DIR, exist_ok=True)
+        with open(LOG_PATH, "a") as f:
+            f.write(json.dumps(result) + "\n")
+        print(json.dumps(result, indent=2))
+        return
+
+    # Sanity ceiling for cold-start promotion, where there's no champion to
+    # compare against -- a finite-but-absurd error (e.g. the model learned
+    # nothing and just outputs near-zero deltas) would otherwise sail through
+    # the `is not None` gate below with zero votes against it.
+    COLD_START_MAX_KM = 500.0
+
+    try:
+        champion, champion_scaler, champion_y_scaler = load_champion(device)
+    except Exception as e:
+        # A corrupted/schema-mismatched checkpoint must not silently vanish
+        # from the log as an unhandled crash -- record it as a rejection so
+        # monitoring (retrain_log.jsonl, the Discord notification) can tell
+        # "champion checkpoint is broken" apart from a generic script failure.
+        result["champion_km_error"] = None
+        result["promoted"] = False
+        result["error"] = f"load_champion failed: {e}"
+        print(f"REJECTED: {result['error']}")
+        os.makedirs(ARTIFACTS_DIR, exist_ok=True)
+        with open(LOG_PATH, "a") as f:
+            f.write(json.dumps(result) + "\n")
+        print(json.dumps(result, indent=2))
+        return
+
     if champion is None:
         result["champion_km_error"] = None
-        result["promoted"] = True
-        print("no existing champion -- promoting candidate unconditionally.")
-        promote(candidate, scaler, y_scaler)
+        if candidate_km > COLD_START_MAX_KM:
+            result["promoted"] = False
+            result["error"] = f"cold-start candidate error {candidate_km:.1f}km exceeds sanity ceiling ({COLD_START_MAX_KM}km)"
+            print(f"REJECTED: {result['error']}")
+        else:
+            result["promoted"] = True
+            print(f"no existing champion -- promoting candidate ({candidate_km:.1f}km, under {COLD_START_MAX_KM}km sanity ceiling).")
+            promote(candidate, scaler, y_scaler)
     else:
         # Same raw validation windows, but scaled through the CHAMPION's own
         # saved scalers — that's the exact transform its deployed weights were

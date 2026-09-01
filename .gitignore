@@ -127,3 +127,11 @@ backend/data/processed/
 backend/ml_trajectory/.venv/
 backend/ml_trajectory/**/__pycache__/
 *.pyc
+
+# ml_trajectory artifacts (model.pt, scalers, history backups, retrain log) —
+# the nightly retrain cron (server.js) writes these directly to the live
+# checkout without ever committing. Tracking them in git means the next
+# `deploy.sh` git pull would hit "local changes would be overwritten by
+# merge" on these binary files and abort, or silently discard a freshly-
+# promoted model. Never track these; each environment has its own.
+backend/ml_trajectory/artifacts/

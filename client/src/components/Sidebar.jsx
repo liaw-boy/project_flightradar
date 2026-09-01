@@ -10,7 +10,7 @@ import { logToServer, logger } from '../utils/logger';
 import { dataManager } from '../services/dataManager';
 import { flightDetailsCache } from '../services/flightDetailsCache';
 import MiniRouteMap from './SidebarMiniMap';
-import { AltitudeChart, FlightProgressInline, FlightProgress } from './SidebarFlightInfo';
+import { FlightProgressInline } from './SidebarFlightInfo';
 import './Sidebar.css';
 
 function headingDir(h) {
@@ -68,7 +68,7 @@ function ShareButton({ icao24 }) {
 // ─── Main Sidebar Component ────────────────────────────────────────────────────
 export default function Sidebar({
     plane, icao24, metadata, route, trackPoints,
-    flightHistoryRef, onClose, trackMode, onToggleTrack
+    onClose, trackMode, onToggleTrack
 }) {
     const { t } = useI18n();
     const [openSections, setOpenSections] = useState({
@@ -665,10 +665,6 @@ export default function Sidebar({
                         } />
                         <DataRow label="Flight No." value={safeFusionData?.route?.flightNumber || plane.callsign || '---'} />
                         <DataRow label={t('source')} value={posSourceMap[plane.positionSource] || 'ADS-B'} />
-
-                        {flightHistoryRef?.current && (
-                            <AltitudeChart history={flightHistoryRef.current} icao24={icao24} />
-                        )}
                     </div>
                 )}
                 

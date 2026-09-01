@@ -1268,8 +1268,14 @@ if (BACKGROUND_JOBS_ENABLED) {
     setInterval(fetchSpecialCategories, 60_000);   // military + LADD (slow)
 }
 
-// [v7.0] Session timeout reaper — in-memory cleanup every 5 minutes
-setInterval(() => {
+// [v7.0] Session timeout reaper — in-memory cleanup every 5 minutes.
+// Gated like the pollers/cron jobs above: on a non-primary instance (staging)
+// activeSessions/the DB stay empty since the actual data-fetch pollers are
+// gated, so this is currently a no-op there either way — but gating it too
+// keeps the "DISABLE_BACKGROUND_JOBS skips ALL background jobs" contract
+// actually true, rather than true by coincidence of nothing populating
+// activeSessions yet.
+if (BACKGROUND_JOBS_ENABLED) setInterval(() => {
     const now = Date.now();
     const staleThreshold = 1200000; // 20 minutes
     const staleIds = [];
@@ -1298,7 +1304,7 @@ setInterval(() => {
 // Runs every 30 minutes. Handles sessions that accumulated from previous server runs.
 const DB_SESSION_STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
 async function reapStaleDbSessions() {
-    
+
     try {
         const cutoff = new Date(Date.now() - DB_SESSION_STALE_MS);
         const result = await FlightSession.updateMany(
@@ -1311,9 +1317,11 @@ async function reapStaleDbSessions() {
         logger.warn('SESSION', `DB reaper error: ${e.message}`);
     }
 }
-setInterval(reapStaleDbSessions, 30 * 60 * 1000); // every 30 min
-// Run once at startup after DB connects (delayed 10s to let DB init complete)
-setTimeout(reapStaleDbSessions, 10_000);
+if (BACKGROUND_JOBS_ENABLED) {
+    setInterval(reapStaleDbSessions, 30 * 60 * 1000); // every 30 min
+    // Run once at startup after DB connects (delayed 10s to let DB init complete)
+    setTimeout(reapStaleDbSessions, 10_000);
+}
 
 // 啟動時讀取快取並初始化（委派給 AccountPool）
 const isFreshQuota = accountPool.loadCache(QUOTA_CACHE_FILE);
@@ -1437,7 +1445,16 @@ app.get('/api/flight-trace/:hex', async (req, res) => {
 // ==========================================
 // [Phase 14] Ultimate Data Fusion Controller
 // ==========================================
-app.get('/api/flight/complete-details/:hex/:callsign', flightController.getCompleteDetails);
+app.get('/api/flight/complete-details/:hex/:callsign', (req, res, next) => {
+    // This is the one fusion route that used to skip the same isValidIcao24()
+    // check every sibling route applies (see lines 523/1339/1398 above) —
+    // hex/callsign flow unencoded into template-literal URLs sent to several
+    // third-party hosts (adsbdb/hexdb/adsb.fi/planespotters/aerodatabox) and
+    // key an unbounded in-memory cache (db/aircraftStore.js, db/routeStore.js).
+    if (!isValidIcao24(req.params.hex)) return res.status(400).json({ error: 'Invalid ICAO24 format' });
+    if (!/^[A-Za-z0-9]{1,10}$/.test(req.params.callsign)) return res.status(400).json({ error: 'Invalid callsign format' });
+    next();
+}, flightController.getCompleteDetails);
 
 // ==========================================
 // 飛機 Metadata（機型/製造商/註冊號）— 永久快取與靜態字典
@@ -1830,8 +1847,10 @@ async function auditGroundedRouteCache() {
         logger.info('ROUTE-AUDIT', `Checked ${checked} grounded aircraft, purged ${purged} stale cached route(s)`);
     }
 }
-setInterval(auditGroundedRouteCache, 15 * 60 * 1000); // every 15 min
-setTimeout(auditGroundedRouteCache, 60_000); // first pass 60s after startup — let the fleet populate first
+if (BACKGROUND_JOBS_ENABLED) {
+    setInterval(auditGroundedRouteCache, 15 * 60 * 1000); // every 15 min
+    setTimeout(auditGroundedRouteCache, 60_000); // first pass 60s after startup — let the fleet populate first
+}
 
 app.get('/api/airports/list', async (req, res) => {
     if (!_cachedAirportList) await buildAirportListCache();

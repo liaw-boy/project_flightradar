@@ -87,7 +87,6 @@ export default function MapView({
     planesDict,
     selectedIcao24,
     trackPoints,
-    flightHistoryRef,
     filters,
     selectedRoute,
     onSelectPlane,

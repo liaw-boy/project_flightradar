@@ -84,7 +84,7 @@ PORT=3099 AEROSTRAT_DB_PATH=/tmp/aerostrat_scratch.db nohup node server.js > /tm
 | systemd unit | `aerostrat.service` | `aerostrat-staging.service` |
 | Port | 3000 | 3002 |
 | SQLite | `backend/data/aerostrat.db` | `backend/data/aerostrat_staging.db`（`AEROSTRAT_DB_PATH` 覆蓋） |
-| 背景輪詢/排程 | 開啟 | **關閉**（`DISABLE_BACKGROUND_JOBS=true`，見 `backend/server.js`）——避免 staging 也打 OpenSky/adsb.lol/adsb.fi/TDX，跟正式站搶額度，也避免搶寫 `ml_trajectory/artifacts/model.pt` 這類共用檔案 |
+| 背景輪詢/排程 | 開啟 | **關閉**（`DISABLE_BACKGROUND_JOBS=true`，見 `backend/server.js`）——避免 staging 也打 OpenSky/adsb.lol/adsb.fi/TDX，跟正式站搶額度。`ml_trajectory/artifacts/model.pt` 本身不是共用檔案（`git worktree` 各自有獨立的檔案，兩個 inode），保護來自排程本身被 gate 掉，不是檔案隔離 |
 | `NODE_ENV` | `production` | `staging` |
 
 **部署到 staging**：`./deploy-staging.sh`（跟 `deploy.sh` 平行，`git fetch` + `checkout origin/main --detach` 而不是 `git pull`，因為 worktree 是 detached HEAD）。

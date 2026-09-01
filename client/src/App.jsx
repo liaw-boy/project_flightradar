@@ -178,7 +178,6 @@ export default function App() {
         fetchPlanes,
         fetchTrack,
         syncViewport,
-        flightHistoryRef,
         trackPointListenerRef,
         sendWorkerMessage,
     } = useFlightData(mapInstanceRef, {
@@ -541,7 +540,6 @@ export default function App() {
                 planesDict={planesDict}
                 selectedIcao24={selectedIcao24}
                 trackPoints={trackPoints}
-                flightHistoryRef={flightHistoryRef}
                 filters={filters}
                 selectedRoute={selectedRoute}
                 onSelectPlane={handleSelectPlane}
@@ -654,7 +652,6 @@ export default function App() {
                             metadata={selectedMetadata}
                             route={selectedRoute}
                             trackPoints={trackPoints}
-                            flightHistoryRef={flightHistoryRef}
                             onClose={isMobile ? () => setShowFullSidebar(false) : handleDeselectPlane}
                             trackMode={trackMode}
                             onToggleTrack={handleToggleTrackMode}

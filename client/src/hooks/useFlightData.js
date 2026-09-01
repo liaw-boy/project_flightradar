@@ -78,7 +78,6 @@ export function useFlightData(mapRef, options = {}) {
     const [apiStats, setApiStats] = useState(null);
     const [throttleSeconds, setThrottleSeconds] = useState(60);
 
-    const flightHistoryRef = useRef({});
     const isFetchingRef = useRef(false);
     const planesDictRef = useRef({});
     const apiStatusRef = useRef('INIT');
@@ -237,7 +236,6 @@ export function useFlightData(mapRef, options = {}) {
     // 處理飛機資料 (非破壞性合併)
     const processPlaneData = useCallback((planes) => {
         setPlanesDict((prev) => {
-            const history = flightHistoryRef.current;
             const next = { ...prev };
 
             planes.forEach(({ icao24, data: pData }) => {
@@ -415,22 +413,8 @@ export function useFlightData(mapRef, options = {}) {
                 // 如果這架飛機太久沒出現在全球快取中，則清理
                 if (p.lastSeenTime && globalSnapshotTime - p.lastSeenTime > 90) {
                     delete next[id];
-                    delete history[id];
                 }
             });
-
-            // [OPT 3.3] 限制記憶體內採蹤的飛機檔案數，防止長時間運行記憶體漉漏
-            const MAX_HISTORY_ENTRIES = 3000;
-            const historyKeys = Object.keys(history);
-            if (historyKeys.length > MAX_HISTORY_ENTRIES) {
-                // 清理超界的最舊條目
-                const globalSnapshotTime2 = globalLastUpdateRef.current || Math.floor(Date.now() / 1000);
-                for (const hid of historyKeys) {
-                    if (!next[hid]) {
-                        delete history[hid];
-                    }
-                }
-            }
 
             // [OPT 2.3] 合併多個 setState，從 updater 回傳後再分手更新計數
             return next;
@@ -450,20 +434,6 @@ export function useFlightData(mapRef, options = {}) {
         setAirCount(air);
         setGroundCount(ground);
     }, [planesDict]);
-
-    // Haversine distance (meters)
-    const getDistance = (lat1, lon1, lat2, lon2) => {
-        const R = 6371e3;
-        const φ1 = lat1 * Math.PI / 180;
-        const φ2 = lat2 * Math.PI / 180;
-        const Δφ = (lat2 - lat1) * Math.PI / 180;
-        const Δλ = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-            Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
-    };
 
     const fetchTrack = useCallback(async (icao24, lastContact, forceRefresh = false) => {
         try {
@@ -486,33 +456,9 @@ export function useFlightData(mapRef, options = {}) {
                 ]);
             }
         } catch (e) {
-            logger.warn('DATA', `Track fetch failed, using local history: ${e.message}`);
+            logger.warn('DATA', `Track fetch failed: ${e.message}`);
         }
-
-        // Fallback: 本地歷史 — format: [time, lat, lng, onGround]
-        const history = flightHistoryRef.current[icao24];
-        if (!history || history.length < 2) return [];
-
-        let latestSegmentStartIdx = 0;
-        for (let i = 1; i < history.length; i++) {
-            const timeDiff = history[i][0] - history[i - 1][0];
-            const wasOnGround = history[i - 1][3] === true;
-            const isOnGround = history[i][3] === true;
-            const dist = getDistance(history[i - 1][1], history[i - 1][2], history[i][1], history[i][2]);
-
-            if ((isOnGround && history[history.length - 1][3] === true) ||
-                (timeDiff > 1800 && (wasOnGround || isOnGround)) ||
-                (timeDiff > 30 && (dist / timeDiff) > 400)) {
-                latestSegmentStartIdx = i;
-            }
-        }
-        const sortedHistory = [...history].sort((a, b) => a[0] - b[0]);
-
-        // Pad to the same 6-field tuple shape as the API path above, so
-        // callers don't need to branch on which source the track came from.
-        return sortedHistory.slice(latestSegmentStartIdx).map((p) => [
-            p[0], p[1], p[2], null, null, null
-        ]);
+        return [];
     }, []);
 
     // [v4.4.0] Enhanced Priority Backfill Processor
@@ -839,7 +785,6 @@ export function useFlightData(mapRef, options = {}) {
         fetchTrack,
         syncViewport,
         deleteFromStore: (id) => trackStore.clearTrack(id), // Expose for manual cleaning
-        flightHistoryRef,
         trackPointListenerRef,
         sendWorkerMessage: (msg) => { if (workerRef.current) workerRef.current.postMessage(msg); },
     };

@@ -66,26 +66,35 @@ export function useIsDark() {
 // ─── Mini Route Map (Leaflet real tiles + great-circle arc) ───────────────────
 const MiniRouteMap = React.memo(function MiniRouteMap({ depInfo, arrInfo }) {
     const isDark = useIsDark();
-    if (!depInfo?.lat || !depInfo?.lng || !arrInfo?.lat || !arrInfo?.lng) return null;
+    // Rules-of-Hooks: every hook below must run on every render regardless of
+    // whether depInfo/arrInfo are ready yet — depInfo/arrInfo can transition
+    // from "missing lat/lng" to "populated" across re-renders of the SAME
+    // mounted instance (Sidebar fetches them async), and an early `return null`
+    // placed before these hooks used to change how many hooks ran between
+    // renders, which crashes React ("Rendered fewer hooks than expected").
+    // Guard with a boolean instead, and only skip rendering at the JSX return.
+    const hasRoute = !!(depInfo?.lat && depInfo?.lng && arrInfo?.lat && arrInfo?.lng);
+    const depLat = depInfo?.lat ?? 0, depLng = depInfo?.lng ?? 0;
+    const arrLat = arrInfo?.lat ?? 0, arrLng = arrInfo?.lng ?? 0;
 
     // adjLng2: arrival longitude adjusted for shortest path (may exceed ±180)
     const adjArrLng = useMemo(() =>
-        shortestLng(depInfo.lng, arrInfo.lng),
-    [depInfo.lng, arrInfo.lng]);
+        shortestLng(depLng, arrLng),
+    [depLng, arrLng]);
 
     const arcPoints = useMemo(() =>
-        curvePts(depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng),
-    [depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng]);
+        hasRoute ? curvePts(depLat, depLng, arrLat, arrLng) : [],
+    [hasRoute, depLat, depLng, arrLat, arrLng]);
 
     const mapInit = useMemo(() => ({
-        center: [(depInfo.lat + arrInfo.lat) / 2, (depInfo.lng + adjArrLng) / 2],
+        center: [(depLat + arrLat) / 2, (depLng + adjArrLng) / 2],
         zoom: 2,
-    }), [depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng, adjArrLng]);
+    }), [depLat, depLng, arrLat, arrLng, adjArrLng]);
 
     const mapBounds = useMemo(() => [
-        [depInfo.lat, depInfo.lng],
-        [arrInfo.lat, adjArrLng],
-    ], [depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng, adjArrLng]);
+        [depLat, depLng],
+        [arrLat, adjArrLng],
+    ], [depLat, depLng, arrLat, arrLng, adjArrLng]);
 
     // Same Esri Canvas basemaps as the main map (MapView.jsx TILE_URLS /
     // FilterPanel.jsx MAP_LAYERS) — was a separate OSM tile + CSS-filter
@@ -95,7 +104,7 @@ const MiniRouteMap = React.memo(function MiniRouteMap({ depInfo, arrInfo }) {
         ? 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'
         : 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}';
 
-    if (!arcPoints.length) return null;
+    if (!hasRoute || !arcPoints.length) return null;
 
     return (
         <div

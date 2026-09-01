@@ -74,7 +74,11 @@ function fetchFidsBoardTiming(flightNumber, originIata, destinationIata) {
         departure_estimated: depMatch ? (depMatch.actualTime || depMatch.estimatedTime || null) : null,
         arrival_scheduled: arrMatch?.scheduledTime || null,
         arrival_estimated: arrMatch ? (arrMatch.actualTime || arrMatch.estimatedTime || null) : null,
-        boardStatus: (depMatch || arrMatch)?.status || null,
+        // Prefer the arrival leg's status when both exist — it's the more
+        // terminal/authoritative signal for a flight's overall state
+        // (departure status can still read "ontime" hours after an
+        // enroute delay that the arrival record already reflects).
+        boardStatus: (arrMatch || depMatch)?.status || null,
         source: 'tpe_flight_board',
     };
 }

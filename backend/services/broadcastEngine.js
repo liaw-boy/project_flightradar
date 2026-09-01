@@ -84,7 +84,31 @@ const PREDICTOR_WINDOW_SIZE = 10; // must match ml_trajectory/model.py WINDOW_SI
 const PREDICTOR_STEP_S = 5;
 let _broadcastDirty = false;
 
+// pruneAndBroadcast is called fire-and-forget from three independently-
+// timed pollers (baseline 5s, viewport 5s, special 60s — see pollers.js).
+// Each poller guards against re-entering ITSELF, but nothing previously
+// guarded pruneAndBroadcast against two DIFFERENT pollers' calls overlapping
+// here. Because this function does `await predictBatch(...)` partway
+// through (an HTTP round-trip), two overlapping calls can finish in either
+// order — whichever's predictBatch call happens to return last wins the
+// final setGlobalPlanesCache() write, which is not necessarily the call
+// that started with the freshest masterStateMap snapshot. A skip-if-busy
+// guard (matching the style already used for the pollers themselves) means
+// a rare overlap just skips one cycle rather than risking a stale
+// overwrite — the next 2-5s tick catches up regardless.
+let _pruneAndBroadcastRunning = false;
+
 async function pruneAndBroadcast() {
+    if (_pruneAndBroadcastRunning) return;
+    _pruneAndBroadcastRunning = true;
+    try {
+        await _pruneAndBroadcastImpl();
+    } finally {
+        _pruneAndBroadcastRunning = false;
+    }
+}
+
+async function _pruneAndBroadcastImpl() {
     // Staleness is measured from _posUpdatedAt (last time the position
     // actually advanced), not _lastSeen (last time this icao24 merely
     // appeared in an upstream poll response). An upstream feed that keeps
