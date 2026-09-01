@@ -1,5 +1,5 @@
 import { dataManager } from '../services/dataManager';
-import { ALT_STOPS } from '../config/planeIconTheme';
+import { ALT_STOPS, GROUND_COLOR, UNKNOWN_ALT_COLOR } from '../config/planeIconTheme';
 
 const EARTH_RADIUS = 6371000;
 
@@ -287,24 +287,27 @@ export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'ALTI
     const isLight = scheme === 'ALTITUDE_LIGHT';
     const stops = ALT_STOPS;
 
-    // Ground stop lightness/saturation are tuned per-scheme for contrast against
-    // the basemap, but the HUE always comes from the same GND stop as the legend.
+    // Ground/unknown are deliberately neutral greys (tar1090's own default),
+    // not a ramp color — visually distinct from "lowest point on the gradient".
     const toCss = (h, s, l) => isLight
         ? `hsl(${Math.round(h)},${Math.round(s * 0.75)}%,${Math.max(26, Math.round(l * 0.62))}%)`
         : `hsl(${Math.round(h)},${Math.round(s)}%,${Math.round(l)}%)`;
 
     if (onGround || altitude === 'GROUND') {
-        const g = stops[0];
-        return toCss(g.h, g.s, g.l);
+        return toCss(GROUND_COLOR.h, GROUND_COLOR.s, GROUND_COLOR.l);
     }
 
     const alt = parseFloat(altitude);
-    if (isNaN(alt) || alt <= 0) {
-        const g = stops[0];
-        return toCss(g.h, g.s, g.l);
+    if (isNaN(alt)) {
+        return toCss(UNKNOWN_ALT_COLOR.h, UNKNOWN_ALT_COLOR.s, UNKNOWN_ALT_COLOR.l);
     }
 
-    // Clamp to range
+    // Clamp to range — altitudes outside the anchors use the nearest anchor's
+    // hue (tar1090: "altitudes below/above the first/last entry use its hue").
+    if (alt <= stops[0].alt) {
+        const s = stops[0];
+        return toCss(s.h, s.s, s.l);
+    }
     if (alt >= stops[stops.length - 1].alt) {
         const s = stops[stops.length - 1];
         return toCss(s.h, s.s, s.l);

@@ -10,20 +10,24 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 // ── Altitude color ramp (HSL, altitude in METRES) ──────────────────────────
-// Same gradient tar1090 / globe.adsb.fi / FR24 use. Both the on-map icons
-// (via getAltitudeColor in flightUtils.js) and the bottom altitude legend
-// (AltitudeLegend.jsx) derive their colors from this single ramp.
+// Matches tar1090's actual shipped default (html/config.js ColorByAlt.air) —
+// verified against tar1090's own source, not an approximation: 3 hue anchors
+// linearly interpolated, constant saturation/lightness. Altitudes below the
+// first anchor use its hue; above the last, its hue (see getAltitudeColor).
+// Both the on-map icons (via getAltitudeColor in flightUtils.js) and the
+// bottom altitude legend (AltitudeLegend.jsx) derive their colors from this
+// single ramp.
 export const ALT_STOPS = [
-    { alt:     0, h:  20, s: 88, l: 52 }, // orange       — ground / takeoff (0ft)
-    { alt:   610, h:  33, s: 88, l: 51 }, // yellow-orange — 2,000ft
-    { alt:  1219, h:  43, s: 88, l: 50 }, // yellow        — 4,000ft
-    { alt:  1829, h:  54, s: 88, l: 49 }, // yellow-green  — 6,000ft
-    { alt:  2438, h:  72, s: 88, l: 46 }, // green-yellow  — 8,000ft
-    { alt:  2743, h:  85, s: 88, l: 44 }, // bright green  — 9,000ft
-    { alt:  3353, h: 140, s: 88, l: 41 }, // emerald green — 11,000ft (regional cruise)
-    { alt: 12192, h: 300, s: 88, l: 48 }, // purple/magenta— 40,000ft (jet cruise)
-    { alt: 15545, h: 360, s: 88, l: 52 }, // red           — 51,000ft+ (extreme)
+    { alt:   610, h:  20, s: 88, l: 44 }, // orange        — 2,000ft
+    { alt:  3048, h: 140, s: 88, l: 44 }, // light green   — 10,000ft
+    { alt: 12192, h: 300, s: 88, l: 44 }, // magenta       — 40,000ft (jet cruise)
 ];
+
+// tar1090's ground/unknown-altitude colors are deliberately NEUTRAL (no hue)
+// rather than reusing a ramp color — a taxiing aircraft's grey is visually
+// distinct from "this is the lowest point on the altitude gradient".
+export const GROUND_COLOR = { h: 0, s: 0, l: 45 };
+export const UNKNOWN_ALT_COLOR = { h: 0, s: 0, l: 75 };
 
 // ── Icon size: zoom → base pixel size curve ────────────────────────────────
 // adsb.fi/FR24-style. See aircraftIcons.js's getDrawSize() history comment
