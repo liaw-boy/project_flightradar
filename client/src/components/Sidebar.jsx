@@ -19,6 +19,25 @@ function headingDir(h) {
     return dirs[Math.round(h / 45) % 8];
 }
 
+// Scheduled/estimated departure-arrival timestamps (ISO strings from
+// flightController.js's route waterfall — AeroDataBox globally, tpe_flight_board
+// for TPE/TSA/KHH/RMQ domestic legs). Shown alongside the existing distance-based
+// FlightProgressInline arc, which needs no schedule data at all.
+function fmtSchedTime(iso) {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (isNaN(d)) return null;
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+// >10min later than scheduled counts as a delay worth flagging visually.
+function isDelayed(scheduled, estimated) {
+    if (!scheduled || !estimated) return false;
+    const s = new Date(scheduled), e = new Date(estimated);
+    if (isNaN(s) || isNaN(e)) return false;
+    return (e - s) / 60000 > 10;
+}
+
 function ShareButton({ icao24 }) {
     const [copied, setCopied] = useState(false);
     const handleShare = () => {
@@ -490,6 +509,14 @@ export default function Sidebar({
                                 {routeInfo.departure_terminal && <span>T{routeInfo.departure_terminal}</span>}
                                 {routeInfo.departure_gate && <span> · {routeInfo.departure_gate}</span>}
                             </div>
+                            {(routeInfo.departure_scheduled || routeInfo.departure_estimated) && (
+                                <div className="bp-sched-time">
+                                    {fmtSchedTime(routeInfo.departure_estimated || routeInfo.departure_scheduled)}
+                                    {isDelayed(routeInfo.departure_scheduled, routeInfo.departure_estimated) && (
+                                        <span className="bp-delay"> {t('delayed')}</span>
+                                    )}
+                                </div>
+                            )}
                         </div>
 
                         {/* Center: inline progress */}
@@ -518,6 +545,14 @@ export default function Sidebar({
                                 {routeInfo.arrival_terminal && <span>T{routeInfo.arrival_terminal}</span>}
                                 {routeInfo.arrival_gate && <span> · {routeInfo.arrival_gate}</span>}
                             </div>
+                            {(routeInfo.arrival_scheduled || routeInfo.arrival_estimated) && (
+                                <div className="bp-sched-time" style={{ textAlign: 'right' }}>
+                                    {fmtSchedTime(routeInfo.arrival_estimated || routeInfo.arrival_scheduled)}
+                                    {isDelayed(routeInfo.arrival_scheduled, routeInfo.arrival_estimated) && (
+                                        <span className="bp-delay"> {t('delayed')}</span>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
 

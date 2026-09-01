@@ -3,7 +3,58 @@ const Route = require('../db/routeStore');
 const MictronicsDb = require('../db/mictronicsDb');
 const VrsDb = require('../db/vrsDb');
 const { AirportDictionary, RouteDictionary } = require('../db/staticMaps');
+const { queryFlights: queryFidsBoard, listBoardAirports } = require('../services/fidsBoard');
 const logger = require('../logger');
+
+const _boardAirportCodes = new Set(listBoardAirports().map(a => a.code));
+
+// Taiwan domestic-board timing enrichment (TPE/TSA/KHH/RMQ only — see
+// fidsBoard.js). This is tpe_flight_board's own official scheduled/estimated/
+// actual triple, more precise for these 4 airports than AeroDataBox's
+// generic schedule inference. Runs AFTER the main route waterfall has
+// already resolved flightNumber/origin_iata/destination_iata — searches the
+// board by flight-number text match, then sanity-checks the matched record's
+// origin/destination actually agree with the already-resolved route before
+// trusting its times (guards against a false substring match).
+function _lookupBoardSide(flightNumber, code, direction, expectOrigin, expectDestination) {
+    try {
+        const { flights } = queryFidsBoard({ code, direction, q: flightNumber, history: true }, null);
+        const match = flights.find(f =>
+            f.flightNumber === flightNumber ||
+            (f.codeshares || []).some(c => c.flightNumber === flightNumber)
+        );
+        if (!match) return null;
+        // Sanity check: the board record's own origin/destination should
+        // agree with what the route waterfall already resolved, so a loose
+        // text match can't silently attach the wrong flight's times.
+        if (expectOrigin && match.origin && match.origin !== expectOrigin) return null;
+        if (expectDestination && match.destination && match.destination !== expectDestination) return null;
+        return match;
+    } catch (e) {
+        logger.debug('FUSION', `fidsBoard timing lookup failed for ${flightNumber}: ${e.message}`);
+        return null;
+    }
+}
+
+function fetchFidsBoardTiming(flightNumber, originIata, destinationIata) {
+    if (!flightNumber) return null;
+    const fromBoard = _boardAirportCodes.has(originIata);
+    const toBoard = _boardAirportCodes.has(destinationIata);
+    if (!fromBoard && !toBoard) return null;
+
+    const depMatch = fromBoard ? _lookupBoardSide(flightNumber, originIata, 'departure', originIata, destinationIata) : null;
+    const arrMatch = toBoard ? _lookupBoardSide(flightNumber, destinationIata, 'arrival', originIata, destinationIata) : null;
+    if (!depMatch && !arrMatch) return null;
+
+    return {
+        departure_scheduled: depMatch?.scheduledTime || null,
+        departure_estimated: depMatch ? (depMatch.actualTime || depMatch.estimatedTime || null) : null,
+        arrival_scheduled: arrMatch?.scheduledTime || null,
+        arrival_estimated: arrMatch ? (arrMatch.actualTime || arrMatch.estimatedTime || null) : null,
+        boardStatus: (depMatch || arrMatch)?.status || null,
+        source: 'tpe_flight_board',
+    };
+}
 
 // [LOG] Rate-limit noisy external-API fail logs — only print first N per rolling window
 function makeRateLimitedLogger(maxPerWindow = 3, windowMs = 60000) {
@@ -389,9 +440,13 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
                     destination_name:   dbRoute.destination_name   || null,
                     destination_city:   dbRoute.destination_city   || null,
                     departure_time:     dbRoute.departure_time     || null,
+                    departure_scheduled: dbRoute.departure_scheduled || null,
+                    departure_estimated: dbRoute.departure_estimated || null,
                     departure_terminal: dbRoute.departure_terminal || null,
                     departure_gate:     dbRoute.departure_gate     || null,
                     arrival_time:       dbRoute.arrival_time       || null,
+                    arrival_scheduled:  dbRoute.arrival_scheduled  || null,
+                    arrival_estimated:  dbRoute.arrival_estimated  || null,
                     arrival_terminal:   dbRoute.arrival_terminal   || null,
                     arrival_gate:       dbRoute.arrival_gate       || null,
                     flightNumber:       dbRoute.flightNumber       || callsign,
@@ -438,9 +493,17 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
                         destination_name:   f.arrival?.airport?.name || null,
                         destination_city:   f.arrival?.airport?.municipalityName || null,
                         departure_time:     fmtTime(depRevised || depSched),
+                        // Raw ISO timestamps, kept separate (not collapsed like
+                        // departure_time above) so the frontend can distinguish
+                        // "on schedule" from "revised/delayed" and build a
+                        // progress bar. depSched/arrSched are null-safe already.
+                        departure_scheduled: depSched || null,
+                        departure_estimated: depRevised || null,
                         departure_terminal: f.departure?.terminal || null,
                         departure_gate:     f.departure?.gate || null,
                         arrival_time:       fmtTime(arrRevised || arrSched),
+                        arrival_scheduled:  arrSched || null,
+                        arrival_estimated:  arrRevised || null,
                         arrival_terminal:   f.arrival?.terminal || null,
                         arrival_gate:       f.arrival?.gate || null,
                         flightNumber:       f.number || null,
@@ -477,9 +540,13 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
                     } : {}),
                     // Schedule data always from AeroDataBox (ADSB.fi doesn't have times)
                     departure_time:     adbRoute?.departure_time     || null,
+                    departure_scheduled: adbRoute?.departure_scheduled || null,
+                    departure_estimated: adbRoute?.departure_estimated || null,
                     departure_terminal: adbRoute?.departure_terminal || null,
                     departure_gate:     adbRoute?.departure_gate     || null,
                     arrival_time:       adbRoute?.arrival_time       || null,
+                    arrival_scheduled:  adbRoute?.arrival_scheduled  || null,
+                    arrival_estimated:  adbRoute?.arrival_estimated  || null,
                     arrival_terminal:   adbRoute?.arrival_terminal   || null,
                     arrival_gate:       adbRoute?.arrival_gate       || null,
                     flightNumber:       adbRoute?.flightNumber || adsbFiRoute?.flightNumber || callsign,
@@ -587,6 +654,20 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
             routeInfo.flightNumber = results[1].value.flight.trim();
         }
 
+        // Taiwan domestic board (TPE/TSA/KHH/RMQ) timing enrichment — more
+        // precise than AeroDataBox for these 4 airports since it's the
+        // official tpe_flight_board data. Overrides AeroDataBox's schedule
+        // fields when a confident match is found; leaves them untouched
+        // otherwise (graceful no-op for non-Taiwan routes/no match).
+        const boardTiming = fetchFidsBoardTiming(routeInfo.flightNumber, routeInfo.origin_iata, routeInfo.destination_iata);
+        if (boardTiming) {
+            if (boardTiming.departure_scheduled) routeInfo.departure_scheduled = boardTiming.departure_scheduled;
+            if (boardTiming.departure_estimated) routeInfo.departure_estimated = boardTiming.departure_estimated;
+            if (boardTiming.arrival_scheduled) routeInfo.arrival_scheduled = boardTiming.arrival_scheduled;
+            if (boardTiming.arrival_estimated) routeInfo.arrival_estimated = boardTiming.arrival_estimated;
+            if (boardTiming.boardStatus) routeInfo.flightStatus = boardTiming.boardStatus;
+        }
+
         // [進階] Optional METAR fetch
         if (routeInfo.destination_iata && routeInfo.destination_iata !== 'N/A') {
             try {
@@ -648,9 +729,13 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
             destination_name:   routeInfo.destination_name   || null,
             destination_city:   routeInfo.destination_city   || null,
             departure_time:     routeInfo.departure_time     || null,
+            departure_scheduled: routeInfo.departure_scheduled || null,
+            departure_estimated: routeInfo.departure_estimated || null,
             departure_terminal: routeInfo.departure_terminal || null,
             departure_gate:     routeInfo.departure_gate     || null,
             arrival_time:       routeInfo.arrival_time       || null,
+            arrival_scheduled:  routeInfo.arrival_scheduled  || null,
+            arrival_estimated:  routeInfo.arrival_estimated  || null,
             arrival_terminal:   routeInfo.arrival_terminal   || null,
             arrival_gate:       routeInfo.arrival_gate       || null,
             flightStatus:       routeInfo.flightStatus       || null,
