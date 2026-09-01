@@ -1252,10 +1252,21 @@ const { fetchGlobalBaseline, fetchViewportOverlay, fetchSpecialCategories, enric
     normalizeAcRecord, fetchOpenSkyBaselineFallback, ingestTrackPoints, triggerBackgroundResolution,
 });
 
+// Non-primary instances (e.g. a staging deployment sharing the same upstream
+// API keys/quota as production) must not also poll OpenSky/adsb.lol/adsb.fi/TDX
+// or run the nightly cron jobs below — doing so silently doubles external
+// request volume and can re-trigger quota exhaustion across both instances.
+const BACKGROUND_JOBS_ENABLED = process.env.DISABLE_BACKGROUND_JOBS !== 'true';
+if (!BACKGROUND_JOBS_ENABLED) {
+    logger.warn('STARTUP', 'DISABLE_BACKGROUND_JOBS=true — skipping all pollers/cron jobs (non-primary instance mode)');
+}
+
 // ── [v11.0] Three-Tier Engine Startup ─────────────────────────────────────
-setInterval(fetchGlobalBaseline,    5_000);    // adsb.lol primary (5s), adsb.fi fallback
-setInterval(fetchViewportOverlay,    5_000);   // viewport high-frequency overlay
-setInterval(fetchSpecialCategories, 60_000);   // military + LADD (slow)
+if (BACKGROUND_JOBS_ENABLED) {
+    setInterval(fetchGlobalBaseline,    5_000);    // adsb.lol primary (5s), adsb.fi fallback
+    setInterval(fetchViewportOverlay,    5_000);   // viewport high-frequency overlay
+    setInterval(fetchSpecialCategories, 60_000);   // military + LADD (slow)
+}
 
 // [v7.0] Session timeout reaper — in-memory cleanup every 5 minutes
 setInterval(() => {
@@ -1306,12 +1317,14 @@ setTimeout(reapStaleDbSessions, 10_000);
 
 // 啟動時讀取快取並初始化（委派給 AccountPool）
 const isFreshQuota = accountPool.loadCache(QUOTA_CACHE_FILE);
-(async () => {
-    await accountPool.warmup(isFreshQuota);
-    // [v11.0] Immediate first-run: global baseline first, then special categories 3s later
-    fetchGlobalBaseline();
-    setTimeout(fetchSpecialCategories, 3_000);
-})();
+if (BACKGROUND_JOBS_ENABLED) {
+    (async () => {
+        await accountPool.warmup(isFreshQuota);
+        // [v11.0] Immediate first-run: global baseline first, then special categories 3s later
+        fetchGlobalBaseline();
+        setTimeout(fetchSpecialCategories, 3_000);
+    })();
+}
 
 // Automatic "stuck/zombie plane" diagnostic beacon (2026-09-01) — see
 // MapView.jsx's reportStalePlane(). Client-side detector fires when a plane
@@ -2923,7 +2936,7 @@ async function syncSchedulesDatabase() {
 
 // TDX 進出港資料：每日凌晨 4 點同步一次（10 機場 × 2 endpoint = 20 req/次，每月 620 req ≈ 0.02 點）
 // 主要路由來源已改為 adsbdb.com（免費無限額），TDX 僅作台灣本地班次補充
-cron.schedule('0 4 * * *', () => {
+if (BACKGROUND_JOBS_ENABLED) cron.schedule('0 4 * * *', () => {
     crawlFlightSchedules();
 }, {
     timezone: "Asia/Taipei"
@@ -2937,7 +2950,7 @@ const dbSyncStatus = {
 };
 
 // ── VRS Routes Database (daily sync, 03:42 Taiwan time) ──
-cron.schedule('42 3 * * *', () => {
+if (BACKGROUND_JOBS_ENABLED) cron.schedule('42 3 * * *', () => {
     logger.info('VRS', 'Daily sync starting...');
     syncLog.start('vrs');
     syncVrsRoutes(msg => logger.info('VRS', msg))
@@ -2957,7 +2970,7 @@ cron.schedule('42 3 * * *', () => {
 
 // ── Mictronics Aircraft Registry (weekly sync, every Sunday 03:17 Taiwan time) ──
 // force:true ensures aircraft_types cache is refreshed and existing data is re-synced
-cron.schedule('17 3 * * 0', () => {
+if (BACKGROUND_JOBS_ENABLED) cron.schedule('17 3 * * 0', () => {
     logger.info('MICT', 'Weekly sync starting...');
     syncLog.start('mictronics');
     syncMictronics(msg => logger.info('MICT', msg), { force: true })
@@ -2985,7 +2998,7 @@ const { notifyDiscord } = require('./services/discordNotifier');
 // promotion threshold (ml_trajectory/retrain_and_promote.py). The predictor
 // service (infer_server.py) polls model.pt's mtime and hot-reloads a
 // promotion within a minute — no restart needed here.
-cron.schedule('30 4 * * *', () => {
+if (BACKGROUND_JOBS_ENABLED) cron.schedule('30 4 * * *', () => {
     const { execFile } = require('child_process');
     const trajectoryDir = path.join(__dirname, 'ml_trajectory');
     const pythonBin = path.join(trajectoryDir, '.venv', 'bin', 'python');
