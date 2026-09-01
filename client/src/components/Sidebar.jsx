@@ -622,6 +622,12 @@ export default function Sidebar({
                     <div className="sb-section-content">
                         {/* Secondary info rows */}
                         <DataRow label={t('position')} value={plane.lat != null && plane.lng != null ? `${plane.lat.toFixed(4)}, ${plane.lng.toFixed(4)}` : 'N/A'} />
+                        <DataRow label={t('heading')} value={plane.heading != null ? `${Math.round(plane.heading)}°` : '--'} />
+                        <DataRow label={t('vertRate')} value={
+                            plane.onGround || plane.vRate == null
+                                ? '--'
+                                : `${plane.vRate >= 0 ? '+' : ''}${Math.round(plane.vRate / 0.00508)} ft/min`
+                        } />
                         <DataRow label="Flight No." value={safeFusionData?.route?.flightNumber || plane.callsign || '---'} />
                         <DataRow label={t('source')} value={posSourceMap[plane.positionSource] || 'ADS-B'} />
 
