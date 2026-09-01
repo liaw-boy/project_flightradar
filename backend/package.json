@@ -10,7 +10,9 @@
     "sync-mictronics": "node scripts/syncMictronics.js",
     "test": "jest --forceExit --testTimeout=15000 --runInBand",
     "test:watch": "jest --watch --forceExit",
-    "test:coverage": "jest --coverage --forceExit"
+    "test:coverage": "jest --coverage --forceExit",
+    "test:unit": "jest --forceExit --testTimeout=15000 --runInBand --testPathIgnorePatterns=\"__tests__/(api|stress|user-journey)\\.test\\.js\"",
+    "test:smoke": "jest --forceExit --testTimeout=15000 --runInBand --testPathPattern=\"(api|stress|user-journey)\\.test\\.js\""
   },
   "jest": {
     "testEnvironment": "node",

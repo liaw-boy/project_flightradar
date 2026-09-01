@@ -27,7 +27,10 @@ jobs:
 
       - name: Run tests
         working-directory: backend
-        run: npx jest --forceExit --testTimeout=15000 --runInBand
+        # api.test.js / stress.test.js / user-journey.test.js hit a live server
+        # at localhost:3000 by design (manual smoke tests, see `npm run test:smoke`)
+        # — not hermetic, so they're excluded from the CI gate.
+        run: npm run test:unit
 
   client-build:
     name: Client build (Vite)
