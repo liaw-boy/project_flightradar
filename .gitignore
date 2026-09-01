@@ -122,3 +122,8 @@ backend/data/routes.db
 backend/data/raw_openflights.dat
 backend/data/aircraft.csv.gz
 backend/data/processed/
+
+# Python (ml_trajectory) — venv and bytecode caches never tracked
+backend/ml_trajectory/.venv/
+backend/ml_trajectory/**/__pycache__/
+*.pyc

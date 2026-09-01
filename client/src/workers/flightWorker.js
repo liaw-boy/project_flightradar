@@ -91,7 +91,8 @@ function processDelta(updates, removed, time) {
 
     // 2. Apply updates — array→object conversion
     // Format: [icao24, lat, lng, heading, altitude, velocity, onGround,
-    //          category, isEmergency, callsign, vRate, squawk, lastContact, typecode]
+    //          category, isEmergency, callsign, vRate, squawk, lastContact,
+    //          typecode, predictedLat, predictedLng]
     for (let i = 0; i < updates.length; i++) {
         const u = updates[i];
         const id = u[0];
@@ -117,6 +118,10 @@ function processDelta(updates, removed, time) {
         p.squawk = u[11];
         p.lastContact = u[12];
         if (u[13]) p.typecode = u[13];
+        // LSTM "Phase 2" smoothing target — see MapView.jsx animate().
+        // null when the model hasn't got a full window for this aircraft yet.
+        p.predictedLat = u[14] ?? null;
+        p.predictedLng = u[15] ?? null;
 
         dirtySet.add(id);
     }

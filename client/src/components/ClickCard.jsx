@@ -17,6 +17,10 @@ export default function ClickCard({ plane, pos, onClose, onOpenDetails }) {
 
         const callsignParam = getSafeCallsignParam(plane);
         const cached = flightDetailsCache.get(plane.icao24);
+        // Captured at fetch-start time — prevIcaoRef gets overwritten as soon
+        // as the user clicks a different plane, so comparing against it below
+        // is what actually detects a stale response landing late.
+        const icaoAtFetch = plane.icao24;
 
         Promise.all([
             dataManager.getRoute(plane.icao24, plane.callsign),
@@ -29,6 +33,11 @@ export default function ClickCard({ plane, pos, onClose, onOpenDetails }) {
                         .then(d => { if (d) flightDetailsCache.set(plane.icao24, d); return d; })
                         .catch(() => null)),
         ]).then(([basicRoute, fusionData]) => {
+            // A previous plane's response landing after the user already
+            // clicked a different one — discard rather than show it under
+            // the new plane's header (previously unguarded: this is what
+            // produced "點擊不同飛機資訊都很慢跑出來/顯示上一筆資料").
+            if (prevIcaoRef.current !== icaoAtFetch) return;
             const fr = fusionData?.route || {};
             setRoute({
                 dep: fr.origin_iata || fr.origin_icao || basicRoute?.departureAirport || null,

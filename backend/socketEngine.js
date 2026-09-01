@@ -15,7 +15,12 @@ function buildTuple(plane) {
         plane.icao24, plane.lat, plane.lng, plane.heading, plane.altitude,
         plane.velocity, plane.onGround, plane.category, plane.isEmergency,
         plane.callsign, plane.vRate, plane.squawk, plane.lastContact,
-        plane.typecode || null
+        plane.typecode || null,
+        // [14],[15]: LSTM-predicted next position (ml_trajectory), used by
+        // the frontend to blend smoothly instead of freezing between real
+        // updates — see MapView.jsx animate(). null when the model hasn't
+        // got a full window for this aircraft yet.
+        plane.predictedLat ?? null, plane.predictedLng ?? null,
     ];
 }
 
@@ -117,6 +122,12 @@ function broadcastPlanes(states, timestamp) {
         const prev = prevStates.get(icao24);
         let changed = false;
 
+        // Predicted-position drift is included so a plane whose real
+        // telemetry happens to hold steady between cycles (e.g. a holding
+        // pattern) still pushes an updated "Phase 2" smoothing target to the
+        // client — airborne planes with a real position delta already cross
+        // the lat/lng threshold almost every cycle regardless, so this adds
+        // negligible extra broadcast volume in practice.
         if (
             !prev ||
             Math.abs(plane.lat - prev.lat) > 0.0001 ||
@@ -125,7 +136,9 @@ function broadcastPlanes(states, timestamp) {
             prev.altitude !== plane.altitude ||
             prev.velocity !== plane.velocity ||
             prev.onGround !== plane.onGround ||
-            prev.lastContact !== plane.lastContact
+            prev.lastContact !== plane.lastContact ||
+            Math.abs((plane.predictedLat ?? 0) - (prev.predictedLat ?? 0)) > 0.0002 ||
+            Math.abs((plane.predictedLng ?? 0) - (prev.predictedLng ?? 0)) > 0.0002
         ) {
             changed = true;
         }
@@ -137,6 +150,7 @@ function broadcastPlanes(states, timestamp) {
             lat: plane.lat, lng: plane.lng, heading: plane.heading,
             altitude: plane.altitude, velocity: plane.velocity,
             onGround: plane.onGround, lastContact: plane.lastContact,
+            predictedLat: plane.predictedLat, predictedLng: plane.predictedLng,
             tuple,
         });
 

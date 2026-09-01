@@ -7,7 +7,7 @@
 服務定義：`~/.config/systemd/user/aerostrat.service`
 
 ```ini
-WorkingDirectory=/home/eric/lbw_project/project_aerostrat/backend
+WorkingDirectory=/mnt/legend800/lbw_project/project_aerostrat/backend
 ExecStart=.../node server.js
 Environment=PORT=3000
 

@@ -30,6 +30,12 @@ export default function HoverCard({ plane, pos }) {
 
         const callsignParam = getSafeCallsignParam(plane);
         const cachedFusion = flightDetailsCache.get(plane.icao24);
+        // Captured at fetch-start time, not read from the ref later — the ref
+        // itself gets overwritten as soon as the user moves to a new plane,
+        // so comparing against it below (not `plane.icao24`, which this
+        // closure still sees as the OLD plane) is what actually detects a
+        // stale response arriving after the user already selected something else.
+        const icaoAtFetch = plane.icao24;
 
         Promise.all([
             dataManager.getPhotos(plane.icao24, plane.registration),
@@ -43,6 +49,13 @@ export default function HoverCard({ plane, pos }) {
                         .then(d => { if (d) flightDetailsCache.set(plane.icao24, d); return d; })
                         .catch(() => null))
         ]).then(([photos, routeData, fusionData]) => {
+            // A previous plane's response landing after the user already
+            // hovered/clicked a different one — discard it entirely rather
+            // than let it overwrite what's now on screen under a mismatched
+            // header (see the retry-photo branch below, which already had
+            // this guard; the main path here was missing it).
+            if (prevIcaoRef.current !== icaoAtFetch) return;
+
             if (photos && photos.length > 0) setPhoto(photos[0]);
             else setPhoto(null);
 
@@ -73,10 +86,14 @@ export default function HoverCard({ plane, pos }) {
 
             // Still fetch airport details for city names if fusion didn't provide them
             if (merged.departureAirport && !merged.depCity)
-                dataManager.getAirport(merged.departureAirport).then(setDepInfo).catch(() => {});
+                dataManager.getAirport(merged.departureAirport)
+                    .then(d => { if (prevIcaoRef.current === icaoAtFetch) setDepInfo(d); })
+                    .catch(() => {});
             if (merged.arrivalAirport && !merged.arrCity)
-                dataManager.getAirport(merged.arrivalAirport).then(setArrInfo).catch(() => {});
-        }).catch(() => { setRouteLoading(false); });
+                dataManager.getAirport(merged.arrivalAirport)
+                    .then(d => { if (prevIcaoRef.current === icaoAtFetch) setArrInfo(d); })
+                    .catch(() => {});
+        }).catch(() => { if (prevIcaoRef.current === icaoAtFetch) setRouteLoading(false); });
 
     }, [plane?.icao24, plane?.callsign, plane?.registration]);
 

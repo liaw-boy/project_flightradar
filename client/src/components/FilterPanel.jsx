@@ -6,22 +6,24 @@ import './FilterPanel.css';
 // [v3.0] Map tile layer definitions
 // [2026-08] CartoDB's anonymous basemaps.cartocdn.com CDN now requires an API
 // key — unauthenticated requests return a 256x256 "API KEY REQUIRED"
-// placeholder tile instead of a real map. Swapped light/dark/street to
-// key-free providers (OSM standard + CyclOSM); Dark applies a CSS invert
-// filter on top of the OSM tiles in MapView.jsx since there's no free
-// no-key dark raster tile source. Satellite/Terrain were unaffected.
+// placeholder tile instead of a real map. Light/Dark moved to Esri's
+// key-free Canvas basemaps (World_Light_Gray_Base / World_Dark_Gray_Base) —
+// genuinely distinct grayscale/dark cartography, not a CSS filter over a
+// full-color tile, and same arcgisonline.com host already trusted/CSP-
+// allowlisted for the Satellite layer below, so no CSP change needed.
+// Street moved to CyclOSM (also key-free). Satellite/Terrain unaffected.
 export const MAP_LAYERS = [
     {
         id: 'light',
         label: 'Light',
-        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-        attribution: '© OpenStreetMap contributors',
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        attribution: '© Esri',
     },
     {
         id: 'dark',
         label: 'Dark',
-        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-        attribution: '© OpenStreetMap contributors',
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        attribution: '© Esri',
     },
     {
         id: 'satellite',

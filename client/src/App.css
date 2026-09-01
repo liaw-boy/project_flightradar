@@ -17,19 +17,6 @@
     filter: brightness(0.92) saturate(0.85);
 }
 
-/* [2026-08] "Dark" map layer (FilterPanel) has no free no-key dark raster
-   tile source since CartoDB locked dark_all behind an API key — approximate
-   it by inverting the OSM light tiles. Scoped to .leaflet-tile-pane only, so
-   plane icons/markers/HUD (different Leaflet panes) are unaffected. */
-.map-tiles-dark .leaflet-tile-pane {
-    filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7);
-}
-
-/* Same treatment for SidebarMiniMap.jsx's route preview map */
-.mini-map-dark .leaflet-tile-pane {
-    filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7);
-}
-
 .right-hud {
     position: absolute;
     top: calc(var(--topbar-h) + var(--panel-gap));

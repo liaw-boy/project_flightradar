@@ -277,13 +277,18 @@ export default function App() {
         }
         // If ?icao= is set, fetch its position and pan to it so bbox refresh
         // loads the plane into planesDict (it may be outside the initial view).
+        // Uses /api/planes/:icao24 (reads masterStateMap directly) — this used
+        // to call /api/flights/live, a legacy endpoint that queries OpenSky
+        // directly instead of the same adsb.lol-backed state everything else
+        // uses. When the OpenSky account pool's daily quota ran out (a real,
+        // observed condition), that call silently returned nothing and a
+        // Discord alert's deep link would just never navigate anywhere.
         if (urlParams.icao) {
-            fetch('/api/flights/live')
+            fetch(`/api/planes/${urlParams.icao}`)
                 .then(r => r.json())
                 .then(d => {
-                    const found = (d.planes || []).find(p => p.hex === urlParams.icao);
-                    if (found?.lat && found?.lon) {
-                        map.setView([found.lat, found.lon], Math.max(map.getZoom(), 9));
+                    if (d.found && typeof d.lat === 'number' && typeof d.lng === 'number') {
+                        map.setView([d.lat, d.lng], Math.max(map.getZoom(), 9));
                     }
                 })
                 .catch(() => {});

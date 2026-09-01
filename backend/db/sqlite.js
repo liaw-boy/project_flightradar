@@ -65,6 +65,41 @@ CREATE INDEX IF NOT EXISTS idx_tp_icao24  ON track_points(icao24);
 CREATE INDEX IF NOT EXISTS idx_tp_ts      ON track_points(ts);
 `);
 
+// ── Trajectory Predictor: predicted-vs-actual log ─────────────────────────
+// One row per completed prediction: what the model guessed 2s ago for this
+// aircraft, and what the next real position update actually turned out to
+// be. This is the feedback loop retrain_and_promote.py needs to learn from
+// its own real-world misses, not just replay historical track_points.
+db.exec(`
+CREATE TABLE IF NOT EXISTS prediction_log (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    icao24            TEXT    NOT NULL,
+    ts                INTEGER NOT NULL,
+    predicted_lat     REAL,
+    predicted_lng     REAL,
+    predicted_altitude REAL,
+    actual_lat        REAL,
+    actual_lng        REAL,
+    actual_altitude   REAL,
+    error_km          REAL,
+    created_at        INTEGER DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_pl_icao24 ON prediction_log(icao24, ts);
+CREATE INDEX IF NOT EXISTS idx_pl_ts     ON prediction_log(ts);
+CREATE INDEX IF NOT EXISTS idx_pl_error  ON prediction_log(error_km);
+`);
+// steps_ahead: how many RESAMPLE_DT_S-sized rollout steps this prediction
+// extrapolated (see ml_trajectory/dataset.py) — needed to segment accuracy
+// by prediction horizon (5s vs 90s predictions have very different error
+// distributions). Added 2026-08-31, after prediction_log already existed —
+// same guarded-ALTER pattern as the users table migration above.
+{
+    const plCols = db.pragma('table_info(prediction_log)').map(c => c.name);
+    if (!plCols.includes('steps_ahead')) {
+        db.exec('ALTER TABLE prediction_log ADD COLUMN steps_ahead INTEGER');
+    }
+}
+
 // ── Mictronics Aircraft Registry (static, weekly sync) ───────────────────
 db.exec(`
 CREATE TABLE IF NOT EXISTS mictronics_aircraft (

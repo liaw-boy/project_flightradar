@@ -297,32 +297,71 @@ export function useFlightData(mapRef, options = {}) {
                     const now = Date.now();
                     const rawDurMs = now - (existing._dataArrivedAt ?? now);
                     const observedDurMs  = Math.max(3000, Math.min(30000, rawDurMs));
-                    // Long idle (>60s): always snap + discard stale trail
-                    const isStaleAfterIdle = rawDurMs > 60000;
+                    // Long idle: always snap + discard stale trail.
+                    // [2026-09-01] Was `> 60000` — the EXACT same value as
+                    // trackIngest.js's own "meaningful change" heartbeat
+                    // guarantee (services/trackIngest.js: forces a write at
+                    // least every 60s even with zero movement). A threshold
+                    // equal to a guaranteed max gap has zero margin — any
+                    // real-world timing jitter (a poll running a few hundred
+                    // ms late, GC pause, network latency) pushes the actual
+                    // gap slightly past 60000ms during completely normal
+                    // operation, wiping a healthy trail for no reason. Raised
+                    // to 90000 to match PLANE_TTL_MS (broadcastEngine.js) —
+                    // the same horizon already used as "this plane is
+                    // genuinely gone" elsewhere in the system.
+                    const isStaleAfterIdle = rawDurMs > 90000;
 
                     // Current render position is the most accurate "from" reference
-                    const curRenderLat = existing.renderLat ?? existing._interpToLat ?? existing.lat;
-                    const curRenderLng = existing.renderLng ?? existing._interpToLng ?? existing.lng;
+                    const curRenderLat = existing.renderLat ?? existing._interpToLat ?? existing._emaLat ?? existing.lat;
+                    const curRenderLng = existing.renderLng ?? existing._interpToLng ?? existing._emaLng ?? existing.lng;
+
+                    // [v2.2 — parity with the WS path's EMA + bearing-reversal guards]
+                    // This bbox-polling path is the fallback when the WebSocket drops —
+                    // it used to apply only the absolute jump guard, missing the EMA
+                    // noise smoothing and bearing-reversal rejection the WS path has had
+                    // for a while. A user who fell back to polling lost both defenses at
+                    // once: the same MLAT jitter that's invisible on WS produced visible
+                    // jitter/reversal glitches here. Bearing check runs on the raw
+                    // incoming position, before EMA, so a rejected sample never poisons
+                    // the EMA's running state for the next (good) sample.
+                    const bearingRejected = !isStaleAfterIdle && !pData.onGround &&
+                        _isBearingReversal(curRenderLat, curRenderLng, pData.lat, pData.lng, pData.heading);
+
+                    const EMA_ALPHA = 0.72;
+                    let emaLat, emaLng;
+                    if (bearingRejected) {
+                        emaLat = existing._emaLat ?? curRenderLat;
+                        emaLng = existing._emaLng ?? curRenderLng;
+                    } else if (existing._emaLat != null) {
+                        emaLat = EMA_ALPHA * pData.lat + (1 - EMA_ALPHA) * existing._emaLat;
+                        emaLng = EMA_ALPHA * pData.lng + (1 - EMA_ALPHA) * existing._emaLng;
+                    } else {
+                        emaLat = pData.lat;
+                        emaLng = pData.lng;
+                    }
 
                     // Long idle or impossible jump → snap to new position, reset interpolation
-                    if (isStaleAfterIdle || _isImpossibleJump(curRenderLat, curRenderLng, pData.lat, pData.lng, observedDurMs)) {
+                    if (isStaleAfterIdle || (!bearingRejected && _isImpossibleJump(curRenderLat, curRenderLng, pData.lat, pData.lng, observedDurMs))) {
                         if (isStaleAfterIdle) trackStore.clearTrack(icao24);
                         next[icao24] = {
                             ...existing,
                             ...pData,
                             isDirty,
-                            _interpFromLat: pData.lat,
-                            _interpFromLng: pData.lng,
-                            _interpToLat:   pData.lat,
-                            _interpToLng:   pData.lng,
+                            _emaLat: emaLat,
+                            _emaLng: emaLng,
+                            _interpFromLat: emaLat,
+                            _interpFromLng: emaLng,
+                            _interpToLat:   emaLat,
+                            _interpToLng:   emaLng,
                             _interpStartMs: now,
                             _interpDurMs:   observedDurMs,
                             _pendingLat:    undefined,
                             _pendingLng:    undefined,
                             _pendingDurMs:  undefined,
                             _dataArrivedAt: now,
-                            renderLat: pData.lat,
-                            renderLng: pData.lng,
+                            renderLat: emaLat,
+                            renderLng: emaLng,
                             globalX: globalPt.x,
                             globalY: globalPt.y
                         };
@@ -334,13 +373,13 @@ export function useFlightData(mapRef, options = {}) {
                     // prior lerp finished (bursty network, server catch-up), curRenderLat
                     // reflects the true on-screen position; _interpToLat would still be
                     // the old, not-yet-reached target and cause a visible snap-back.
-                    const fromLat = curRenderLat;
-                    const fromLng = curRenderLng;
                     const interpUpdate = {
-                        _interpFromLat: fromLat,
-                        _interpFromLng: fromLng,
-                        _interpToLat:   pData.lat,
-                        _interpToLng:   pData.lng,
+                        _emaLat: emaLat,
+                        _emaLng: emaLng,
+                        _interpFromLat: curRenderLat,
+                        _interpFromLng: curRenderLng,
+                        _interpToLat:   emaLat,
+                        _interpToLng:   emaLng,
                         _interpStartMs: now,
                         _interpDurMs:   observedDurMs,
                         _pendingLat:    undefined,
@@ -363,12 +402,18 @@ export function useFlightData(mapRef, options = {}) {
             });
 
             // 清理機制：不再根據這次 BBox 結果刪除，而是根據「過期時間」
-            // 只有當飛機最後一次在後端全球快取出現的時間比當前最新的全球刷新時間早 60 秒以上，才視為消失
+            // 只有當飛機最後一次在後端全球快取出現的時間比當前最新的全球刷新時間早超過門檻，才視為消失
+            // [2026-09-01] 門檻原本是 60 秒——比後端自己認定「這架飛機真的消失」
+            // 的權威門檻 PLANE_TTL_MS（services/broadcastEngine.js，90 秒）還短。
+            // 代表前端會比後端更早放棄一架飛機：後端還在追蹤、隨時可能送出新資料，
+            // 前端卻已經把它從 planesDict 刪掉，下一筆更新一到又要重新當成「新飛機」
+            // 冒出來——尤其在今天一直遇到的 adsb.lol/OpenSky 間歇性斷線期間，這個
+            // 落差會更容易被撞到。改成跟後端一致的 90 秒，前端永遠不會比後端更早放棄。
             const globalSnapshotTime = globalLastUpdateRef.current || Math.floor(Date.now() / 1000);
             Object.keys(next).forEach((id) => {
                 const p = next[id];
                 // 如果這架飛機太久沒出現在全球快取中，則清理
-                if (p.lastSeenTime && globalSnapshotTime - p.lastSeenTime > 60) {
+                if (p.lastSeenTime && globalSnapshotTime - p.lastSeenTime > 90) {
                     delete next[id];
                     delete history[id];
                 }
@@ -648,12 +693,19 @@ export function useFlightData(mapRef, options = {}) {
                     p.squawk = wp.squawk;
                     p.lastContact = wp.lastContact;
                     if (wp.typecode) p.typecode = wp.typecode;
+                    // LSTM "Phase 2" smoothing target — see MapView.jsx animate().
+                    p.predictedLat = wp.predictedLat ?? null;
+                    p.predictedLng = wp.predictedLng ?? null;
 
                     // [Snapshot Interpolation v2.1 — WS path — Buffered + Jump Guard]
                     const wsRawDurMs = now - (p._dataArrivedAt ?? now);
                     const wsDurMs = Math.max(3000, Math.min(30000, wsRawDurMs));
-                    // Long idle (>60s): always snap + discard stale trail
-                    const wsIsStale = wsRawDurMs > 60000;
+                    // Long idle: always snap + discard stale trail. Same fix
+                    // as the bbox-polling path's isStaleAfterIdle above — was
+                    // `> 60000`, exactly trackIngest.js's own heartbeat
+                    // guarantee with zero safety margin, on the PRIMARY (not
+                    // fallback) update path. Raised to 90000 (PLANE_TTL_MS).
+                    const wsIsStale = wsRawDurMs > 90000;
 
                     const wsRenderLat = p.renderLat ?? p._interpToLat ?? p._emaLat ?? wp.lat;
                     const wsRenderLng = p.renderLng ?? p._interpToLng ?? p._emaLng ?? wp.lng;

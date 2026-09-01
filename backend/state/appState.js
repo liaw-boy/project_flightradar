@@ -19,6 +19,11 @@ const aircraftMetadataIndex = new Map(); // icao24 -> typecode
 const lastGlobalStatesMap = new Map(); // icao24 -> state (用於偵測起飛/降落)
 const activeSessions = new Map();  // [Flight Sessions] icao24 -> { sessionId, callsign, lastSeen, onGround }
 const lastStoredPoint = new Map(); // [Track Dedup] icao24 -> { lat, lng, altitude, heading, velocity, ts }
+const recentTrackBuffer = new Map(); // [Trajectory Predictor] icao24 -> last N airborne points (ring buffer, oldest first)
+const pendingPredictions = new Map(); // [Prediction Log] icao24 -> { lat, lng, altitude, baselinePosUpdatedAt } — last not-yet-validated prediction
+const notifiedEmergencies = new Set(); // [Discord Alert] icao24s already notified for their CURRENT emergency squawk — cleared when it clears
+const notifiedMilitary = new Set(); // [Discord Alert] icao24s already notified as military for their CURRENT sighting — cleared when they leave masterStateMap
+const notifiedSpecialLivery = new Set(); // [Discord Alert] icao24s already notified as special-livery for their CURRENT sighting — cleared when they leave masterStateMap
 const ingestionStats = { totalPoints: 0, totalBatches: 0, sessionsCreated: 0, sessionsClosed: 0, lastBatchSize: 0, lastBatchMs: 0 };
 
 let _globalPlanesCache = { states: [], time: 0 };
@@ -33,6 +38,11 @@ module.exports = {
     lastGlobalStatesMap,
     activeSessions,
     lastStoredPoint,
+    recentTrackBuffer,
+    pendingPredictions,
+    notifiedEmergencies,
+    notifiedMilitary,
+    notifiedSpecialLivery,
     ingestionStats,
     getGlobalPlanesCache,
     setGlobalPlanesCache,

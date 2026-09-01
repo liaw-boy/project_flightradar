@@ -271,6 +271,15 @@
     animation: photoFadeIn 0.2s ease-out;
 }
 
+/* airport-data.com fallback photos are low-res source images (no true
+   "large" variant exists); stretching them to fill the hero area with
+   object-fit:cover is what makes them look blurry. Showing them at their
+   native size instead avoids the upscale. */
+.aircraft-photo--lowres {
+    object-fit: contain;
+    background: var(--bg-2);
+}
+
 @keyframes photoFadeIn {
     from { opacity: 0; }
     to { opacity: 1; }

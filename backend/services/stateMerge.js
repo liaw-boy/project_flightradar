@@ -89,14 +89,30 @@ function mergeStates(states, strategy = 'upsert') {
             record.posTime = existing.posTime;
         }
 
+        // _lastSeen only proves "this icao24 was still in the upstream
+        // response" — an upstream feed that keeps re-reporting the same
+        // frozen coordinates (signal actually lost, but the source keeps
+        // listing the aircraft) refreshes _lastSeen forever, so the 90s TTL
+        // prune and the LSTM gap-fill trigger (both keyed on _lastSeen in
+        // broadcastEngine.js) never fire — the plane just sits frozen
+        // on-screen indefinitely. _posUpdatedAt only advances when posTime
+        // itself advances past what we last recorded, i.e. a genuinely new
+        // measurement arrived, not merely a repeated one.
+        const posAdvanced = !existing || existing.posTime == null || record.posTime == null
+            || record.posTime > existing.posTime;
+        const posUpdatedAt = posAdvanced ? now : (existing?._posUpdatedAt ?? now);
+
         if (strategy === 'merge') {
-            const merged = { ...existing, ...record, _lastSeen: now };
+            const merged = { ...existing, ...record, _lastSeen: now, _posUpdatedAt: posUpdatedAt };
             // Preserve richer metadata fields from existing if new record lacks them
             if (!p.description && existing?.description) merged.description = existing.description;
             if (!p.year        && existing?.year)        merged.year        = existing.year;
             if (!p.typecode    && existing?.typecode)    merged.typecode    = existing.typecode;
             if (!p.operator    && existing?.operator)    merged.operator    = existing.operator;
             if (!p.model       && existing?.model)       merged.model       = existing.model;
+            // A missing heading must not render as "nose due north" — carry
+            // the last known heading forward instead of letting it go null.
+            if (merged.heading == null && typeof existing?.heading === 'number') merged.heading = existing.heading;
             masterStateMap.set(p.icao24, merged);
         } else {
             // 'upsert' (Tier 1) previously replaced the whole record wholesale
@@ -110,10 +126,13 @@ function mergeStates(states, strategy = 'upsert') {
             // showed it. Position/telemetry fields still come wholesale from
             // the new record (that data must always be fresh); only these
             // enrichment-only fields carry forward.
-            const next = { ...record, _lastSeen: now };
+            const next = { ...record, _lastSeen: now, _posUpdatedAt: posUpdatedAt };
             if (!next.operator && existing?.operator) next.operator = existing.operator;
             if (!next.model    && existing?.model)    next.model    = existing.model;
             if (!isValidTypecode(next.typecode) && isValidTypecode(existing?.typecode)) next.typecode = existing.typecode;
+            // A missing heading must not render as "nose due north" — carry
+            // the last known heading forward instead of letting it go null.
+            if (next.heading == null && typeof existing?.heading === 'number') next.heading = existing.heading;
             masterStateMap.set(p.icao24, next);
         }
     }

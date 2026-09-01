@@ -53,19 +53,22 @@ describe('fetchGlobalBaseline total-outage alert', () => {
     test('alerts once total outage reaches the consecutive-cycle threshold', async () => {
         const { fetchGlobalBaseline } = makePollers();
 
-        await fetchGlobalBaseline();
-        await fetchGlobalBaseline();
+        // Threshold is 8 cycles (~40s) — raised from 3 (~15s) on 2026-09-01
+        // because 15s was shorter than OpenSky's own 30s fallback throttle
+        // (planeSources.js OPENSKY_FALLBACK_MIN_GAP_MS), so every normal gap
+        // between OpenSky's throttled attempts falsely tripped this alert.
+        for (let i = 0; i < 7; i++) await fetchGlobalBaseline();
         expect(errorSpy.mock.calls.filter(c => c[0] === 'ALERT')).toHaveLength(0);
 
-        await fetchGlobalBaseline(); // 3rd consecutive total-outage cycle — threshold
+        await fetchGlobalBaseline(); // 8th consecutive total-outage cycle — threshold
         const alerts = errorSpy.mock.calls.filter(c => c[0] === 'ALERT');
         expect(alerts).toHaveLength(1);
-        expect(alerts[0][1]).toMatch(/dark for 15s\+/);
+        expect(alerts[0][1]).toMatch(/dark for 40s\+/);
     });
 
     test('does not re-alert every cycle while the outage persists (throttled)', async () => {
         const { fetchGlobalBaseline } = makePollers();
-        for (let i = 0; i < 6; i++) await fetchGlobalBaseline();
+        for (let i = 0; i < 12; i++) await fetchGlobalBaseline(); // past the 8-cycle threshold, then some more
 
         const alerts = errorSpy.mock.calls.filter(c => c[0] === 'ALERT');
         expect(alerts).toHaveLength(1); // throttle window (5 min) hasn't elapsed

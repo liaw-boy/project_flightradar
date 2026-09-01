@@ -87,16 +87,18 @@ const MiniRouteMap = React.memo(function MiniRouteMap({ depInfo, arrInfo }) {
         [arrInfo.lat, adjArrLng],
     ], [depInfo.lat, depInfo.lng, arrInfo.lat, arrInfo.lng, adjArrLng]);
 
-    // [2026-08] CartoDB's free basemaps.cartocdn.com CDN now requires an API
-    // key — both variants use the same key-free OSM tile, dark is CSS-inverted
-    // below (see .mini-map-dark) instead of using a real dark tile source.
-    const tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    // Same Esri Canvas basemaps as the main map (MapView.jsx TILE_URLS /
+    // FilterPanel.jsx MAP_LAYERS) — was a separate OSM tile + CSS-filter
+    // approximation; unified so the sidebar preview visually matches the
+    // main map's style instead of looking like a different app.
+    const tileUrl = isDark
+        ? 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'
+        : 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}';
 
     if (!arcPoints.length) return null;
 
     return (
         <div
-            className={isDark ? 'mini-map-dark' : undefined}
             style={{ margin: '0 12px 12px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border)' }}
         >
             <MapContainer

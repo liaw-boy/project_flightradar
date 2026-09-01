@@ -35,7 +35,7 @@ const isValidTypecode = tc => typeof tc === 'string' && tc.length > 0 && !SIGNAL
 // Every other field (squawk, callsign, enrichment, isMil, ...) is always
 // allowed to update regardless of position freshness — only the "where is
 // it" component gets held back when it's suspect.
-const POSITION_FIELDS = ['lat', 'lng', 'heading', 'altitude', 'velocity', 'onGround'];
+const POSITION_FIELDS = ['lat', 'lng', 'heading', 'altitude', 'velocity', 'onGround', 'vRate'];
 
 function getDistance(lat1, lon1, lat2, lon2) {
     const R = 6371; // km

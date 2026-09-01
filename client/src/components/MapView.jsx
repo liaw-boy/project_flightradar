@@ -14,6 +14,8 @@ import AltitudeLegend from './AltitudeLegend';
 import {
     FR24_BASE_PX,
     haversineKm,
+    bearingDeg,
+    angleDiffDeg,
     vectorPathsMap,
     _enrichScheduled,
     measureCached,
@@ -24,6 +26,49 @@ import {
     getAircraftVectorKey,
 } from './mapViewUtils';
 
+
+// Phase 2 model-guided coasting (see animate() below) — capped short so a
+// stale prediction never coasts far, and a sanity distance guard against a
+// wild model output before it ever reaches the blend.
+//
+// [2026-08-31] Disabled by default. Root-caused two real bugs live on
+// production today: (1) landed/on-ground aircraft were still being fed
+// through a model trained exclusively on airborne data, extrapolating them
+// to nonsense positions; (2) even for airborne planes, per-prediction
+// direction noise (previously masked because the old, much-less-accurate
+// model almost never passed PHASE2_MAX_JUMP_KM, so this branch was near
+// -dormant) produced visible back-and-forth jitter once predictions started
+// actually being accepted. Checked tar1090 (the reference open-source ADS-B
+// web client this whole feeder ecosystem is built on) for comparison: it
+// does NOT extrapolate/guess position between updates at all — it just
+// holds the last real position and waits for the next one. That's the
+// proven, battle-tested behavior; re-enable this only after the model-blend
+// path has been independently validated to not reproduce those two bugs.
+const PHASE2_ENABLED = false;
+const PHASE2_BLEND_MS = 2000;
+const PHASE2_MAX_JUMP_KM = 3;
+
+// Automatic "stuck/zombie plane" reporter — fire-and-forget, best-effort.
+// Session-level dedup (not just per-plane _staleReported) caps total volume
+// even if many aircraft go stale in the same outage window.
+const _staleReportedThisSession = new Set();
+const STALE_REPORT_SESSION_CAP = 50;
+function reportStalePlane(plane, dataAgeSec) {
+    if (_staleReportedThisSession.size >= STALE_REPORT_SESSION_CAP) return;
+    _staleReportedThisSession.add(plane.icao24 + ':' + Math.floor(Date.now() / 60000));
+    fetch('/api/debug/stale-plane', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            icao24: plane.icao24,
+            callsign: plane.callsign || null,
+            lat: plane.lat, lng: plane.lng, heading: plane.heading,
+            onGround: !!plane.onGround,
+            lastContact: plane.lastContact || null,
+            dataAgeSec: Math.round(dataAgeSec),
+        }),
+    }).catch(() => { /* best-effort — never disrupt rendering over a logging beacon */ });
+}
 
 export default function MapView({
     planesDict,
@@ -218,10 +263,14 @@ export default function MapView({
         // 加入右下角的縮放按鈕
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        tileLayerRef.current = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '',
-        }).addTo(map);
+        // Placeholder tile matching the `mapLayer` default prop ('dark') — the
+        // mapLayer effect below immediately sets the real URL/zoom for
+        // whatever style is actually selected, this just avoids a flash of
+        // the wrong style before that effect runs.
+        tileLayerRef.current = L.tileLayer(
+            'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+            { maxZoom: 19, attribution: '' }
+        ).addTo(map);
 
         // 初始 bounds
         setBounds(map.getBounds());
@@ -533,13 +582,14 @@ export default function MapView({
         if (!map) return;
         // [2026-08] CartoDB's free basemaps.cartocdn.com CDN now requires an
         // API key (unauthenticated requests return an "API KEY REQUIRED"
-        // placeholder tile) — light/dark/street moved to key-free providers.
-        // Dark has no free no-key raster source, so it reuses the OSM tiles
-        // and gets a CSS invert filter (see the .map-tiles-dark rule toggled
-        // below) to approximate the old CartoDB dark_all look.
+        // placeholder tile). Light/Dark moved to Esri's key-free Canvas
+        // basemaps (World_Light_Gray_Base / World_Dark_Gray_Base) — genuinely
+        // distinct grayscale/dark cartography from the same arcgisonline.com
+        // host already used (and CSP-allowlisted) for Satellite below, so no
+        // CSS filter approximation is needed anymore. Street moved to CyclOSM.
         const TILE_URLS = {
-            light: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            dark: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            light: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+            dark: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
             satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             street: 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
             terrain: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
@@ -552,16 +602,16 @@ export default function MapView({
         // high zoom, Terrain-only. maxNativeZoom (not maxZoom) is the right
         // knob — it tells Leaflet to stop requesting past that level and
         // instead upscale the last real tile, so the user can still zoom in
-        // smoothly instead of hitting a hard wall or broken tiles.
+        // smoothly instead of hitting a hard wall or broken tiles. Esri's
+        // Canvas basemaps' documented LOD range tops out at 16.
         const TILE_MAX_NATIVE_ZOOM = {
-            light: 19, dark: 19, satellite: 19, street: 20, terrain: 17,
+            light: 16, dark: 16, satellite: 19, street: 20, terrain: 17,
         };
         const url = TILE_URLS[mapLayer] || TILE_URLS.light;
         if (tileLayerRef.current) {
             tileLayerRef.current.options.maxNativeZoom = TILE_MAX_NATIVE_ZOOM[mapLayer] || 19;
             tileLayerRef.current.setUrl(url);
         }
-        map.getContainer().classList.toggle('map-tiles-dark', mapLayer === 'dark');
     }, [mapLayer]);
 
     // [v3.0] Track mode: update ref so animation loop sees latest value
@@ -848,15 +898,21 @@ export default function MapView({
                     prewarmExactSvg(activeTypecode);
                 }
 
-                // === Snapshot Interpolation v1.0 ===
+                // === Snapshot Interpolation v2.0 ===
                 // Phase 1 (t: 0→1): linear interpolation between two known ADS-B positions.
                 //   - No heading field used → no 1° quantization wobble
                 //   - t is monotonically increasing → plane never goes backward
                 //   - Direction derived from coordinate difference → exact, not noisy
                 //
-                // Phase 2 (t > 1): gentle continuation in the A→B direction while waiting
-                //   for the next API update. Uses measured velocity vector from coordinates,
-                //   not the ADS-B heading field.
+                // Phase 2 (t > 1): model-guided coasting toward the LSTM's predicted
+                //   next position (backend/services/broadcastEngine.js, computed from
+                //   real velocity/heading/altitude history — NOT client-side constant-
+                //   velocity extrapolation; that was tried and reverted because it
+                //   overshot the actual path and snapped back when the next real point
+                //   arrived behind it, see git history). The blend always starts from
+                //   the icon's actual current on-screen position (never from the old
+                //   target), so even a bad prediction only ever produces one continuous
+                //   correction, never a jump-then-reverse.
                 {
                     const fromLat = plane._interpFromLat ?? plane.lat;
                     const fromLng = plane._interpFromLng ?? plane.lng;
@@ -871,13 +927,56 @@ export default function MapView({
                         const t = elapsed / durMs;
                         plane.renderLat = fromLat + (toLat - fromLat) * t;
                         plane.renderLng = fromLng + (toLng - fromLng) * t;
+                        // Phase 2 state resets each time Phase 1 restarts, so the next
+                        // Phase 2 entry always blends from wherever Phase 1 left the icon.
+                        plane._phase2Active = false;
                     } else {
-                        // Lerp complete — hold at the confirmed ADS-B position.
-                        // Dead reckoning / extrapolation removed: it caused the icon to
-                        // overshoot the actual path, then snap backward when the next real
-                        // ADS-B position arrived behind the predicted point.
-                        plane.renderLat = toLat;
-                        plane.renderLng = toLng;
+                        const predLat = plane.predictedLat;
+                        const predLng = plane.predictedLng;
+                        const hasPrediction = typeof predLat === 'number' && typeof predLng === 'number';
+                        // Distance alone isn't enough of a guard: a prediction that's
+                        // "close" in km but points opposite the plane's real heading
+                        // still looks visibly wrong (plane briefly reversing before
+                        // the next real point corrects it). Reject anything more than
+                        // 90° off heading — this was silently near-dormant before the
+                        // model's accuracy fix (predictions almost never passed the km
+                        // check), so the direction check hadn't been needed until now.
+                        const predDistOk = hasPrediction &&
+                            haversineKm(toLat, toLng, predLat, predLng) < PHASE2_MAX_JUMP_KM;
+                        const predDirOk = predDistOk && (
+                            typeof plane.heading !== 'number' ||
+                            haversineKm(toLat, toLng, predLat, predLng) < 0.05 || // too short to have a meaningful bearing
+                            Math.abs(angleDiffDeg(plane.heading, bearingDeg(toLat, toLng, predLat, predLng))) < 90
+                        );
+                        const sane = PHASE2_ENABLED && predDistOk && predDirOk;
+
+                        if (!sane) {
+                            // No usable prediction (model service down, buffer not full
+                            // yet, or a wild output) — hold at the last confirmed
+                            // position, same as before this feature existed.
+                            plane.renderLat = toLat;
+                            plane.renderLng = toLng;
+                            plane._phase2Active = false;
+                        } else {
+                            // (Re)target the blend on first Phase 2 entry, or whenever the
+                            // model's prediction has moved meaningfully — always restarting
+                            // FROM the icon's current on-screen position.
+                            const targetMoved = !plane._phase2Active ||
+                                Math.abs((plane._phase2ToLat ?? predLat) - predLat) > 0.0001 ||
+                                Math.abs((plane._phase2ToLng ?? predLng) - predLng) > 0.0001;
+                            if (targetMoved) {
+                                plane._phase2FromLat = plane.renderLat ?? toLat;
+                                plane._phase2FromLng = plane.renderLng ?? toLng;
+                                plane._phase2ToLat = predLat;
+                                plane._phase2ToLng = predLng;
+                                plane._phase2StartMs = nowDateMs;
+                                plane._phase2Active = true;
+                            }
+                            const p2Elapsed = nowDateMs - plane._phase2StartMs;
+                            const p2T = Math.min(1, p2Elapsed / PHASE2_BLEND_MS);
+                            plane.renderLat = plane._phase2FromLat + (plane._phase2ToLat - plane._phase2FromLat) * p2T;
+                            plane.renderLng = plane._phase2FromLng + (plane._phase2ToLng - plane._phase2FromLng) * p2T;
+                        }
                     }
                 }
             });
@@ -941,18 +1040,30 @@ export default function MapView({
                     const livePathLng = livePlane?.renderLng ?? livePlane?.lng;
 
                     // Cap DR trail extension based on flight phase:
-                    //   On ground / very slow (<50 m/s / 97kt)          → 60s
-                    //   Landing phase: alt < 600m AND vRate < -150 fpm  → 45s
+                    //   On ground / very slow (<50 m/s / 97kt)          → 90s
+                    //   Landing phase: alt < 600m AND vRate < -150 fpm  → 90s
                     //   Approach: alt < 1500m                           → 120s
                     //   Normal cruise                                   → 600s
+                    // [2026-09-01] Ground/landing were 60s/45s — BELOW the 60s
+                    // heartbeat trackIngest.js guarantees between stored track
+                    // points (services/trackIngest.js's "meaningful change"
+                    // throttle forces a write at least every 60s even with zero
+                    // movement). That meant the live extension could — and, per
+                    // live capture during a real landing, DID — detach on every
+                    // completely normal slow/landing sequence, no network issue
+                    // needed. Raised both to 90s, matching PLANE_TTL_MS
+                    // (services/broadcastEngine.js) — the same horizon the
+                    // backend already uses as "this plane is genuinely gone",
+                    // so the trail only detaches when the plane itself would
+                    // already be pruned, never from a normal heartbeat gap.
                     const vel = livePlane.velocity ?? 0;
                     const alt = livePlane.altitude ?? 99999;
                     const vRate = livePlane.vRate ?? 0;
                     const isSlowOrGround = livePlane.onGround || vel < 50;
                     const isLanding = !livePlane.onGround && alt < 600 && vRate < -150;
                     const isApproach = !livePlane.onGround && alt < 1500;
-                    const liveExtCap = isSlowOrGround ? 60
-                                     : isLanding      ? 45
+                    const liveExtCap = isSlowOrGround ? 90
+                                     : isLanding      ? 90
                                      : isApproach     ? 120
                                      :                  600;
                     if (livePathLat && livePathLng && gapSec < liveExtCap) {
@@ -1323,6 +1434,23 @@ export default function MapView({
                     let opacity = 1.0;
                     if (dataAge > 60) opacity = 0.4;
                     else if (dataAge > 30) opacity = 0.7;
+
+                    // Automatic "stuck/zombie plane" detection (2026-09-01) —
+                    // previously this class of bug (a plane visibly frozen on
+                    // screen, e.g. heading stuck due north, well past its real
+                    // last update) could only be caught if a user happened to
+                    // screenshot it live; by the time it's investigated the
+                    // 90s TTL has usually already pruned it server-side,
+                    // leaving nothing to inspect. Report once per stale
+                    // episode — well before the 90s prune — so occurrences
+                    // get logged server-side automatically instead of relying
+                    // on a human catching it in the act.
+                    if (dataAge > 45 && !plane._staleReported) {
+                        plane._staleReported = true;
+                        reportStalePlane(plane, dataAge);
+                    } else if (dataAge < 30) {
+                        plane._staleReported = false; // real update arrived — allow re-report if it goes stale again
+                    }
 
                     // [Phase 15] Focus Mode Dimming
                     if (currentSelected && !isSelected) {

@@ -23,6 +23,7 @@ const {
 const { getActiveViewports, getClientCount } = require('../socketEngine');
 const Aircraft = require('../db/aircraftStore');
 const MictronicsDb = require('../db/mictronicsDb');
+const { notifyDiscord } = require('./discordNotifier');
 
 function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingestTrackPoints, triggerBackgroundResolution }) {
 
@@ -38,7 +39,19 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
     // throttled alert once that's been true for several consecutive cycles, so
     // it's visible without a human having to notice the map went stale.
     let _consecutiveTotalOutageCycles = 0;
-    const TOTAL_OUTAGE_ALERT_THRESHOLD = 3;       // ~15s of zero data at the 5s poll interval
+    // [2026-09-01] Was 3 (~15s) — SHORTER than planeSources.js's own
+    // OPENSKY_FALLBACK_MIN_GAP_MS (30s), the deliberate throttle on how often
+    // the last-resort fallback is even allowed to try. Whenever adsb.lol AND
+    // adsb.fi are both circuit-broken at the same time (their own cooldowns
+    // are independent of this poll loop), every cycle in between OpenSky's
+    // once-per-30s attempts legitimately reports "all sources failed" — that
+    // is the system working as designed, not a real outage, but a 15s
+    // threshold fired a false "total outage" alert on every single one of
+    // those normal throttle gaps. Raised to 8 (~40s) — safely past one full
+    // OpenSky throttle window (30s) plus its own request latency (~1-2s
+    // observed) — so this only fires when OpenSky's own scheduled attempt
+    // ALSO failed to recover the map, a genuine outage.
+    const TOTAL_OUTAGE_ALERT_THRESHOLD = 8;       // ~40s of zero data at the 5s poll interval
     const TOTAL_OUTAGE_ALERT_THROTTLE_MS = 5 * 60_000; // re-announce at most once per 5 min while it persists
     let _lastTotalOutageAlertAt = 0;
 
@@ -78,7 +91,15 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
                 const msg = lolR.reason?.message || '';
                 if (msg === 'CB open') logSuppressedSource('adsb.lol');
                 else {
-                    if (msg.includes('429') || msg.includes('503')) cbTrip('adsb.lol');
+                    // Trip on ANY failure, not just explicit 429/503 — a network-level
+                    // timeout ("fetch failed" / "operation was aborted") never carries
+                    // an HTTP status, so it fell through this check entirely and the
+                    // 5s poll kept hammering a host that wasn't responding at all,
+                    // which is the worst thing to do to a host that may be silently
+                    // rate-limiting/blocking this IP. cbTrip's exponential backoff
+                    // (circuitBreaker.js) means occasional single hiccups still only
+                    // cost 5 minutes; only a sustained outage backs off further.
+                    cbTrip('adsb.lol');
                     logger.warn('SYNC', `adsb.lol failed: ${msg}`);
                 }
             }
@@ -122,9 +143,24 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
                         _lastTotalOutageAlertAt = now;
                         const outageSec = _consecutiveTotalOutageCycles * 5;
                         logger.error('ALERT', `Global baseline dark for ${outageSec}s+ — adsb.lol, adsb.fi-snap, AND OpenSky fallback all failed this cycle. Map is serving stale data.`);
+                        notifyDiscord({
+                            icon: 'outageDown', color: 'orange',
+                            title: 'AEROSTRAT 資料來源全滅',
+                            description: `adsb.lol、adsb.fi-snap、OpenSky 三個來源同一輪都失敗，已持續 **${outageSec} 秒**以上，地圖目前在用舊快取撐著（stale）。\n（每 5 分鐘最多重複提醒一次，直到恢復為止）`,
+                        }, 'DISCORD_OUTAGE_WEBHOOK_URL');
                     }
                 }
                 return;
+            }
+            if (_consecutiveTotalOutageCycles >= TOTAL_OUTAGE_ALERT_THRESHOLD) {
+                // Was down long enough to have alerted — announce recovery too,
+                // so the channel isn't just a one-way stream of bad news.
+                const outageSec = _consecutiveTotalOutageCycles * 5;
+                notifyDiscord({
+                    icon: 'outageUp', color: 'green',
+                    title: 'AEROSTRAT 資料來源已恢復',
+                    description: `先前中斷約 **${outageSec} 秒**，目前來源: ${source}`,
+                }, 'DISCORD_OUTAGE_WEBHOOK_URL');
             }
             _consecutiveTotalOutageCycles = 0;
 

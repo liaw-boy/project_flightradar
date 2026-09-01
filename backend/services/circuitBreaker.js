@@ -5,15 +5,24 @@
 const logger = require('../logger');
 const { sourceHealth } = require('../state/appState');
 
-const SOURCE_CB_MS = 5 * 60_000;  // 5 min backoff on 429/503
+const SOURCE_CB_MS = 5 * 60_000;      // base backoff (also the explicit-ms default)
+const SOURCE_CB_MAX_MS = 30 * 60_000; // cap so a chronic outage doesn't lock a source out for hours
 
 const cbOpen  = k => (sourceHealth[k]?.cbUntil || 0) > Date.now();
 
-const cbTrip  = (k, ms = SOURCE_CB_MS) => {
+// ms: explicit override (e.g. a known long-lived block like a 403 ban).
+// Omitted -> exponential backoff from consecutiveFails (5m, 10m, 20m, capped
+// at 30m), so a source that keeps failing every single cycle gets backed off
+// progressively instead of being retried at the same fixed cadence forever —
+// hammering a host that's already timing out on every request risks making
+// an upstream anti-abuse block worse, not better.
+const cbTrip  = (k, ms) => {
+    const consecutiveFails = (sourceHealth[k]?.consecutiveFails || 0) + 1;
+    const backoffMs = ms ?? Math.min(SOURCE_CB_MS * (2 ** (consecutiveFails - 1)), SOURCE_CB_MAX_MS);
     sourceHealth[k] = {
         ...sourceHealth[k],
-        cbUntil: Date.now() + ms,
-        consecutiveFails: (sourceHealth[k]?.consecutiveFails || 0) + 1,
+        cbUntil: Date.now() + backoffMs,
+        consecutiveFails,
     };
 };
 

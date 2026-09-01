@@ -193,7 +193,8 @@ export default function Sidebar({
                 if (!active) return;
                 const formatted = (results || []).slice(0, 1).map(p => ({
                     url: p.thumbnail_large?.src || p.thumbnail?.src || p.link || null,
-                    photographer: p.photographer || 'Planespotters.net'
+                    photographer: p.photographer || 'Planespotters.net',
+                    lowRes: !!p.lowRes
                 })).filter(h => h.url);
                 setPhotos(formatted);
                 setCurrentPhotoIdx(0);
@@ -231,7 +232,8 @@ export default function Sidebar({
                 if (!active) return;
                 const formatted = (results || []).slice(0, 1).map(p => ({
                     url: p.thumbnail_large?.src || p.thumbnail?.src || p.link || null,
-                    photographer: p.photographer || 'Planespotters.net'
+                    photographer: p.photographer || 'Planespotters.net',
+                    lowRes: !!p.lowRes
                 })).filter(h => h.url);
                 if (formatted.length > 0) {
                     setPhotos(formatted);
@@ -401,7 +403,7 @@ export default function Sidebar({
                                         key={activePhoto.url} 
                                         src={activePhoto.url} 
                                         alt={aircraftModel} 
-                                        className={`aircraft-photo ${isImageLoaded ? 'fade-in' : 'loading-hidden'}`}
+                                        className={`aircraft-photo ${isImageLoaded ? 'fade-in' : 'loading-hidden'} ${activePhoto.lowRes ? 'aircraft-photo--lowres' : ''}`}
                                         onLoad={() => {
                                             setIsImageLoaded(true);
                                             setPrevPhotoUrl(activePhoto.url); // [v6.9] Update backdrop only on success

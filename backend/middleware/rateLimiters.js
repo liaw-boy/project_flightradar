@@ -8,7 +8,11 @@ const apiLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please wait a moment.' },
-    skip: (req) => ['/api/events', '/api/flights/live', '/api/flight-details'].some(p => req.path.startsWith(p)),
+    // /api/flight-details was removed from this skip-list: it fans out to 5
+    // external services including a paid AeroDataBox subscription and was
+    // previously exempt from ALL rate limiting — see fusionLimiter below,
+    // which is now applied to it in server.js.
+    skip: (req) => ['/api/events', '/api/flights/live'].some(p => req.path.startsWith(p)),
 });
 
 // Strict limiter for expensive fusion endpoints (fan out to 5 external APIs)

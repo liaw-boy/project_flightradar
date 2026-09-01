@@ -226,6 +226,7 @@ registerAirlineAssetRoutes(app, __dirname);
 
 app.use('/api', apiLimiter);
 app.use('/api/flight/complete-details', fusionLimiter);
+app.use('/api/flight-details', fusionLimiter);
 app.use('/api/lookup', lookupLimiter);
 app.use(cookieParser());
 app.use(express.json());
@@ -514,6 +515,13 @@ app.get('/api/flights/live', async (req, res) => {
 app.get('/api/flight-details/:hex/:callsign', async (req, res) => {
     const hex = req.params.hex.toLowerCase();
     const callsign = req.params.callsign.toUpperCase().trim();
+    // isValidIcao24 is a hoisted function declaration (defined further down
+    // this file) — safe to call here. Without this check, an attacker could
+    // hit this route with unlimited distinct hex/callsign pairs to defeat
+    // the cache (keyed by hex) and burn the paid AeroDataBox quota + hammer
+    // hexdb.io/planespotters.net on every single request.
+    if (!isValidIcao24(hex)) return res.status(400).json({ error: 'Invalid ICAO24 format' });
+    if (!/^[A-Z0-9]{2,8}$/.test(callsign)) return res.status(400).json({ error: 'Invalid callsign format' });
     const cacheKey = `details_${hex}`;
 
     // 1. Memory Cache Check
@@ -531,17 +539,17 @@ app.get('/api/flight-details/:hex/:callsign', async (req, res) => {
         fetchOpenSky({ icao24: hex }).catch(() => null),
         
         // b. [Route Supplement] Using AeroDataBox as Route API fallback
-        fetch(`https://aerodatabox.p.rapidapi.com/flights/callsign/${callsign}`, {
+        fetch(`https://aerodatabox.p.rapidapi.com/flights/callsign/${encodeURIComponent(callsign)}`, {
             headers: { 'X-RapidAPI-Key': process.env.AERODATABOX_API_KEY, 'X-RapidAPI-Host': 'aerodatabox.p.rapidapi.com' },
             signal: AbortSignal.timeout(4000)
         }).then(r => r.ok ? r.json() : null).catch(() => null),
-        
+
         // c. [Static Metadata] HexDB
-        fetch(`https://hexdb.io/api/v1/aircraft/${hex}`, { signal: AbortSignal.timeout(3000) })
+        fetch(`https://hexdb.io/api/v1/aircraft/${encodeURIComponent(hex)}`, { signal: AbortSignal.timeout(3000) })
             .then(r => r.ok ? r.json() : null).catch(() => null),
-            
+
         // d. [Photos] Planespotters
-        fetch(`https://api.planespotters.net/pub/photos/hex/${hex}`, {
+        fetch(`https://api.planespotters.net/pub/photos/hex/${encodeURIComponent(hex)}`, {
             headers: { 'User-Agent': 'AEROSTRAT/5.0' },
             signal: AbortSignal.timeout(4000)
         }).then(r => r.ok ? r.json() : null).catch(() => null),
@@ -1051,6 +1059,54 @@ app.get('/monitor/api/db-status', requireMonitorAuth, (req, res) => {
     });
 });
 
+// Stage 1 of the Phase-2 re-enablement plan (see
+// ~/.claude/plans/lively-spinning-stream.md) — a pure read-only accuracy
+// view over prediction_log, segmented by steps_ahead (prediction horizon).
+// This is the judgment call data for deciding which horizon range, if any,
+// is trustworthy enough to re-enable for display; it does not itself touch
+// any display logic.
+app.get('/monitor/api/prediction-accuracy', requireMonitorAuth, (req, res) => {
+    const sqliteDb = require('./db/sqlite');
+    const now = Math.floor(Date.now() / 1000);
+    const windows = { '24h': now - 86400, '7d': now - 7 * 86400 };
+    const result = {};
+    try {
+        for (const [label, cutoff] of Object.entries(windows)) {
+            const groups = sqliteDb.prepare(`
+                SELECT steps_ahead, COUNT(*) as n, AVG(error_km) as avg_err
+                FROM prediction_log
+                WHERE ts > ? AND steps_ahead IS NOT NULL
+                GROUP BY steps_ahead
+                ORDER BY steps_ahead
+            `).all(cutoff);
+            result[label] = groups.map(g => {
+                // Sample the most recent rows in this bucket rather than
+                // scanning the whole window (could be tens of millions of
+                // rows over 7 days) — good enough for an ops-dashboard
+                // percentile estimate, not a precise statistical claim.
+                const sample = sqliteDb.prepare(`
+                    SELECT error_km FROM prediction_log
+                    WHERE ts > ? AND steps_ahead = ?
+                    ORDER BY id DESC LIMIT 3000
+                `).all(cutoff, g.steps_ahead).map(r => r.error_km).sort((a, b) => a - b);
+                const pct = p => sample.length ? sample[Math.min(sample.length - 1, Math.floor(sample.length * p))] : null;
+                return {
+                    stepsAhead: g.steps_ahead,
+                    horizonSec: g.steps_ahead * 5, // must match ml_trajectory/dataset.py's RESAMPLE_DT_S
+                    count: g.n,
+                    avgKm: g.avg_err,
+                    p50Km: pct(0.5),
+                    p90Km: pct(0.9),
+                    p99Km: pct(0.99),
+                };
+            });
+        }
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // ==========================================
 // API 請求計數器
 // ==========================================
@@ -1067,6 +1123,19 @@ var apiStats = {
     // accounts 動態從 pool 讀取，不再在此儲存
     get accounts() { return accountPool.getStats(); },
 };
+
+// /api/planes/bbox is the site's highest-traffic, fully public, unauthenticated
+// endpoint — serving raw apiStats there exposed each OpenSky account's real
+// username alongside its credit balance/fail counts to any visitor (devtools
+// on the response). The /monitor dashboard (behind requireMonitorAuth) still
+// gets the real usernames via apiStats.accounts directly; this redacted copy
+// is only for the public bbox HUD, which only needs credit/health numbers.
+function publicApiStats() {
+    return {
+        ...apiStats,
+        accounts: accountPool.getStats().map((a, i) => ({ ...a, user: `account-${i + 1}` })),
+    };
+}
 
 // calculateRecommendedInterval 委派給 accountPool（保留名稱供舊呼叫點使用）
 function calculateRecommendedInterval() {
@@ -1161,7 +1230,7 @@ function isPlausibleRoute(groundAirport, depCode, arrCode) {
 }
 
 const { createPlaneSources } = require('./services/planeSources');
-const { fetchOpenSky, fetchOpenSkyBaselineFallback, normalizeAcRecord, fetchAirplanesLive, fetchAdsbFi } = createPlaneSources({
+const { fetchOpenSky, fetchOpenSkyBaselineFallback, normalizeAcRecord } = createPlaneSources({
     accountPool, apiStats, cbOpen, cbTrip, cbReset, logSuppressedSource, logger, backendDir: __dirname,
 });
 
@@ -1244,6 +1313,29 @@ const isFreshQuota = accountPool.loadCache(QUOTA_CACHE_FILE);
     setTimeout(fetchSpecialCategories, 3_000);
 })();
 
+// Automatic "stuck/zombie plane" diagnostic beacon (2026-09-01) — see
+// MapView.jsx's reportStalePlane(). Client-side detector fires when a plane
+// has been rendered on screen for >45s with no real backend update (well
+// before the 90s TTL prune), so occurrences get logged here automatically
+// instead of relying on a user happening to screenshot it live. Public,
+// unauthenticated, and already covered by the global apiLimiter — validate
+// input defensively since it's client-supplied.
+app.post('/api/debug/stale-plane', (req, res) => {
+    const b = req.body || {};
+    const icao24 = typeof b.icao24 === 'string' ? b.icao24.slice(0, 10) : null;
+    if (!icao24 || !isValidIcao24(icao24)) return res.status(400).json({ error: 'invalid icao24' });
+    const num = v => (typeof v === 'number' && Number.isFinite(v)) ? v : null;
+    logger.warn('STALE-PLANE', JSON.stringify({
+        icao24,
+        callsign: typeof b.callsign === 'string' ? b.callsign.slice(0, 12) : null,
+        lat: num(b.lat), lng: num(b.lng), heading: num(b.heading),
+        onGround: !!b.onGround,
+        lastContact: num(b.lastContact),
+        dataAgeSec: num(b.dataAgeSec),
+    }));
+    res.status(204).end();
+});
+
 // [Surgical Patch] 極簡化 BBox 路由：整合 Aircraft store 飛機情報融合
 app.get('/api/planes/bbox', async (req, res) => {
     const { lamin, lomin, lamax, lomax } = req.query;
@@ -1277,7 +1369,7 @@ app.get('/api/planes/bbox', async (req, res) => {
         states: planesInBBox,
         source: 'global_cache_prestitched',
         stale: !!getGlobalPlanesCache().stale,
-        stats: apiStats // [v4.3.6] Restore API stats for HUD synchronization
+        stats: publicApiStats() // [v4.3.6] Restore API stats for HUD synchronization — redacted, see publicApiStats()
     });
 });
 
@@ -1351,6 +1443,32 @@ try {
 }
 
 // [REMOVED] saveMetadataCache is no longer needed with the Aircraft store
+
+// Single-aircraft position lookup, backed directly by the live fusion
+// engine's masterStateMap — used by the frontend's `?icao=` deep-link
+// handler (App.jsx handleMapReady) to pan the map to a plane that may be
+// outside the current viewport before it can appear via /api/planes/bbox.
+// Previously this used /api/flights/live, a legacy endpoint that calls
+// OpenSky directly instead of reading the same adsb.lol-backed state
+// everything else uses — when the OpenSky account pool's daily quota runs
+// out (a real, observed condition), that endpoint silently returns nothing
+// and the deep link just never navigates. This endpoint has no external
+// API dependency at all — it's a plain in-memory Map read.
+// isValidIcao24() (hex-only, fixed length) guards against this route ever
+// shadowing a differently-named /api/planes/* route registered later, the
+// way an earlier version of this route (registered before /api/planes/bbox,
+// with no format check) briefly did in production — Express matches routes
+// in registration order, and an unconstrained `:icao24` param matches ANY
+// path segment, including the literal word "bbox".
+app.get('/api/planes/:icao24', (req, res) => {
+    const icao24 = req.params.icao24.toLowerCase();
+    if (!isValidIcao24(icao24)) return res.status(404).json({ found: false });
+    const p = masterStateMap.get(icao24);
+    if (!p || typeof p.lat !== 'number' || typeof p.lng !== 'number') {
+        return res.status(404).json({ found: false });
+    }
+    res.json({ found: true, icao24, lat: p.lat, lng: p.lng, callsign: p.callsign || null });
+});
 
 app.get('/api/metadata/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
@@ -1850,12 +1968,21 @@ app.get('/api/photos/:icao24', async (req, res) => {
                     if (adData.status === 200 && Array.isArray(adData.data)) {
                         for (const p of adData.data) {
                             if (!p.image) continue;
+                            // airport-data.com's endpoint is explicitly named "ac_thumb" —
+                            // it only ever returns one low-res thumbnail, never a full-size
+                            // photo. Previously this got written into thumbnail_large too,
+                            // so the frontend (which always prefers thumbnail_large) ended
+                            // up displaying this thumbnail scaled up to hero-photo size,
+                            // which is what actually produced the reported blurriness —
+                            // not a frontend bug, a mislabeled resolution from this source.
+                            // lowRes lets the frontend size/handle it appropriately instead
+                            // of upscaling a thumbnail as if it were full resolution.
                             freshPhotos.push({
-                                thumbnail:       { src: p.image },
-                                thumbnail_large: { src: p.image },
+                                thumbnail: { src: p.image },
                                 photographer: p.photographer || 'airport-data.com',
                                 link: p.link || p.image,
-                                source: 'airport-data'
+                                source: 'airport-data',
+                                lowRes: true,
                             });
                         }
                     }
@@ -1874,7 +2001,12 @@ app.get('/api/photos/:icao24', async (req, res) => {
             if (url && !seenUrls.has(url)) {
                 finalPhotos.push({
                     thumbnail: { src: p.thumbnail?.src || url },
-                    thumbnail_large: { src: url },
+                    // Carry lowRes through instead of always relabeling the URL as
+                    // "large" — a source that only ever provides a thumbnail (see
+                    // the airport-data.com branch above) shouldn't have that
+                    // thumbnail presented to the frontend as full resolution.
+                    thumbnail_large: p.lowRes ? undefined : { src: url },
+                    lowRes: !!p.lowRes,
                     photographer: p.photographer,
                     link: p.link,
                     source: p.source || 'api'
@@ -2842,6 +2974,68 @@ cron.schedule('17 3 * * 0', () => {
             logger.error('MICT', `Weekly sync failed: ${e.message}`);
             syncLog.fail('mictronics', e.message);
         });
+}, { timezone: 'Asia/Taipei' });
+
+const { notifyDiscord } = require('./services/discordNotifier');
+
+// ── Trajectory Predictor Retraining (nightly, 04:30 Taiwan time) ──
+// Champion/challenger: trains a candidate LSTM on the latest aerostrat.db
+// track history and only overwrites artifacts/model.pt if it beats the
+// currently-deployed model's km-error on a held-out set by more than the
+// promotion threshold (ml_trajectory/retrain_and_promote.py). The predictor
+// service (infer_server.py) polls model.pt's mtime and hot-reloads a
+// promotion within a minute — no restart needed here.
+cron.schedule('30 4 * * *', () => {
+    const { execFile } = require('child_process');
+    const trajectoryDir = path.join(__dirname, 'ml_trajectory');
+    const pythonBin = path.join(trajectoryDir, '.venv', 'bin', 'python');
+    logger.info('TRAJECTORY', 'Nightly retrain starting...');
+    syncLog.start('trajectory-retrain');
+    execFile(pythonBin, ['retrain_and_promote.py', '--use-prediction-log'], {
+        cwd: trajectoryDir,
+        timeout: 30 * 60_000, // generous cap — a slow night shouldn't overlap tomorrow's run
+        maxBuffer: 10 * 1024 * 1024,
+    }, (err, stdout, stderr) => {
+        if (err) {
+            logger.error('TRAJECTORY', `Nightly retrain failed: ${err.message}`);
+            syncLog.fail('trajectory-retrain', err.message);
+            notifyDiscord({
+                icon: 'failed', color: 'red',
+                title: 'AEROSTRAT 航跡模型訓練失敗',
+                description: `\`\`\`${err.message.slice(0, 500)}\`\`\``,
+            });
+            return;
+        }
+        // Script's own final line is the JSON result object (see retrain_and_promote.py).
+        const lastLine = stdout.trim().split('\n').pop() || '';
+        let summary = lastLine;
+        let embed = {
+            icon: 'failed', color: 'gray',
+            title: 'AEROSTRAT 航跡模型訓練完成（輸出格式異常，無法解析）',
+            description: `\`\`\`${lastLine.slice(0, 500)}\`\`\``,
+        };
+        try {
+            const result = JSON.parse(lastLine);
+            summary = result.promoted
+                ? `promoted — candidate ${result.candidate_km_error?.toFixed(1)}km vs champion ${result.champion_km_error?.toFixed(1)}km`
+                : `rejected — candidate ${result.candidate_km_error?.toFixed(1)}km did not beat champion`;
+            embed = result.promoted
+                ? {
+                    icon: 'promoted', color: 'green',
+                    title: 'AEROSTRAT 航跡模型訓練 — 已晉升新模型',
+                    description: `candidate: **${result.candidate_km_error?.toFixed(1)}km**　champion(舊): ${result.champion_km_error?.toFixed(1) ?? 'N/A'}km\n` +
+                        `改善: **${result.improvement_pct?.toFixed(1) ?? 'N/A'}%**\nsessions: ${result.sessions}　windows: ${result.windows}`,
+                }
+                : {
+                    icon: 'rejected', color: 'gray',
+                    title: 'AEROSTRAT 航跡模型訓練 — 候選未達門檻，維持現有模型',
+                    description: `candidate: ${result.candidate_km_error?.toFixed(1)}km　champion: ${result.champion_km_error?.toFixed(1) ?? 'N/A'}km`,
+                };
+        } catch (_) { /* fall back to raw last line if output shape changes */ }
+        logger.info('TRAJECTORY', `Nightly retrain done — ${summary}`);
+        syncLog.success('trajectory-retrain', summary);
+        notifyDiscord(embed);
+    });
 }, { timezone: 'Asia/Taipei' });
 
 // On startup: mark schedules_static as always ok (static file, loaded at boot)

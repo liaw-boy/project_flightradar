@@ -19,9 +19,17 @@ function createPlaneSources({ accountPool, apiStats, cbOpen, cbTrip, cbReset, lo
             url += `?lamin=${params.lamin}&lomin=${params.lomin}&lamax=${params.lamax}&lomax=${params.lomax}`;
         }
 
+        // Was 30s — real-world OpenSky response times of 15-40s meant a single
+        // slow call could stall the whole 5s poll loop (this is the fallback
+        // of last resort when adsb.lol AND adsb.fi are both already down, so
+        // a long stall here shows up as visible "map is stale" gaps). The
+        // call-rate throttle (OPENSKY_FALLBACK_MIN_GAP_MS, independent of this
+        // value) already caps how often we hit OpenSky, so failing faster
+        // here does not burn extra quota — it just stops us waiting as long
+        // on a call that was going to fail or arrive too late to matter.
         const response = await fetch(url, {
             headers,
-            signal: AbortSignal.timeout(30000)
+            signal: AbortSignal.timeout(8000)
         });
 
         accountPool.recordResponse(account, response.status, response.headers);
@@ -55,6 +63,16 @@ function createPlaneSources({ accountPool, apiStats, cbOpen, cbTrip, cbReset, lo
     const OPENSKY_FALLBACK_MIN_GAP_MS = 30_000;
     let _lastOpenSkyFallbackAt = 0;
 
+    // OpenSky's credit cost is a function of bbox area: <=25deg2 => 1 credit,
+    // 25-100 => 2, 100-400 => 3, >400 (this includes "no bbox" == whole
+    // globe) => 4. Any region actually called "Asia" is already >400deg2, so
+    // scoping to Asia would NOT reduce cost below the global rate — this box
+    // is deliberately country-sized (Taiwan + Japan/Korea south tip + South
+    // China + N. Philippines + Indochina, ~350deg2) to land in the 3-credit
+    // tier instead of 4, while still covering the region this site's traffic
+    // actually cares about.
+    const OPENSKY_FALLBACK_BBOX = { lamin: 17, lamax: 31, lomin: 110, lomax: 135 };
+
     async function fetchOpenSkyBaselineFallback() {
         if (cbOpen('opensky')) {
             logSuppressedSource('opensky');
@@ -66,7 +84,7 @@ function createPlaneSources({ accountPool, apiStats, cbOpen, cbTrip, cbReset, lo
 
         const t0 = performance.now();
         try {
-            const { states } = await fetchOpenSky();
+            const { states } = await fetchOpenSky(OPENSKY_FALLBACK_BBOX);
             const usable = (states || []).filter(
                 p => p.icao24 && typeof p.lat === 'number' && typeof p.lng === 'number'
             );
@@ -139,53 +157,7 @@ function createPlaneSources({ accountPool, apiStats, cbOpen, cbTrip, cbReset, lo
         };
     }
 
-    /**
-     * [v10.1] New Primary Telemetry: Airplanes.Live (Multi-Endpoint Support)
-     * Supports 'mil', 'point', and 'all' types. Capped at 1 QPS.
-     */
-    async function fetchAirplanesLive(type = 'all', params = {}) {
-        let url = `https://api.airplanes.live/v2/${type}`;
-        if (type === 'point' && params.lat && params.lon) {
-            url = `https://api.airplanes.live/v2/point/${params.lat}/${params.lon}/${params.dist || 250}`;
-        }
-
-        const response = await fetch(url, {
-            headers: { 'User-Agent': 'AEROSTRAT/10.1 (Hybrid Sync Engine)' },
-            signal: AbortSignal.timeout(10000)
-        });
-
-        apiStats.totalCalls++;
-
-        if (!response.ok) {
-            throw new Error(`Airplanes.Live ${type} Error: ${response.status}`);
-        }
-
-        const data = await response.json();
-        // API returns ac[] (ADSBexchange v2 format), not aircraft[]
-        const standardStates = (data.ac || []).map(p => normalizeAcRecord(p))
-            .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
-
-        return { states: standardStates, time: Math.floor(data.now || Date.now() / 1000) };
-    }
-
-    /**
-     * adsb.fi open data API — ADSBexchange v2 compatible, no auth required.
-     * Public rate limit: 1 req/sec. Used as fallback when Airplanes.Live fails.
-     */
-    async function fetchAdsbFi(lat, lon, dist = 250) {
-        const response = await fetch(
-            `https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${dist}`,
-            { headers: { 'User-Agent': 'AEROSTRAT/5.0' }, signal: AbortSignal.timeout(8000) }
-        );
-        if (!response.ok) throw new Error(`adsb.fi Error: ${response.status}`);
-        const data = await response.json();
-        // API returns ac[] (ADSBexchange v2 format), not aircraft[]
-        const standardStates = (data.ac || []).map(p => normalizeAcRecord(p))
-            .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
-        return { states: standardStates };
-    }
-
-    return { fetchOpenSky, fetchOpenSkyBaselineFallback, normalizeAcRecord, fetchAirplanesLive, fetchAdsbFi, EMERGENCY_SQUAWKS };
+    return { fetchOpenSky, fetchOpenSkyBaselineFallback, normalizeAcRecord, EMERGENCY_SQUAWKS };
 }
 
 module.exports = { createPlaneSources };

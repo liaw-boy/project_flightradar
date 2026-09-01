@@ -3,8 +3,10 @@
 // engine. Reads/writes activeSessions, lastStoredPoint, and ingestionStats
 // from state/appState directly (safe — none of the three are ever
 // reassigned wholesale, only mutated in place).
-const { activeSessions, lastStoredPoint, ingestionStats } = require('../state/appState');
+const { activeSessions, lastStoredPoint, recentTrackBuffer, ingestionStats } = require('../state/appState');
 const { isRealIcao24 } = require('../utils/planeGuards');
+
+const PREDICTOR_WINDOW_SIZE = 10; // must match ml_trajectory/model.py WINDOW_SIZE
 
 function createTrackIngest({ Route, TrackPoint, FlightSession, broadcastTrackPoint }) {
 
@@ -58,6 +60,14 @@ function createTrackIngest({ Route, TrackPoint, FlightSession, broadcastTrackPoi
                 // Case 5: Timeout
                 needsNewSession = true;
                 closeReason = 'TIMEOUT';
+            } else if (session.callsign !== callsign && callsign !== 'N/A') {
+                // Case 2 & 6: Callsign changed — checked before ground-idle (below) on
+                // purpose. It used to sit after ground-idle, so a callsign swap while
+                // parked and slow (a real gate-turnaround scenario) fell into the
+                // ground-idle branch first and was never reached — two different
+                // flights at the same gate got merged into one session/callsign until
+                // the aircraft moved fast enough to fall out of ground-idle.
+                needsNewSession = true;
             } else if (onGround && velocityKts < GROUND_IDLE_SPEED_KTS) {
                 // Case 7: Ground idle tracking (Parked)
                 if (!session.groundIdleSince) {
@@ -86,9 +96,6 @@ function createTrackIngest({ Route, TrackPoint, FlightSession, broadcastTrackPoi
                 if (session.airborneCounter >= 3) {
                     needsNewSession = true;
                 }
-            } else if (session.callsign !== callsign && callsign !== 'N/A') {
-                // Case 2 & 6: Callsign changed
-                needsNewSession = true;
             } else if (!session.onGround && onGround) {
                 // Case 3: Landing? — [v11.0 Protection] Require 3 points onGround AND alt < 1000
                 const altitude = p.altitude || 0;
@@ -207,6 +214,27 @@ function createTrackIngest({ Route, TrackPoint, FlightSession, broadcastTrackPoi
                 ts: timeUnix,
                 posTs: posTime,  // actual measurement time for future staleness checks
             });
+
+            // [Trajectory Predictor] Feed the ring buffer used for signal-loss
+            // extrapolation. Airborne-only, matching the training distribution
+            // in ml_trajectory/dataset.py (on_ground = 0).
+            if (!onGround) {
+                let buf = recentTrackBuffer.get(icao24);
+                if (!buf) {
+                    buf = [];
+                    recentTrackBuffer.set(icao24, buf);
+                }
+                buf.push({
+                    lat: p.lat,
+                    lng: p.lng,
+                    altitude: (typeof p.altitude === 'number') ? p.altitude : 0,
+                    velocity: p.velocity || 0,
+                    heading: p.heading || 0,
+                });
+                if (buf.length > PREDICTOR_WINDOW_SIZE) buf.shift();
+            } else {
+                recentTrackBuffer.delete(icao24);
+            }
 
             // Build track point with ALL available telemetry fields
             batchTrackPoints.push({

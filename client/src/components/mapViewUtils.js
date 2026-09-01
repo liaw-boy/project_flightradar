@@ -37,6 +37,28 @@ export function haversineKm(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// ─── Initial bearing (deg, 0-360) from point 1 to point 2 ────────────────────
+// Used by Phase 2's prediction sanity check — a model output that's "close"
+// in km distance but implies moving opposite to the plane's real heading is
+// still visually wrong (looks like the plane briefly reversing), so distance
+// alone isn't enough of a guard.
+export function bearingDeg(lat1, lon1, lat2, lon2) {
+    const toRad = d => d * Math.PI / 180;
+    const lat1R = toRad(lat1), lat2R = toRad(lat2);
+    const dLon = toRad(lon2 - lon1);
+    const x = Math.sin(dLon) * Math.cos(lat2R);
+    const y = Math.cos(lat1R) * Math.sin(lat2R) - Math.sin(lat1R) * Math.cos(lat2R) * Math.cos(dLon);
+    return (Math.atan2(x, y) * 180 / Math.PI + 360) % 360;
+}
+
+// Smallest signed angular difference (deg, -180..180) from a to b.
+export function angleDiffDeg(a, b) {
+    let d = (b - a) % 360;
+    if (d > 180) d -= 360;
+    if (d < -180) d += 360;
+    return d;
+}
+
 // ─── Path2D Vector Object Cache (with ViewBox support) ──────────────
 //
 // AIRCRAFT_CATALOG's declared `vb` (viewBox) is not trustworthy for sizing:

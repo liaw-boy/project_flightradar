@@ -13,7 +13,14 @@
 const logger = require('../logger');
 const { AIRLINES } = require('../data/tpeAirlines');
 
-const TDX_BASE = 'https://tdx.transportdata.tw/api/basic/v2/Air/FIDS/Airport';
+// [2026-08-31] Was calling TDX directly here. Root-caused: this project and
+// the separately-run tpe_flight_board project (same machine, port 3800) both
+// independently polled the exact same 4 airports under the SAME TDX member
+// account — combined usage exceeded TDX's account-level quota and got BOTH
+// registered clients suspended ("超量使用停權"), not just this one. Fix:
+// tpe_flight_board already crawls TDX and exposes the result over HTTP —
+// read that instead of hitting TDX a second time for identical data.
+const TPE_FLIGHT_BOARD_URL = process.env.TPE_FLIGHT_BOARD_URL || 'http://127.0.0.1:3800';
 const REFRESH_MS = 5 * 60 * 1000; // 5 minutes — FIDS remarks/times update continuously
 const BUFFER_MINUTES = 10; // live view hides flights more than this far in the past
 
@@ -25,30 +32,6 @@ const BOARD_AIRPORTS = [
 ];
 
 let _cache = {}; // code -> { arrivals: [raw], departures: [raw], updatedAt: ISOString }
-let _tokenCache = { token: null, expiresAt: 0 };
-
-async function getTDXAccessToken() {
-    const now = Date.now();
-    if (_tokenCache.token && now < _tokenCache.expiresAt) return _tokenCache.token;
-
-    const clientId = process.env.TDX_CLIENT_ID?.trim();
-    const clientSecret = process.env.TDX_CLIENT_SECRET?.trim();
-    if (!clientId || !clientSecret) throw new Error('TDX_CLIENT_ID / TDX_CLIENT_SECRET not configured');
-
-    const res = await fetch(
-        'https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token',
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }).toString(),
-            signal: AbortSignal.timeout(10000),
-        }
-    );
-    if (!res.ok) throw new Error(`TDX Auth failed (${res.status})`);
-    const data = await res.json();
-    _tokenCache = { token: data.access_token, expiresAt: now + (data.expires_in ? data.expires_in * 1000 - 30000 : 15 * 60 * 1000) };
-    return _tokenCache.token;
-}
 
 function clean(value) {
     if (value == null) return null;
@@ -57,88 +40,65 @@ function clean(value) {
     return trimmed;
 }
 
-function toArrivalRecord(item) {
+// tpe_flight_board's /api/flights already serializes+groups codeshares
+// server-side, but its field names line up with this module's own "raw"
+// shape closely enough to feed straight into the serialize()/groupCodeshares()
+// pipeline below unchanged — the only fields it doesn't carry (flightDate,
+// isCargo) aren't load-bearing here (isCargo defaults false since we always
+// request cargo=1 below, so nothing downstream would need to filter it out).
+function fromTpeFlightBoardRecord(item, direction) {
     return {
-        direction: 'arrival',
-        flightDate: item.FlightDate,
-        flightNumber: `${item.AirlineID || ''}${item.FlightNumber || ''}`,
-        airlineId: item.AirlineID || null,
-        origin: item.DepartureAirportID || null,
-        destination: item.ArrivalAirportID || null,
-        scheduledTime: item.ScheduleArrivalTime || null,
-        actualTime: item.ActualArrivalTime || null,
-        estimatedTime: item.EstimatedArrivalTime || null,
-        remark: clean(item.ArrivalRemark),
-        terminal: clean(item.Terminal),
-        gate: clean(item.Gate),
-        acType: clean(item.AcType),
-        baggageClaim: clean(item.BaggageClaim),
-        checkCounter: null,
-        isCargo: !!item.IsCargo,
-        updateTime: item.UpdateTime || null,
+        direction,
+        flightDate: (item.scheduledTime || '').slice(0, 10) || null,
+        flightNumber: item.flightNumber,
+        airlineId: item.airlineId,
+        origin: item.origin,
+        destination: item.destination,
+        scheduledTime: item.scheduledTime || null,
+        actualTime: item.actualTime || null,
+        estimatedTime: item.estimatedTime || null,
+        remark: item.remark || null,
+        terminal: item.terminal || null,
+        gate: item.gate || null,
+        acType: item.acType || null,
+        baggageClaim: item.baggageClaim || null,
+        checkCounter: item.checkCounter || null,
+        isCargo: false,
+        updateTime: item.updateTime || null,
     };
 }
 
-function toDepartureRecord(item) {
-    return {
-        direction: 'departure',
-        flightDate: item.FlightDate,
-        flightNumber: `${item.AirlineID || ''}${item.FlightNumber || ''}`,
-        airlineId: item.AirlineID || null,
-        origin: item.DepartureAirportID || null,
-        destination: item.ArrivalAirportID || null,
-        scheduledTime: item.ScheduleDepartureTime || null,
-        actualTime: item.ActualDepartureTime || null,
-        estimatedTime: item.EstimatedDepartureTime || null,
-        remark: clean(item.DepartureRemark),
-        terminal: clean(item.Terminal),
-        gate: clean(item.Gate),
-        acType: clean(item.AcType),
-        baggageClaim: null,
-        checkCounter: clean(item.CheckCounter),
-        isCargo: !!item.IsCargo,
-        updateTime: item.UpdateTime || null,
-    };
-}
-
-async function fetchBoardForAirport(token, code) {
+async function fetchBoardForAirport(code) {
+    // all=1 + cargo=1: ask for the full unfiltered day's data — this
+    // module's own queryFlights() below re-applies the buffer/cargo/terminal
+    // filters, so we want tpe_flight_board's raw superset here, not its
+    // already-buffer-filtered live view.
+    const qs = `airport=${code}&all=1&cargo=1`;
     const [arrRes, depRes] = await Promise.allSettled([
-        fetch(`${TDX_BASE}/Arrival/${code}?$format=JSON`, {
-            headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000),
-        }),
-        fetch(`${TDX_BASE}/Departure/${code}?$format=JSON`, {
-            headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000),
-        }),
+        fetch(`${TPE_FLIGHT_BOARD_URL}/api/flights?direction=arrival&${qs}`, { signal: AbortSignal.timeout(8000) }),
+        fetch(`${TPE_FLIGHT_BOARD_URL}/api/flights?direction=departure&${qs}`, { signal: AbortSignal.timeout(8000) }),
     ]);
 
-    const arrRaw = arrRes.status === 'fulfilled' && arrRes.value.ok ? await arrRes.value.json() : [];
-    const depRaw = depRes.status === 'fulfilled' && depRes.value.ok ? await depRes.value.json() : [];
+    const arrJson = arrRes.status === 'fulfilled' && arrRes.value.ok ? await arrRes.value.json() : null;
+    const depJson = depRes.status === 'fulfilled' && depRes.value.ok ? await depRes.value.json() : null;
+    if (!arrJson && !depJson) throw new Error('tpe_flight_board unreachable for both directions');
 
     return {
-        arrivals: (arrRaw || []).map(toArrivalRecord),
-        departures: (depRaw || []).map(toDepartureRecord),
+        arrivals: (arrJson?.flights || []).map(f => fromTpeFlightBoardRecord(f, 'arrival')),
+        departures: (depJson?.flights || []).map(f => fromTpeFlightBoardRecord(f, 'departure')),
         updatedAt: new Date().toISOString(),
     };
 }
 
 async function refreshFidsBoard() {
-    let token;
-    try {
-        token = await getTDXAccessToken();
-    } catch (e) {
-        logger.warn('FIDS', `Token error: ${e.message}`);
-        return;
-    }
-
     for (const ap of BOARD_AIRPORTS) {
         try {
-            const board = await fetchBoardForAirport(token, ap.code);
+            const board = await fetchBoardForAirport(ap.code);
             _cache[ap.code] = board;
             logger.debug('FIDS', `${ap.code} board refreshed: ${board.arrivals.length} arrivals, ${board.departures.length} departures`);
         } catch (e) {
             logger.warn('FIDS', `Board fetch failed for ${ap.code}: ${e.message}`);
         }
-        await new Promise(r => setTimeout(r, 500)); // gentle pacing across airports
     }
 }
 

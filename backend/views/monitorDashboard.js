@@ -408,6 +408,13 @@ a:hover{opacity:.75}
           </div>
           <div class="card-body" id="api-body"></div>
         </div>
+        <div id="mlaccuracy" class="card">
+          <div class="card-hd">
+            <span class="card-title">Trajectory Model Accuracy</span>
+            <span class="card-badge" id="mlaccuracy-badge">—</span>
+          </div>
+          <div class="card-body" id="mlaccuracy-body" style="font-family:monospace;font-size:11px"></div>
+        </div>
       </div>
 
     </div><!-- /scroll -->
@@ -743,6 +750,28 @@ async function refresh() {
 
       const totalRows = (mt.track_points?.rows||0) + (mt.flight_sessions?.rows||0);
       document.getElementById('db-badge').textContent = totalRows.toLocaleString() + ' rows';
+    } catch(_) {}
+
+    // ── Trajectory Model Accuracy (Phase-2 re-enablement Stage 1) ──
+    try {
+      const acc = await fetch('/monitor/api/prediction-accuracy').then(r => r.json());
+      const d7 = acc['7d'] || [];
+      const totalN = d7.reduce((s, g) => s + (g.count||0), 0);
+      document.getElementById('mlaccuracy-badge').textContent = totalN.toLocaleString() + ' (7d)';
+      if (d7.length === 0) {
+        document.getElementById('mlaccuracy-body').innerHTML = row('無資料', '尚未累積 prediction_log', 'dim');
+      } else {
+        const errBadge = km => km == null ? 'dim' : km < 1 ? 'ok' : km < 3 ? 'warn' : 'err';
+        document.getElementById('mlaccuracy-body').innerHTML = d7.map(g =>
+          row(
+            g.horizonSec + 's (' + g.stepsAhead + ' step)',
+            'avg ' + (g.avgKm?.toFixed(2)??'—') + 'km · p50 ' + (g.p50Km?.toFixed(2)??'—') +
+            ' · p90 ' + (g.p90Km?.toFixed(2)??'—') + ' · p99 ' + (g.p99Km?.toFixed(2)??'—') +
+            ' · n=' + g.count.toLocaleString(),
+            errBadge(g.avgKm)
+          )
+        ).join('');
+      }
     } catch(_) {}
 
   } catch(e) {

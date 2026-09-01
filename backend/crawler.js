@@ -3,8 +3,15 @@ const Route     = require('./db/routeStore');
 const logger    = require('./logger');
 const syncLog   = require('./db/syncLogger');
 
-// TDX API base
-const TDX_BASE = 'https://tdx.transportdata.tw/api/basic/v2/Air/FIDS/Airport';
+// [2026-08-31] Was calling TDX directly here (own getTDXAccessToken/
+// fetchAirportFIDS). Root-caused: this project and the separately-run
+// tpe_flight_board project (same machine, port 3800) both independently
+// polled the exact same 4 airports under the SAME TDX member account —
+// combined usage exceeded TDX's account-level quota and got BOTH registered
+// clients suspended ("超量使用停權"). Fix: read tpe_flight_board's
+// already-crawled data over HTTP instead of hitting TDX a second time here
+// (services/fidsBoard.js got the same fix for its own separate TDX caller).
+const TPE_FLIGHT_BOARD_URL = process.env.TPE_FLIGHT_BOARD_URL || 'http://127.0.0.1:3800';
 
 // 台灣主要機場 — 只爬有大量國際航班的機場以節省 TDX 點數
 // 離島/小機場的班次極少，adsbdb.com 已能覆蓋，不需要 TDX
@@ -15,74 +22,32 @@ const TW_AIRPORTS = [
     { iata: 'RMQ', icao: 'RCMQ' }, // 台中清泉崗（國際線）
 ];
 
-async function getTDXAccessToken() {
-    const clientId = process.env.TDX_CLIENT_ID?.trim();
-    const clientSecret = process.env.TDX_CLIENT_SECRET?.trim();
-
-    if (!clientId || !clientSecret || clientId === 'YOUR_CLIENT_ID_HERE') {
-        throw new Error('TDX_CLIENT_ID / TDX_CLIENT_SECRET not configured');
-    }
-
-    const res = await fetch(
-        'https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token',
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-                grant_type: 'client_credentials',
-                client_id: clientId,
-                client_secret: clientSecret,
-            }).toString(),
-            signal: AbortSignal.timeout(10000),
-        }
-    );
-
-    if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`TDX Auth failed (${res.status}): ${errText}`);
-    }
-
-    return (await res.json()).access_token;
-}
-
-async function fetchAirportFIDS(token, iata) {
+async function fetchAirportFIDS(iata) {
+    const qs = `airport=${iata}&all=1&cargo=1`;
     const [arrRes, depRes] = await Promise.allSettled([
-        fetch(`${TDX_BASE}/Arrival/${iata}?$format=JSON`, {
-            headers: { Authorization: `Bearer ${token}` },
-            signal: AbortSignal.timeout(8000),
-        }),
-        fetch(`${TDX_BASE}/Departure/${iata}?$format=JSON`, {
-            headers: { Authorization: `Bearer ${token}` },
-            signal: AbortSignal.timeout(8000),
-        }),
+        fetch(`${TPE_FLIGHT_BOARD_URL}/api/flights?direction=arrival&${qs}`, { signal: AbortSignal.timeout(8000) }),
+        fetch(`${TPE_FLIGHT_BOARD_URL}/api/flights?direction=departure&${qs}`, { signal: AbortSignal.timeout(8000) }),
     ]);
 
-    const arrivals  = arrRes.status  === 'fulfilled' && arrRes.value.ok  ? await arrRes.value.json()  : [];
-    const departures = depRes.status === 'fulfilled' && depRes.value.ok  ? await depRes.value.json() : [];
-    return { arrivals, departures };
+    const arrJson = arrRes.status === 'fulfilled' && arrRes.value.ok ? await arrRes.value.json() : null;
+    const depJson = depRes.status === 'fulfilled' && depRes.value.ok ? await depRes.value.json() : null;
+    return { arrivals: arrJson?.flights || [], departures: depJson?.flights || [] };
 }
 
 async function crawlFlightSchedules() {
-    logger.info('CRAWLER', `Starting TDX schedule sync (${TW_AIRPORTS.length} airports)`);
+    logger.info('CRAWLER', `Starting TDX-derived schedule sync via tpe_flight_board (${TW_AIRPORTS.length} airports)`);
     syncLog.start('tdx');
 
-    let token;
-    try {
-        token = await getTDXAccessToken();
-    } catch (err) {
-        logger.error('CRAWLER', `Auth failed: ${err.message}`);
-        syncLog.fail('tdx', `TDX auth failed: ${err.message}`);
-        return;
-    }
-
-    // 循序抓取，每次間隔 1.5 秒，避免 burst 觸發 TDX rate limit（免費帳號 50 req/s per IP）
+    // Sequential with a short gap is no longer about respecting TDX's own
+    // rate limit (tpe_flight_board owns that now) — just gentle pacing
+    // against a local service that's also serving live traffic.
     const results = [];
     for (const ap of TW_AIRPORTS) {
-        const r = await fetchAirportFIDS(token, ap.iata)
+        const r = await fetchAirportFIDS(ap.iata)
             .then(data => ({ status: 'fulfilled', value: { ...data, ap } }))
             .catch(err => ({ status: 'rejected', reason: err }));
         results.push(r);
-        await new Promise(res => setTimeout(res, 1500));
+        await new Promise(res => setTimeout(res, 300));
     }
 
     const routeData = {};
@@ -94,10 +59,10 @@ async function crawlFlightSchedules() {
         // 抵達：外站 → 台灣機場
         for (const f of arrivals) {
             const cs = buildCallsign(f);
-            if (!cs || !f.DepartureAirportID) continue;
+            if (!cs || !f.origin) continue;
             // 用 IATA 轉 ICAO（若查得到），否則直接存 IATA
             routeData[cs] = {
-                dep: f.DepartureAirportID,
+                dep: f.origin,
                 arr: ap.icao,
                 source: 'tdx',
             };
@@ -106,10 +71,10 @@ async function crawlFlightSchedules() {
         // 出發：台灣機場 → 外站
         for (const f of departures) {
             const cs = buildCallsign(f);
-            if (!cs || !f.ArrivalAirportID) continue;
+            if (!cs || !f.destination) continue;
             routeData[cs] = {
                 dep: ap.icao,
-                arr: f.ArrivalAirportID,
+                arr: f.destination,
                 source: 'tdx',
             };
         }
@@ -141,7 +106,9 @@ async function crawlFlightSchedules() {
 }
 
 function buildCallsign(f) {
-    const raw = ((f.AirlineID || '') + (f.FlightNumber || '')).trim().toUpperCase();
+    // f.flightNumber already comes pre-combined (airlineId + number) from
+    // tpe_flight_board's /api/flights.
+    const raw = (f.flightNumber || '').trim().toUpperCase();
     return raw.replace(/[^A-Z0-9]/g, '') || null;
 }
 
