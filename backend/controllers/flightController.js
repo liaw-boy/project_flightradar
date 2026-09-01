@@ -16,20 +16,43 @@ const _boardAirportCodes = new Set(listBoardAirports().map(a => a.code));
 // board by flight-number text match, then sanity-checks the matched record's
 // origin/destination actually agree with the already-resolved route before
 // trusting its times (guards against a false substring match).
+// tpe_flight_board keys its own records by IATA-style flight number (e.g.
+// "AE1275"), but `flightNumber` here is often still the raw ICAO callsign
+// (e.g. "MDA1275", Mandarin Airlines' ICAO prefix) when AeroDataBox hasn't
+// resolved it to IATA form — so a plain text match misses real matches.
+// Build both candidate forms using VrsDb's existing ICAO<->IATA airline
+// table (already loaded for other lookups; no new data source needed).
+function _candidateFlightNumbers(flightNumber) {
+    const raw = (flightNumber || '').trim().toUpperCase();
+    const m = raw.match(/^([A-Z]{2,3})(\d+.*)$/);
+    if (!m) return [raw];
+    const [, prefix, digits] = m;
+    const candidates = new Set([raw]);
+    try {
+        const byIcao = VrsDb.lookupAirline(prefix);
+        if (byIcao?.iata) candidates.add(byIcao.iata + digits);
+    } catch (_) { /* VrsDb unavailable — original candidate still tried */ }
+    return [...candidates];
+}
+
 function _lookupBoardSide(flightNumber, code, direction, expectOrigin, expectDestination) {
     try {
-        const { flights } = queryFidsBoard({ code, direction, q: flightNumber, history: true }, null);
-        const match = flights.find(f =>
-            f.flightNumber === flightNumber ||
-            (f.codeshares || []).some(c => c.flightNumber === flightNumber)
-        );
-        if (!match) return null;
-        // Sanity check: the board record's own origin/destination should
-        // agree with what the route waterfall already resolved, so a loose
-        // text match can't silently attach the wrong flight's times.
-        if (expectOrigin && match.origin && match.origin !== expectOrigin) return null;
-        if (expectDestination && match.destination && match.destination !== expectDestination) return null;
-        return match;
+        const candidates = _candidateFlightNumbers(flightNumber);
+        for (const candidate of candidates) {
+            const { flights } = queryFidsBoard({ code, direction, q: candidate, history: true }, null);
+            const match = flights.find(f =>
+                f.flightNumber === candidate ||
+                (f.codeshares || []).some(c => c.flightNumber === candidate)
+            );
+            if (!match) continue;
+            // Sanity check: the board record's own origin/destination should
+            // agree with what the route waterfall already resolved, so a loose
+            // text match can't silently attach the wrong flight's times.
+            if (expectOrigin && match.origin && match.origin !== expectOrigin) continue;
+            if (expectDestination && match.destination && match.destination !== expectDestination) continue;
+            return match;
+        }
+        return null;
     } catch (e) {
         logger.debug('FUSION', `fidsBoard timing lookup failed for ${flightNumber}: ${e.message}`);
         return null;
