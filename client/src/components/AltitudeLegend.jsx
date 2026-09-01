@@ -1,16 +1,20 @@
 import React from 'react';
+import { ALT_STOPS } from '../config/planeIconTheme';
 
 // Shows the tar1090 HSL gradient with altitude labels, matching the track colors.
 // Only visible in ALTITUDE scheme; hidden in TACTICAL and other solid-color modes.
+//
+// Label swatches are pulled directly from ALT_STOPS (the same ramp the map
+// icons use via getAltitudeColor) so this legend can never drift out of sync
+// with the actual icon colors — see planeIconTheme.js.
+const _LABELED_STOP_ALTS = { GND: 0, '3km': 3353, '12km': 12192, '15km+': 15545 };
 export default function AltitudeLegend({ colorScheme }) {
     if (colorScheme === 'TACTICAL' || colorScheme === 'MONO') return null;
 
-    const stops = [
-        { label: 'GND',    h: 20,  s: 88, l: 52 },
-        { label: '3km',    h: 140, s: 88, l: 41 },
-        { label: '12km',   h: 300, s: 88, l: 48 },
-        { label: '15km+',  h: 360, s: 88, l: 52 },
-    ];
+    const stops = Object.entries(_LABELED_STOP_ALTS).map(([label, alt]) => ({
+        label,
+        ...ALT_STOPS.find(s => s.alt === alt),
+    }));
     const gradientColors = [
         `hsl(20,88%,52%)`,
         `hsl(54,88%,49%)`,

@@ -12,7 +12,6 @@ import { logger } from '../utils/logger';
 import PlaneCanvasLayer from './PlaneCanvasLayer';
 import AltitudeLegend from './AltitudeLegend';
 import {
-    FR24_BASE_PX,
     haversineKm,
     bearingDeg,
     angleDiffDeg,
@@ -25,6 +24,20 @@ import {
     RENDER_MODE_SIMPLE,
     getAircraftVectorKey,
 } from './mapViewUtils';
+import {
+    FOCUS_DIM_OPACITY,
+    SELECTION_GLOW,
+    SELECTED_STROKE_DARK,
+    TIER1_SELECTED_STROKE_LIGHT,
+    SHADOW_STROKE_LIGHT,
+    SHADOW_STROKE_DARK,
+    NORMAL_STROKE_DARK,
+    OUTLINE_LINE_WIDTH_PX,
+    OUTLINE_LINE_WIDTH_MIN_PX,
+    TIER1_DOT,
+    TIER1_MAX_DRAW_SIZE,
+    TIER4_FALLBACK_RADIUS,
+} from '../config/planeIconTheme';
 
 
 // Phase 2 model-guided coasting (see animate() below) — capped short so a
@@ -1454,28 +1467,29 @@ export default function MapView({
 
                     // [Phase 15] Focus Mode Dimming
                     if (currentSelected && !isSelected) {
-                        opacity = 0.3;
+                        opacity = FOCUS_DIM_OPACITY;
                     }
 
 
                     // [v12.9] Pulsing glow ring for selected aircraft
                     if (isSelected) {
-                        const pulse = (nowMs % 2000) / 2000;
-                        const ringR = 14 + pulse * 22;
-                        const ringAlpha = (1 - pulse) * 0.55;
+                        const { outer, inner, color: glowColor } = SELECTION_GLOW;
+                        const pulse = (nowMs % outer.pulsePeriodMs) / outer.pulsePeriodMs;
+                        const ringR = outer.baseRadius + pulse * outer.pulseRadiusRange;
+                        const ringAlpha = (1 - pulse) * outer.alphaMax;
                         ctx.save();
                         ctx.globalAlpha = ringAlpha;
-                        ctx.strokeStyle = '#22d3ee';
-                        ctx.lineWidth = 1.5;
+                        ctx.strokeStyle = glowColor;
+                        ctx.lineWidth = outer.lineWidth;
                         ctx.beginPath();
                         ctx.arc(ptX, ptY, ringR, 0, Math.PI * 2);
                         ctx.stroke();
                         // Inner static glow
-                        ctx.globalAlpha = 0.25;
-                        ctx.strokeStyle = '#22d3ee';
-                        ctx.lineWidth = 3;
+                        ctx.globalAlpha = inner.alpha;
+                        ctx.strokeStyle = glowColor;
+                        ctx.lineWidth = inner.lineWidth;
                         ctx.beginPath();
-                        ctx.arc(ptX, ptY, 10, 0, Math.PI * 2);
+                        ctx.arc(ptX, ptY, inner.radius, 0, Math.PI * 2);
                         ctx.stroke();
                         ctx.restore();
                     }
@@ -1512,15 +1526,15 @@ export default function MapView({
                     // Tier 2: GitHub SVG    — exact 1:1 shape (async pre-warmed)
                     // Tier 3: Path2D embed  — instant, always available fallback
 
-                    if (drawSize <= 3) {
+                    if (drawSize <= TIER1_MAX_DRAW_SIZE) {
                         // ── Tier 1: Tactical Dot ─────────────────────────────
                         const dotR = Math.max(2, drawSize / 2);
                         ctx.save();
                         ctx.globalAlpha = opacity;
                         // Dark border for contrast
-                        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                        ctx.fillStyle = TIER1_DOT.darkBorderColor;
                         ctx.beginPath();
-                        ctx.arc(ptX, ptY, dotR + 1.2, 0, Math.PI * 2);
+                        ctx.arc(ptX, ptY, dotR + TIER1_DOT.darkBorderPad, 0, Math.PI * 2);
                         ctx.fill();
                         // Colored center — always the altitude-ramp color; selection is
                         // conveyed via the outline ring below, never by changing the hue
@@ -1530,8 +1544,8 @@ export default function MapView({
                         ctx.arc(ptX, ptY, dotR, 0, Math.PI * 2);
                         ctx.fill();
                         if (isSelected) {
-                            ctx.strokeStyle = mapLayerRef.current === 'light' ? '#b45309' : '#FFD700';
-                            ctx.lineWidth = 1.5;
+                            ctx.strokeStyle = mapLayerRef.current === 'light' ? TIER1_SELECTED_STROKE_LIGHT : SELECTED_STROKE_DARK;
+                            ctx.lineWidth = TIER1_DOT.selectedOutlineWidth;
                             ctx.stroke();
                         }
                         ctx.restore();
@@ -1605,16 +1619,18 @@ export default function MapView({
                                 ctx.lineJoin = 'round';
                                 // Pass 1: shadow outline
                                 const isLightMap = mapLayerRef.current === 'light';
-                                ctx.strokeStyle = isLightMap ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.7)';
-                                ctx.lineWidth = Math.max(0.8, 2.0 / canvasScale);
+                                ctx.strokeStyle = isLightMap ? SHADOW_STROKE_LIGHT : SHADOW_STROKE_DARK;
+                                ctx.lineWidth = Math.max(OUTLINE_LINE_WIDTH_MIN_PX.shadow, OUTLINE_LINE_WIDTH_PX.shadow / canvasScale);
                                 ctx.stroke(path);
                                 // Pass 2: colored fill
                                 ctx.fillStyle = altColor;
                                 ctx.fill(path);
                                 // Pass 3: thin contrast outline — white in light mode, yellow in dark
-                                const selectedStroke = isLightMap ? altColor : '#FFD700';
-                                ctx.strokeStyle = isSelected ? selectedStroke : (isLightMap ? altColor : 'rgba(150,160,175,0.8)');
-                                ctx.lineWidth = isSelected ? Math.max(0.8, 2.0 / canvasScale) : Math.max(0.3, 1.0 / canvasScale);
+                                const selectedStroke = isLightMap ? altColor : SELECTED_STROKE_DARK;
+                                ctx.strokeStyle = isSelected ? selectedStroke : (isLightMap ? altColor : NORMAL_STROKE_DARK);
+                                ctx.lineWidth = isSelected
+                                    ? Math.max(OUTLINE_LINE_WIDTH_MIN_PX.selected, OUTLINE_LINE_WIDTH_PX.selected / canvasScale)
+                                    : Math.max(OUTLINE_LINE_WIDTH_MIN_PX.normal, OUTLINE_LINE_WIDTH_PX.normal / canvasScale);
                                 ctx.stroke(path);
                                 ctx.restore();
                             } else {
@@ -1623,7 +1639,7 @@ export default function MapView({
                                 ctx.globalAlpha = opacity;
                                 ctx.fillStyle = altColor;
                                 ctx.beginPath();
-                                ctx.arc(ptX, ptY, 5, 0, Math.PI * 2);
+                                ctx.arc(ptX, ptY, TIER4_FALLBACK_RADIUS, 0, Math.PI * 2);
                                 ctx.fill();
                                 ctx.restore();
                             }

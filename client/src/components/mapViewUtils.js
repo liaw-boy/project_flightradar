@@ -23,9 +23,6 @@ export function _greatCirclePoints(lat1, lng1, lat2, lng2, n = 64) {
     return pts;
 }
 
-// Base icon size — PlaneFinder reference
-export const FR24_BASE_PX = 36;
-
 // ─── Haversine distance helper (km) ──────────────────────────────────────────
 export function haversineKm(lat1, lon1, lat2, lon2) {
     const R = 6371;

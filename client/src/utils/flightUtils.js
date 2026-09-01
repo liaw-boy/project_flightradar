@@ -1,4 +1,5 @@
 import { dataManager } from '../services/dataManager';
+import { ALT_STOPS } from '../config/planeIconTheme';
 
 const EARTH_RADIUS = 6371000;
 
@@ -255,36 +256,19 @@ export function getNearestAirport(lat, lng) {
     return nearest ? { airport: nearest, distance: Math.round(minDist) } : null;
 }
 
-// ── tar1090 / globe.adsb.fi altitude color system (HSL, altitudes in METRES) ──
-// Warm colours at low altitude (takeoff/landing danger zone)
-// → Cool green at typical cruise altitude (most time spent here)
-// → Purple/red at extreme high altitude (unusual/special)
-// This is the same gradient used by tar1090, globe.adsb.fi, and FR24.
-// Converted from tar1090's feet-based stops to metres (1ft = 0.3048m).
-const _ALT_STOPS = [
-    { alt:     0, h:  20, s: 88, l: 52 }, // orange       — ground / takeoff (0ft)
-    { alt:   610, h:  33, s: 88, l: 51 }, // yellow-orange — 2,000ft
-    { alt:  1219, h:  43, s: 88, l: 50 }, // yellow        — 4,000ft
-    { alt:  1829, h:  54, s: 88, l: 49 }, // yellow-green  — 6,000ft
-    { alt:  2438, h:  72, s: 88, l: 46 }, // green-yellow  — 8,000ft
-    { alt:  2743, h:  85, s: 88, l: 44 }, // bright green  — 9,000ft
-    { alt:  3353, h: 140, s: 88, l: 41 }, // emerald green — 11,000ft (regional cruise)
-    { alt: 12192, h: 300, s: 88, l: 48 }, // purple/magenta— 40,000ft (jet cruise)
-    { alt: 15545, h: 360, s: 88, l: 52 }, // red           — 51,000ft+ (extreme)
-];
-
 /**
  * SINGLE SOURCE OF TRUTH for aircraft icon color across the whole app.
  * Both the on-map aircraft icons (MapView) and the bottom altitude legend
  * (AltitudeLegend) must derive their colors from this function / the
- * `_ALT_STOPS` ramp it reads from — never hardcode a separate palette.
+ * `ALT_STOPS` ramp (config/planeIconTheme.js) it reads from — never hardcode
+ * a separate palette.
  *
  * Priority order (highest wins):
  *   1. Emergency (squawk 7500/7600/7700) → fixed alarm red, ignores altitude entirely.
  *   2. Ground / parked                    → the ramp's own GND stop (orange), not an
  *                                            unrelated grey — so a taxiing aircraft's
  *                                            color always matches the legend's "GND" swatch.
- *   3. Airborne                           → smooth HSL interpolation across `_ALT_STOPS`.
+ *   3. Airborne                           → smooth HSL interpolation across `ALT_STOPS`.
  *
  * scheme = 'TACTICAL'       → uniform #ffce00 (legacy tactical yellow, altitude-blind)
  * scheme = 'ALTITUDE'       → smooth HSL gradient (default, matches adsb.fi / the legend)
@@ -301,7 +285,7 @@ export function getAltitudeColor(altitude, onGround, isEmergency, scheme = 'ALTI
     if (scheme === 'TACTICAL') return '#F0C040';
 
     const isLight = scheme === 'ALTITUDE_LIGHT';
-    const stops = _ALT_STOPS;
+    const stops = ALT_STOPS;
 
     // Ground stop lightness/saturation are tuned per-scheme for contrast against
     // the basemap, but the HUE always comes from the same GND stop as the legend.

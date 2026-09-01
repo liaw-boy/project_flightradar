@@ -1,11 +1,15 @@
 /**
  * AIRCRAFT ICONS ENGINE V13 ??Full Per-Type Catalog (182 Types)
- * 
+ *
  * ALL SVG paths and viewBoxes extracted VERBATIM from icon_catalog.html
  * Source: https://github.com/RexKramer1/AircraftShapesSVG.git
- * 
+ *
  * Each individual aircraft type has its own unique silhouette.
  */
+import {
+    ZOOM_SIZE_TABLE, ZOOM_SIZE_CEILING_BASE_PX, ZOOM_SIZE_CEILING_STEP_PX, ZOOM_SIZE_CEILING_PX,
+    TYPE_SCALE_REF, TYPE_SCALE_MIN, TYPE_SCALE_MAX, ICON_SCALE_VERSION as _ICON_SCALE_VERSION,
+} from '../config/planeIconTheme';
 
 // ?? Altitude Color Ramp (for Historical Tracks) ??????????????
 
@@ -466,8 +470,9 @@ export function getAircraftScale(plane) {
     return data.scale || 1.0;
 }
 
-// Increment this when scale values or size curve changes — busts MapView scaleCacheRef
-export const ICON_SCALE_VERSION = 5;
+// Re-exported for existing call sites — the version constant now lives in
+// planeIconTheme.js alongside the values it busts the cache for.
+export const ICON_SCALE_VERSION = _ICON_SCALE_VERSION;
 
 /**
  * adsb.fi/FR24-style zoom-to-pixel curve.
@@ -491,30 +496,21 @@ export const ICON_SCALE_VERSION = 5;
  *         as FR24/tar1090's raw ratio would (deliberately conservative —
  *         avoid a jarring one-shot size change for users).
  */
-const _SCALE_REF = 1.45; // B738 / A320 catalog scale — normalizes typeScale to 1.0×
-const _TYPE_SCALE_MIN = 0.85;
-const _TYPE_SCALE_MAX = 1.4;
-export function getDrawSize(_plane, zoom, _typeScale = _SCALE_REF) {
-    let base;
-    if      (zoom <= 4)  base = 15; // floor — always a recognizable shape, never a dot
-    else if (zoom <= 5)  base = 18;
-    else if (zoom <= 6)  base = 20;
-    else if (zoom <= 7)  base = 24;
-    else if (zoom <= 8)  base = 28;
-    else if (zoom <= 9)  base = 31;
-    else if (zoom <= 10) base = 34;
-    else if (zoom <= 11) base = 37;
-    else if (zoom <= 12) base = 40;
-    else if (zoom <= 13) base = 43;
-    else if (zoom <= 14) base = 46;
-    else if (zoom <= 15) base = 49;
-    else                 base = Math.min(53, 49 + (zoom - 15) * 2); // ceiling ~53px
+export function getDrawSize(_plane, zoom, _typeScale = TYPE_SCALE_REF) {
+    let base = ZOOM_SIZE_CEILING_PX; // zoom beyond the table's last tier, clamped below
+    for (const tier of ZOOM_SIZE_TABLE) {
+        if (zoom <= tier.maxZoom) { base = tier.px; break; }
+    }
+    const lastTierMaxZoom = ZOOM_SIZE_TABLE[ZOOM_SIZE_TABLE.length - 1].maxZoom;
+    if (zoom > lastTierMaxZoom) {
+        base = Math.min(ZOOM_SIZE_CEILING_PX, ZOOM_SIZE_CEILING_BASE_PX + (zoom - lastTierMaxZoom) * ZOOM_SIZE_CEILING_STEP_PX);
+    }
 
     // Normalize the catalog scale (e.g. AIRCRAFT_CATALOG[...].scale, 1.00-2.58)
-    // against the narrow-body baseline (1.45 → 1.0×), then clamp the
-    // differentiation range so size varies by type but stays subtle.
-    const normalized = _typeScale / _SCALE_REF;
-    const typeFactor = Math.min(_TYPE_SCALE_MAX, Math.max(_TYPE_SCALE_MIN, normalized));
+    // against the narrow-body baseline (1.0×), then clamp the differentiation
+    // range so size varies by type but stays subtle.
+    const normalized = _typeScale / TYPE_SCALE_REF;
+    const typeFactor = Math.min(TYPE_SCALE_MAX, Math.max(TYPE_SCALE_MIN, normalized));
 
     return Math.round(base * typeFactor);
 }
