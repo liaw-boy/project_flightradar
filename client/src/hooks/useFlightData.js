@@ -55,7 +55,61 @@ function _isBearingReversal(fromLat, fromLng, toLat, toLng, heading) {
               Math.sin(toRad(fromLat)) * Math.cos(toRad(toLat)) * Math.cos(toRad(toLng - fromLng));
     const bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
     const diff = Math.abs(bearing - heading) % 360;
-    return (diff > 180 ? 360 - diff : diff) > 120;
+    const angleOff = diff > 180 ? 360 - diff : diff;
+    // [2026-09-01] Threshold tightened from a flat 120° to a distance-scaled
+    // one. Root-caused the "moves forward, briefly backs up, then the next
+    // real point corrects it" glitch users still saw even with Phase 2
+    // fully disabled (see PHASE2_ENABLED in MapView.jsx) — it's this guard,
+    // not Phase 2, that gates every position update that reaches Phase 1's
+    // lerp. At small displacements (60m-500m, i.e. the band right above the
+    // noise floor rejected above), a flat 120° tolerance let a fairly large
+    // direction error straight through: an aircraft cannot genuinely
+    // reorient by 90-120° while covering only a few hundred metres between
+    // two updates — cruise/climb speeds over one poll/WS interval
+    // (_isImpossibleJump above works out to roughly 380m-1.3km per 3-10s
+    // gap) cover far more ground than that unless the plane is essentially
+    // stationary, in which case a 90-120° "turn" is almost certainly MLAT
+    // noise or a source-handoff blip (adsb.lol/adsb.fi/OpenSky disagreeing
+    // slightly — see stateMerge.js), not a real manoeuvre. Genuinely large
+    // displacements DO see real heading swings mid-turn (a holding pattern
+    // or go-around can rotate 60-90°+ over several seconds), so the looser
+    // 120° tolerance is kept there to avoid freezing the icon mid-turn.
+    const REVERSAL_THRESHOLD_DEG = dist < 0.5 ? 90 : 120;
+    return angleOff > REVERSAL_THRESHOLD_DEG;
+}
+
+// ── [Task A: pan/zoom poll acceleration] ─────────────────────────────────
+// tar1090-inspired: if the visible bbox moved meaningfully since the last
+// data fetch, the user is staring at a viewport the backend hasn't fetched
+// data for yet. This only ever *shortens* an already-scheduled wait, never
+// bypasses or lowers the backend's `recommendedInterval` quota-protection
+// floor — see ACCEL_FLOOR_MS below, and the reschedule logic always derives
+// from the interval the backend itself last returned.
+const ACCEL_FLOOR_MS = 3000; // never poll more often than every 3s, even mid-drag
+const ACCEL_DIVISOR = 4;     // tar1090 divides the wait by 4 on viewport change
+
+function _boundsChangedSignificantly(oldB, newB) {
+    if (!oldB || !newB) return false;
+    const oldW = oldB.east - oldB.west;
+    const oldH = oldB.north - oldB.south;
+    if (!(oldW > 0) || !(oldH > 0)) return false; // guard against degenerate/NaN bounds
+
+    const newW = newB.east - newB.west;
+    const centerOldLat = (oldB.north + oldB.south) / 2;
+    const centerOldLng = (oldB.east + oldB.west) / 2;
+    const centerNewLat = (newB.north + newB.south) / 2;
+    const centerNewLng = (newB.east + newB.west) / 2;
+
+    // Relative shift, not absolute degrees — a small drag at high zoom (few
+    // km) matters as much as a big drag at low zoom (hundreds of km).
+    const latShift = Math.abs(centerNewLat - centerOldLat) / oldH;
+    const lngShift = Math.abs(centerNewLng - centerOldLng) / oldW;
+    const zoomChange = Math.abs(newW - oldW) / oldW; // viewport width delta ≈ zoom change
+
+    // Thresholds intentionally coarse: floating-point/pixel-rounding jitter
+    // from Leaflet's own bounds recompute is well under 1%; a real pan/zoom
+    // is easily 10%+.
+    return latShift > 0.15 || lngShift > 0.15 || zoomChange > 0.3;
 }
 
 /**
@@ -84,6 +138,11 @@ export function useFlightData(mapRef, options = {}) {
     const globalLastUpdateRef = useRef(0);
     const sessionIdRef = useRef(`s_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
     const nextScheduledFetchRef = useRef(Date.now() + 60000);
+    // [Task A] bbox used for the most recent successful auto-refresh fetch,
+    // and the timeout handle for the currently-scheduled next auto-refresh —
+    // kept so the acceleration watcher below can cancel + reschedule it.
+    const lastFetchBoundsRef = useRef(null);
+    const pendingFetchTimeoutRef = useRef(null);
     const workerRef = useRef(null);
     const usesWebSocketRef = useRef(false);
     // Callback set by App.jsx to receive live track point pushes
@@ -120,11 +179,22 @@ export function useFlightData(mapRef, options = {}) {
             // [BBox Fetch] 動態只索取畫面範圍內的飛機
             let url = '/api/planes/bbox';
 
+            // [Task A] Unpadded bounds actually requested this cycle — used
+            // afterwards to detect "did the viewport move" for poll acceleration.
+            let requestedBounds = null;
+
             // 加入 20% 安全邊界，讓 BBox 再稍微擴大一點，避免邊緣飛機突然消失
             if (mapRef && mapRef.current) {
                 const bounds = mapRef.current.getBounds();
                 const padLat = (bounds.getNorth() - bounds.getSouth()) * 0.2;
                 const padLng = (bounds.getEast() - bounds.getWest()) * 0.2;
+
+                requestedBounds = {
+                    south: bounds.getSouth(),
+                    west: bounds.getWest(),
+                    north: bounds.getNorth(),
+                    east: bounds.getEast()
+                };
 
                 url += `?lamin=${bounds.getSouth() - padLat}&lomin=${bounds.getWest() - padLng}&lamax=${bounds.getNorth() + padLat}&lomax=${bounds.getEast() + padLng}`;
             } else {
@@ -208,10 +278,15 @@ export function useFlightData(mapRef, options = {}) {
 
             // 如果是自動刷新觸發的，就設定下一預約更新時間並排程
             if (isAutoRefresh) {
+                // [Task A] Base interval is always exactly what the backend
+                // recommends — this is the OpenSky-quota safety valve and is
+                // never lowered or bypassed here.
                 const interval = (data.recommendedInterval || 20) * 1000;
+                if (requestedBounds) lastFetchBoundsRef.current = requestedBounds;
                 nextScheduledFetchRef.current = Date.now() + interval;
                 setThrottleSeconds(Math.round(interval / 1000));
-                setTimeout(() => {
+                if (pendingFetchTimeoutRef.current) clearTimeout(pendingFetchTimeoutRef.current);
+                pendingFetchTimeoutRef.current = setTimeout(() => {
                     fetchPlanes(true);
                 }, interval);
             }
@@ -225,7 +300,8 @@ export function useFlightData(mapRef, options = {}) {
             // 失敗後同樣釋放鎖
             isFetchingRef.current = false;
             if (isAutoRefresh) {
-                setTimeout(() => {
+                if (pendingFetchTimeoutRef.current) clearTimeout(pendingFetchTimeoutRef.current);
+                pendingFetchTimeoutRef.current = setTimeout(() => {
                     fetchPlanes(true);
                 }, 5000);
             }
@@ -554,6 +630,42 @@ export function useFlightData(mapRef, options = {}) {
                 setThrottleSeconds(0); // WebSocket is realtime
                 return;
             }
+
+            // [Task A] Pan/zoom poll acceleration. If the viewport has moved
+            // meaningfully since the bbox we last actually fetched, shorten
+            // the wait for the *next* poll instead of leaving the user
+            // looking at a newly-panned-to area with stale/empty data until
+            // the previously-scheduled interval elapses. This only ever
+            // shortens an already-scheduled wait (never bypasses or lowers
+            // the backend's recommendedInterval floor itself — the interval
+            // used to compute this wait always originated from the
+            // backend's own response), and is bounded below by
+            // ACCEL_FLOOR_MS so a user dragging the map continuously can't
+            // hammer the backend/OpenSky quota. Once the accelerated fetch
+            // lands, lastFetchBoundsRef is refreshed to the (by-then
+            // settled) viewport, so a stationary map naturally falls back
+            // to the full recommendedInterval on the very next cycle.
+            if (mapRef && mapRef.current && lastFetchBoundsRef.current && !isFetchingRef.current) {
+                const b = mapRef.current.getBounds();
+                const newBounds = {
+                    south: b.getSouth(),
+                    west: b.getWest(),
+                    north: b.getNorth(),
+                    east: b.getEast()
+                };
+                if (_boundsChangedSignificantly(lastFetchBoundsRef.current, newBounds)) {
+                    const remainingMs = nextScheduledFetchRef.current - Date.now();
+                    if (remainingMs > ACCEL_FLOOR_MS) {
+                        const acceleratedMs = Math.max(ACCEL_FLOOR_MS, Math.round(remainingMs / ACCEL_DIVISOR));
+                        if (pendingFetchTimeoutRef.current) clearTimeout(pendingFetchTimeoutRef.current);
+                        nextScheduledFetchRef.current = Date.now() + acceleratedMs;
+                        pendingFetchTimeoutRef.current = setTimeout(() => {
+                            fetchPlanes(true);
+                        }, acceleratedMs);
+                    }
+                }
+            }
+
             const remaining = Math.max(0, Math.round((nextScheduledFetchRef.current - Date.now()) / 1000));
             setThrottleSeconds(remaining);
         }, 1000);

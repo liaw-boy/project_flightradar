@@ -10,6 +10,7 @@ import HoverCard from './HoverCard';
 import ClickCard from './ClickCard';
 import { logger } from '../utils/logger';
 import PlaneCanvasLayer from './PlaneCanvasLayer';
+import PlaneWebGLLayer, { FLOATS_PER_INSTANCE } from './PlaneWebGLLayer';
 import AltitudeLegend from './AltitudeLegend';
 import {
     haversineKm,
@@ -24,6 +25,7 @@ import {
     RENDER_MODE_SIMPLE,
     getAircraftVectorKey,
 } from './mapViewUtils';
+import { buildGreatCircleSegments } from '../utils/greatCircle';
 import {
     FOCUS_DIM_OPACITY,
     SELECTION_GLOW,
@@ -57,6 +59,31 @@ import {
 // holds the last real position and waits for the next one. That's the
 // proven, battle-tested behavior; re-enable this only after the model-blend
 // path has been independently validated to not reproduce those two bugs.
+// [Task B — experimental] Resolves a CSS color string (hex or hsl(), as
+// returned by getAltitudeColor) to normalized [r,g,b] floats for the WebGL
+// instance color attribute, via an offscreen 1x1 canvas — the browser's own
+// CSS color parser, so it stays correct for any format without hand-rolling
+// hsl->rgb math. Memoized since the altitude color ramp only produces a
+// small, highly-repeated set of distinct strings per frame.
+function _webglColorToRGBA(cssColor, cache, ctxRef) {
+    let hit = cache.get(cssColor);
+    if (hit) return hit;
+    if (!ctxRef.current) {
+        const c = document.createElement('canvas');
+        c.width = 1;
+        c.height = 1;
+        ctxRef.current = c.getContext('2d', { willReadFrequently: true });
+    }
+    const ctx = ctxRef.current;
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillStyle = cssColor;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+    hit = [r / 255, g / 255, b / 255];
+    cache.set(cssColor, hit);
+    return hit;
+}
+
 const PHASE2_ENABLED = false;
 const PHASE2_BLEND_MS = 2000;
 const PHASE2_MAX_JUMP_KM = 3;
@@ -121,6 +148,15 @@ export default function MapView({
     const mapContainerRef = useRef(null);
     const mapRef = useRef(null);
     const canvasLayerRef = useRef(null);
+    // [Task B — experimental] GPU-batched WebGL plane layer, dev-opt-in only
+    // via `?renderer=webgl`. Default off, has zero effect otherwise.
+    const webglLayerRef = useRef(null);
+    const webglEnabledRef = useRef(
+        typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('renderer') === 'webgl'
+    );
+    const webglInstanceBufRef = useRef(null); // lazily-sized Float32Array reused every frame
+    const webglColorCacheRef = useRef(new Map()); // CSS color string -> [r,g,b] normalized, memoized
+    const webglColorCtxRef = useRef(null); // lazily-created 1x1 canvas 2d ctx used to resolve CSS colors
     const metadataCacheRef = useRef(new Map()); // [v3.4] Cache for logos/metadata
     const routeLineRef = useRef(null);
 
@@ -291,6 +327,22 @@ export default function MapView({
         const cLayer = new PlaneCanvasLayer();
         map.addLayer(cLayer);
         canvasLayerRef.current = cLayer;
+
+        // [Task B — experimental] Opt-in GPU-batched layer. When enabled, the
+        // Canvas2D layer above keeps running unmodified (so its logic is never
+        // touched), but is hidden — the WebGL layer draws on top instead.
+        if (webglEnabledRef.current) {
+            try {
+                const wLayer = new PlaneWebGLLayer();
+                map.addLayer(wLayer);
+                webglLayerRef.current = wLayer;
+                cLayer.getCanvas().style.display = 'none';
+                logger.warn('RENDER', '[Task B] Experimental WebGL plane renderer active (?renderer=webgl)');
+            } catch (e) {
+                logger.error('RENDER', `[Task B] WebGL renderer init failed, falling back to Canvas2D: ${e.message}`);
+                webglLayerRef.current = null;
+            }
+        }
 
 
 
@@ -776,6 +828,60 @@ export default function MapView({
     // [v3.2] Keep shouldShowPlane accessible for the pointer click event
     const shouldShowPlaneRef = useRef(shouldShowPlane);
     useEffect(() => { shouldShowPlaneRef.current = shouldShowPlane; }, [shouldShowPlane]);
+
+    // ── [Task C] Historical trace replay (GET /api/flight-trace/:hex) ────────
+    // Purely additive: a separate Leaflet vector layer (L.polyline), created
+    // lazily on first use, drawn on top of the existing PlaneCanvasLayer.
+    // Never touches the live-position Canvas rendering above.
+    const traceLayerRef = useRef(null);
+    const [traceIcao24, setTraceIcao24] = useState(null);
+    const [traceLoading, setTraceLoading] = useState(false);
+
+    const clearTrace = useCallback(() => {
+        traceLayerRef.current?.clearLayers();
+        setTraceIcao24(null);
+    }, []);
+
+    // Auto-clear the trace whenever the selection changes to a different
+    // plane (or is cleared) — the trace is scoped to "the plane you had
+    // selected when you asked for it", not a persistent overlay.
+    useEffect(() => {
+        if (traceIcao24 && traceIcao24 !== selectedIcao24) clearTrace();
+    }, [selectedIcao24, traceIcao24, clearTrace]);
+
+    const toggleTrace = useCallback(async () => {
+        const map = mapRef.current;
+        const icao = selectedIcao24;
+        if (!map || !icao) return;
+
+        if (traceIcao24 === icao) {
+            clearTrace();
+            return;
+        }
+
+        setTraceLoading(true);
+        try {
+            const res = await fetch(`/api/flight-trace/${icao}`);
+            const data = await res.json();
+            const segments = buildGreatCircleSegments(data.trace || []);
+
+            if (!traceLayerRef.current) traceLayerRef.current = L.layerGroup().addTo(map);
+            traceLayerRef.current.clearLayers();
+            segments.forEach(seg => {
+                L.polyline(seg, {
+                    color: '#4da3ff',
+                    weight: 3,
+                    opacity: 0.55,
+                    interactive: false,
+                }).addTo(traceLayerRef.current);
+            });
+            setTraceIcao24(icao);
+        } catch (e) {
+            logger.warn('TRACE', `Flight trace fetch failed for ${icao}: ${e.message}`);
+        } finally {
+            setTraceLoading(false);
+        }
+    }, [selectedIcao24, traceIcao24, clearTrace]);
 
 
     // [v4.1.2] Unified Selection & Camera Focus Effect
@@ -1424,6 +1530,20 @@ export default function MapView({
                     return true;
                 }
 
+                // [Task B — experimental] Pre-size the reusable WebGL instance
+                // buffer for this frame. Purely additive — does not affect the
+                // Canvas2D loop below in any way when the layer isn't active.
+                const webglActive = !!webglLayerRef.current;
+                let webglInstances = null;
+                let webglCount = 0;
+                if (webglActive) {
+                    const need = Math.min(maxDraw, renderQueue.length) * FLOATS_PER_INSTANCE;
+                    if (!webglInstanceBufRef.current || webglInstanceBufRef.current.length < need) {
+                        webglInstanceBufRef.current = new Float32Array(Math.max(need, 4096 * FLOATS_PER_INSTANCE));
+                    }
+                    webglInstances = webglInstanceBufRef.current;
+                }
+
                 // ── FR24-Grade Plane Render Loop ─────────────────────────────
                 for (let i = 0; i < Math.min(maxDraw, renderQueue.length); i++) {
                     const plane = renderQueue[i];
@@ -1519,6 +1639,31 @@ export default function MapView({
                     // Movement-vector derivation was designed for MLAT noise and caused
                     // reversed/incorrect headings on clean ADS-B data — removed.
                     const angleRad = (plane.heading || 0) * Math.PI / 180;
+
+                    // [Task B — experimental] Feed the same position/rotation/
+                    // color/scale this plane would otherwise be drawn with into
+                    // the GPU-batched instance buffer. Read-only reuse of the
+                    // values above — never mutates them, never skips or alters
+                    // the Canvas2D tiers below.
+                    if (webglActive && webglCount < webglInstances.length / FLOATS_PER_INSTANCE) {
+                        const rgb = _webglColorToRGBA(altColor, webglColorCacheRef.current, webglColorCtxRef);
+                        // Same typecode-resolution fallback chain as the Canvas2D
+                        // Tier-3 path below (getAircraftVectorKey -> resolveTypecodeKey),
+                        // mapped to this plane's cell in the WebGL sprite atlas.
+                        const vectorKey = getAircraftVectorKey(plane);
+                        const spriteIndex = webglLayerRef.current.getSpriteIndex(vectorKey);
+                        const base = webglCount * FLOATS_PER_INSTANCE;
+                        webglInstances[base + 0] = ptX;
+                        webglInstances[base + 1] = ptY;
+                        webglInstances[base + 2] = angleRad;
+                        webglInstances[base + 3] = isSelected ? drawSize * 1.3 : drawSize;
+                        webglInstances[base + 4] = rgb[0];
+                        webglInstances[base + 5] = rgb[1];
+                        webglInstances[base + 6] = rgb[2];
+                        webglInstances[base + 7] = opacity;
+                        webglInstances[base + 8] = spriteIndex;
+                        webglCount++;
+                    }
 
                     // ── 3-Tier Render Pipeline ────────────────────────────────
                     // Tier 1: Safety dot    — only if drawSize ≤ 3 (should never happen with new minimums)
@@ -1777,6 +1922,12 @@ export default function MapView({
                     } // shouldShowLabel
                 }
 
+                // [Task B — experimental] Single instanced draw call for every
+                // plane collected above.
+                if (webglActive) {
+                    webglLayerRef.current.render(webglInstances, webglCount);
+                }
+
                 // FPS counter (1-second sliding window)
                 fpsCountRef.current++;
                 const fpsNow = performance.now();
@@ -1810,6 +1961,12 @@ export default function MapView({
         <div ref={mapContainerRef} className="map-container">
             {hoveredPlane && hoveredPlane.icao24 !== selectedIcao24 && <HoverCard plane={hoveredPlane} pos={hoverPos} />}
             {/* ClickCard disabled — sidebar opens automatically on plane select */}
+            {/* [2026-09-01] "顯示歷史軌跡" button removed at user's request — the
+                manual API-fetch trace toggle isn't what's wanted here; the user
+                asked for the current flight's own path instead. toggleTrace/
+                buildGreatCircleSegments/traceLayerRef are left in place
+                (unused-but-harmless) pending that follow-up, not deleted, so
+                this can be re-wired without redoing the great-circle work. */}
             <AltitudeLegend colorScheme={colorScheme} />
         </div>
     );
