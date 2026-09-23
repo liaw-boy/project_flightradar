@@ -57,15 +57,16 @@ describe('fetchGlobalBaseline total-outage alert', () => {
     test('alerts once total outage reaches the consecutive-cycle threshold', async () => {
         const { fetchGlobalBaseline } = makePollers();
 
-        // Threshold is 8 cycles (~40s) — see the rationale comment in
-        // pollers.js next to TOTAL_OUTAGE_ALERT_THRESHOLD.
+        // Threshold is 8 cycles (~120s at the current 15s poll interval) —
+        // see the rationale comment in pollers.js next to
+        // TOTAL_OUTAGE_ALERT_THRESHOLD / GLOBAL_BASELINE_INTERVAL_SEC.
         for (let i = 0; i < 7; i++) await fetchGlobalBaseline();
         expect(errorSpy.mock.calls.filter(c => c[0] === 'ALERT')).toHaveLength(0);
 
         await fetchGlobalBaseline(); // 8th consecutive total-outage cycle — threshold
         const alerts = errorSpy.mock.calls.filter(c => c[0] === 'ALERT');
         expect(alerts).toHaveLength(1);
-        expect(alerts[0][1]).toMatch(/dark for 40s\+/);
+        expect(alerts[0][1]).toMatch(/dark for 120s\+/);
     });
 
     test('does not re-alert every cycle while the outage persists (throttled)', async () => {

@@ -1147,9 +1147,17 @@ if (!BACKGROUND_JOBS_ENABLED) {
 // to 10s as a first, reversible, evidence-based step (halves request
 // volume) — re-observe the 429 cadence after this and tune further from
 // there rather than guessing.
+//
+// [2026-09-23] Re-observed after the 10s change: no more stable infinite
+// loop, but still ~2 real 429s (5min cooldown each) + a few timeouts (10s
+// cooldown each, likely just adsb.lol's own load, not us) per 30 minutes —
+// enough to trip the total-outage alert every ~8-9 min when adsb.fi-snap
+// happens to be down at the same moment. Same incremental philosophy as
+// before: one more reversible step (10s->15s) rather than jumping straight
+// to a heavier cut with no data to justify it. Re-observe again from here.
 if (BACKGROUND_JOBS_ENABLED) {
-    setInterval(fetchGlobalBaseline,    10_000);   // adsb.lol primary (10s — see note above), adsb.fi fallback
-    setInterval(fetchViewportOverlay,    10_000);  // viewport high-frequency overlay
+    setInterval(fetchGlobalBaseline,    15_000);   // adsb.lol primary (15s — see notes above), adsb.fi fallback
+    setInterval(fetchViewportOverlay,    10_000);  // viewport high-frequency overlay (re-api.adsb.lol — never seen rate-limited, left as-is)
     setInterval(fetchSpecialCategories, 60_000);   // military + LADD (slow)
 }
 

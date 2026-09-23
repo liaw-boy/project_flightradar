@@ -28,7 +28,8 @@ const { notifyDiscord } = require('./discordNotifier');
 function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackgroundResolution }) {
 
     // ── Tier 1: Global Baseline ────────────────────────────────────────────────
-    // Primary: adsb.lol (no quota, 5s interval)
+    // Primary: adsb.lol (no quota, 15s interval — see server.js's
+    // setInterval(fetchGlobalBaseline, ...) for the current value and why)
     // Fallback: adsb.fi snapshot (if adsb.lol fails)
     let _baselineRunning = false;
 
@@ -39,7 +40,7 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
     // that's been true for several consecutive cycles, so it's visible without
     // a human having to notice the map went stale.
     let _consecutiveTotalOutageCycles = 0;
-    // [2026-09-01] Was 3 (~15s). Raised to 8 (~40s) back when there was a third
+    // [2026-09-01] Was 3 (~15s). Raised to 8 back when there was a third
     // fallback tier (OpenSky, since removed — see git history) whose own
     // independent 30s throttle window meant every gap between its attempts
     // legitimately reported "all sources failed" and falsely tripped a 15s
@@ -48,7 +49,15 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
     // debounce is still a reasonable guard against a handful of transient
     // blips landing back-to-back, so it's left as-is rather than re-tuned
     // without real outage data to tune it against.
-    const TOTAL_OUTAGE_ALERT_THRESHOLD = 8;       // ~40s of zero data at the 5s poll interval
+    //
+    // Must match setInterval(fetchGlobalBaseline, ...) in server.js — used
+    // below to report actual outage duration. This drifted silently before
+    // (hardcoded as "* 5" for the original 5s interval, still "* 5" after
+    // the interval moved to 10s, so every outage alert under-reported its
+    // real duration by 2x); named here so a future interval change can't
+    // silently do the same thing a third time.
+    const GLOBAL_BASELINE_INTERVAL_SEC = 15;
+    const TOTAL_OUTAGE_ALERT_THRESHOLD = 8;       // ~120s of zero data at the 15s poll interval
     const TOTAL_OUTAGE_ALERT_THROTTLE_MS = 5 * 60_000; // re-announce at most once per 5 min while it persists
     let _lastTotalOutageAlertAt = 0;
     // [2026-09-09] Down-detection was debounced (8 consecutive failed cycles)
@@ -139,7 +148,7 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
                     if (now - _lastTotalOutageAlertAt >= TOTAL_OUTAGE_ALERT_THROTTLE_MS) {
                         _lastTotalOutageAlertAt = now;
                         _outageAlertActive = true;
-                        const outageSec = _consecutiveTotalOutageCycles * 5;
+                        const outageSec = _consecutiveTotalOutageCycles * GLOBAL_BASELINE_INTERVAL_SEC;
                         logger.error('ALERT', `Global baseline dark for ${outageSec}s+ — adsb.lol AND adsb.fi-snap both failed this cycle. Map is serving stale data.`);
                         notifyDiscord({
                             icon: 'outageDown', color: 'orange',
@@ -159,7 +168,7 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
                     // Still probationary: keep serving data (states aren't discarded
                     // below) but don't reset the outage bookkeeping yet.
                 } else {
-                    const outageSec = _consecutiveTotalOutageCycles * 5;
+                    const outageSec = _consecutiveTotalOutageCycles * GLOBAL_BASELINE_INTERVAL_SEC;
                     notifyDiscord({
                         icon: 'outageUp', color: 'green',
                         title: 'AEROSTRAT 資料來源已恢復',
