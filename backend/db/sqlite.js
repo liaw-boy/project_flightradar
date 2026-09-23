@@ -245,6 +245,54 @@ function pruneOldSessions() {
     batch();
 }
 
+// ── prediction_log retention ───────────────────────────────────────────────
+// Had no cleanup at all: 246M rows by 2026-09-23, growing ~17.6M/day, and
+// retrain_and_promote.py's load_hard_icao24s() GROUP BY over the whole table
+// was a leading cause of the nightly retrain hitting its 30-min timeout 11
+// nights running. That query only wants icao24s the *current* model misses
+// on, so recent rows are all it should ever see anyway.
+const PREDICTION_LOG_RETENTION_DAYS = Number(process.env.PREDICTION_LOG_RETENTION_DAYS) || 3;
+const _prunePredictionLogStmt = db.prepare(
+    'DELETE FROM prediction_log WHERE rowid IN (SELECT rowid FROM prediction_log WHERE ts < ? LIMIT ?)'
+);
+// Much smaller batch than PRUNE_BATCH: with three secondary indexes and a
+// 246M-row table, a 5000-row DELETE here measured up to ~900ms of blocked
+// event loop (local pings went from ~1ms to 900ms, adsb.lol fetches started
+// timing out). 500 rows keeps each block short.
+const PREDICTION_LOG_PRUNE_BATCH = 500;
+// A backlog run can outlast the hourly interval (the initial ~190M-row
+// backlog takes more than a day at this rate) — don't start a second chain on top.
+let _predictionLogPruneRunning = false;
+
+function prunePredictionLog() {
+    if (_predictionLogPruneRunning) return;
+    _predictionLogPruneRunning = true;
+    const cutoff = Math.floor(Date.now() / 1000) - PREDICTION_LOG_RETENTION_DAYS * 86400;
+    let totalDeleted = 0;
+
+    function batch() {
+        try {
+            const info = _prunePredictionLogStmt.run(cutoff, PREDICTION_LOG_PRUNE_BATCH);
+            totalDeleted += info.changes;
+            if (info.changes >= PREDICTION_LOG_PRUNE_BATCH) {
+                if (totalDeleted % 500000 === 0) {
+                    console.log(`[SQLite] prediction_log prune progress: ${totalDeleted} rows deleted so far…`);
+                }
+                setTimeout(batch, PRUNE_PAUSE_MS);
+                return;
+            }
+            if (totalDeleted > 0) {
+                console.log(`[SQLite] Pruned ${totalDeleted} prediction_log rows older than ${PREDICTION_LOG_RETENTION_DAYS}d`);
+            }
+            db.pragma('wal_checkpoint(PASSIVE)');
+        } catch (e) {
+            console.error('[SQLite] prediction_log prune batch error:', e.message);
+        }
+        _predictionLogPruneRunning = false;
+    }
+    batch();
+}
+
 // ── Periodic WAL checkpoint — every 5 minutes (PASSIVE: non-blocking) ───────
 // If WAL exceeds 2GB, escalate to TRUNCATE to prevent unbounded growth.
 const WAL_SIZE_LIMIT_BYTES = 512 * 1024 * 1024; // 512MB — TRUNCATE to reclaim disk space
@@ -325,6 +373,8 @@ setInterval(pruneOldTrackPoints, 3600 * 1000);
 // Offset from the track-point pruner so the two don't contend on startup.
 setTimeout(pruneOldSessions, 30_000);
 setInterval(pruneOldSessions, 3600 * 1000);
+setTimeout(prunePredictionLog, 60_000);
+setInterval(prunePredictionLog, 3600 * 1000);
 setInterval(walCheckpoint, 5 * 60 * 1000);
 setInterval(analyzeDb, 6 * 3600 * 1000);
 

@@ -2801,24 +2801,45 @@ const { notifyDiscord } = require('./services/discordNotifier');
 // promotion threshold (ml_trajectory/retrain_and_promote.py). The predictor
 // service (infer_server.py) polls model.pt's mtime and hot-reloads a
 // promotion within a minute — no restart needed here.
-if (BACKGROUND_JOBS_ENABLED) cron.schedule('30 4 * * *', () => {
+const RETRAIN_RETRY_DELAY_MS = 5 * 60_000;
+const _tailLines = (s, n = 20) => (s || '').trim().split('\n').slice(-n).join('\n');
+
+function runNightlyRetrain(attempt) {
     const { execFile } = require('child_process');
     const trajectoryDir = path.join(__dirname, 'ml_trajectory');
     const pythonBin = path.join(trajectoryDir, '.venv', 'bin', 'python');
-    logger.info('TRAJECTORY', 'Nightly retrain starting...');
+    logger.info('TRAJECTORY', `Nightly retrain starting (attempt ${attempt})...`);
     syncLog.start('trajectory-retrain');
-    execFile(pythonBin, ['retrain_and_promote.py', '--use-prediction-log'], {
+    // -u: unbuffered, so progress lines printed before a timeout kill actually
+    // reach stdout here instead of dying in Python's pipe buffer.
+    execFile(pythonBin, ['-u', 'retrain_and_promote.py', '--use-prediction-log'], {
         cwd: trajectoryDir,
         timeout: 30 * 60_000, // generous cap — a slow night shouldn't overlap tomorrow's run
         maxBuffer: 10 * 1024 * 1024,
     }, (err, stdout, stderr) => {
         if (err) {
-            logger.error('TRAJECTORY', `Nightly retrain failed: ${err.message}`);
+            // stdout/stderr used to be dropped here, which is why 11 straight
+            // failures (2026-09-12..22) left no trace of which phase was slow.
+            logger.error('TRAJECTORY', `Nightly retrain attempt ${attempt} failed: ${err.message}\n` +
+                `--- stdout (tail) ---\n${_tailLines(stdout)}\n--- stderr (tail) ---\n${_tailLines(stderr)}`);
+            // Retry once for transient failures only. A timeout kill (killed=true)
+            // is deterministic — retrying just holds the GPU the live predictor
+            // shares for another 30 minutes.
+            if (attempt === 1 && !err.killed) {
+                logger.warn('TRAJECTORY', `Retrying nightly retrain in ${RETRAIN_RETRY_DELAY_MS / 60_000} min`);
+                setTimeout(() => runNightlyRetrain(2), RETRAIN_RETRY_DELAY_MS);
+                return;
+            }
             syncLog.fail('trajectory-retrain', err.message);
+            // Every one of the 11 failures above did post here and still went
+            // unnoticed — make a repeat failure visibly different from a one-off.
+            const consecutive = syncLog.get('trajectory-retrain')?.consecutiveFails || 1;
             notifyDiscord({
                 icon: 'failed', color: 'red',
-                title: 'AEROSTRAT 航跡模型訓練失敗',
-                description: `\`\`\`${err.message.slice(0, 500)}\`\`\``,
+                title: consecutive >= 2
+                    ? `AEROSTRAT 航跡模型訓練已連續失敗 ${consecutive} 晚 — 模型未更新，需要處理`
+                    : 'AEROSTRAT 航跡模型訓練失敗',
+                description: `\`\`\`${err.message.slice(0, 300)}\n${_tailLines(stderr, 8).slice(-600)}\`\`\``,
             });
             return;
         }
@@ -2848,11 +2869,13 @@ if (BACKGROUND_JOBS_ENABLED) cron.schedule('30 4 * * *', () => {
                     description: `candidate: ${result.candidate_km_error?.toFixed(1)}km　champion: ${result.champion_km_error?.toFixed(1) ?? 'N/A'}km`,
                 };
         } catch (_) { /* fall back to raw last line if output shape changes */ }
-        logger.info('TRAJECTORY', `Nightly retrain done — ${summary}`);
+        logger.info('TRAJECTORY', `Nightly retrain done — ${summary}\n--- stdout (tail) ---\n${_tailLines(stdout)}`);
         syncLog.success('trajectory-retrain', summary);
         notifyDiscord(embed);
     });
-}, { timezone: 'Asia/Taipei' });
+}
+
+if (BACKGROUND_JOBS_ENABLED) cron.schedule('30 4 * * *', () => runNightlyRetrain(1), { timezone: 'Asia/Taipei' });
 
 // On startup: mark schedules_static as always ok (static file, loaded at boot)
 (function markSchedulesOk() {

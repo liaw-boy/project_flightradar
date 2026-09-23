@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import shutil
+import time
 from datetime import datetime, timezone
 
 import numpy as np
@@ -129,21 +130,36 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"device: {device}")
 
+    # Per-phase wall-clock, printed as each phase ends (survives a timeout
+    # kill when run with python -u) and included in the result JSON.
+    timings = {}
+    lap_start = time.perf_counter()
+
+    def lap(name):
+        nonlocal lap_start
+        now = time.perf_counter()
+        timings[name] = round(now - lap_start, 1)
+        print(f"[timing] {name}: {timings[name]}s")
+        lap_start = now
+
     boost_icao24s = None
     if args.use_prediction_log:
         boost_icao24s = load_hard_icao24s(args.db, error_threshold_km=args.hard_error_km)
         print(f"prediction_log: {len(boost_icao24s)} icao24s averaging >= {args.hard_error_km}km error "
               f"will be oversampled x{args.oversample_factor}")
+    lap("load_hard_icao24s")
 
     sessions = load_sessions(args.db, max_sessions=args.max_sessions, seed=args.seed, row_scan=args.row_scan,
                               boost_icao24s=boost_icao24s, oversample_factor=args.oversample_factor)
     if len(sessions) < 10:
         raise SystemExit(f"only {len(sessions)} usable sessions -- widen --max-sessions/--row-scan")
+    lap("load_sessions")
 
     split = max(1, int(len(sessions) * 0.85))
     train_sessions, val_sessions = sessions[:split], sessions[split:]
     x_train, y_train = build_windows(train_sessions)
     x_val, y_val = build_windows(val_sessions)
+    lap("build_windows")
     if x_train.shape[0] == 0 or x_val.shape[0] == 0:
         raise SystemExit("not enough windows for a train/val split -- widen --max-sessions")
     # A too-small validation set makes the promotion threshold meaningless —
@@ -165,16 +181,19 @@ def main(args):
 
     print(f"training candidate on {x_train.shape[0]} windows ({len(sessions)} sessions)...")
     candidate = train_candidate(x_train_s, y_train_s, device, args.epochs, args.batch_size, args.lr)
+    lap("train_candidate")
     x_val_s = scaler.transform(x_val)
     val_last_pos = x_val[:, -1, :3]
     candidate_km = evaluate_km_error(candidate, device, x_val_s, val_last_pos, y_val, y_scaler)
     print(f"candidate val error: {candidate_km:.3f} km")
+    lap("eval_candidate")
 
     result = {
         "time": datetime.now(timezone.utc).isoformat(),
         "sessions": len(sessions),
         "windows": int(x_train.shape[0]),
         "candidate_km_error": candidate_km,
+        "timings_s": timings,  # same dict; later laps are still included
     }
 
     # A NaN/inf error means training pathology (e.g. a NaN that slipped past
@@ -233,6 +252,7 @@ def main(args):
         # produce for these inputs today, not an apples-to-oranges comparison.
         x_val_champ_s = champion_scaler.transform(x_val)
         champion_km = evaluate_km_error(champion, device, x_val_champ_s, val_last_pos, y_val, champion_y_scaler)
+        lap("eval_champion")
         improvement = (champion_km - candidate_km) / champion_km if champion_km > 0 else 0
         should_promote = improvement > args.min_improvement
 

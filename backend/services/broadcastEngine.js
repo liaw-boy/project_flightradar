@@ -82,6 +82,14 @@ const PREDICTOR_WINDOW_SIZE = 10; // must match ml_trajectory/model.py WINDOW_SI
 // plane stale for `age` ms needs ceil(age / this) rollout steps from
 // infer_server.py's autoregressive extrapolation, not a fixed 1.
 const PREDICTOR_STEP_S = 5;
+const PREDICTION_SAMPLE_SLICES = 5;
+let _predictionCycle = 0;
+// Stable per-icao24 slice so each plane is sampled every Nth cycle, not at random.
+function _sampleSliceOf(icao24) {
+    let h = 0;
+    for (let i = 0; i < icao24.length; i++) h = (h * 31 + icao24.charCodeAt(i)) >>> 0;
+    return h % PREDICTION_SAMPLE_SLICES;
+}
 let _broadcastDirty = false;
 
 // pruneAndBroadcast is called fire-and-forget from three independently-
@@ -267,18 +275,24 @@ async function _pruneAndBroadcastImpl() {
         try { predictionLogStore.insertMany(logRows); } catch (_) { /* best-effort — never block broadcasting on log writes */ }
     }
 
-    // Predict for every plane with a full buffer, not just stale ones —
-    // purely for background accuracy logging (prediction_log) right now.
+    // Predictions here are purely for background accuracy logging
+    // (prediction_log) right now.
     // [2026-08-31] Was also used to gap-fill/blend the DISPLAYED position
     // (both here and in MapView.jsx's Phase 2) — reverted after that path
     // produced two live bugs (predicting for landed aircraft; per-prediction
-    // direction noise read as visible jitter). See the plan doc
-    // (lively-spinning-stream.md) for the staged re-enablement path. This
-    // loop and predictBatch() call are kept running so prediction_log keeps
-    // accumulating real accuracy data during the validation period —
-    // stopping it would blind the exact measurement the next stage needs.
+    // direction noise read as visible jitter). Kept running so prediction_log
+    // keeps accumulating real accuracy data.
+    // [2026-09-23] Only a rotating 1/PREDICTION_SAMPLE_SLICES of the fleet per
+    // cycle, not every plane every cycle: batch size had grown with the global
+    // fleet to 10k+ items, timing out the predictor every few minutes — and
+    // since this function awaits predictBatch() under the skip-if-busy guard
+    // above, each timeout also made the pollers skip their broadcast. The
+    // same every-plane loop was writing ~17.6M prediction_log rows/day; a
+    // sample is plenty for retrain_and_promote.py's per-icao24 averages.
+    const slice = _predictionCycle++ % PREDICTION_SAMPLE_SLICES;
     const predictItems = [];
     for (const [icao24, p] of masterStateMap) {
+        if (_sampleSliceOf(icao24) !== slice) continue;
         // Training data is airborne-only (ml_trajectory/dataset.py's
         // `on_ground = 0` filter) — applying the model to a landed/taxiing
         // aircraft extrapolates flight-regime dynamics onto ground movement
@@ -295,14 +309,16 @@ async function _pruneAndBroadcastImpl() {
         predictItems.push({ icao24, sequence: buf, stepsAhead });
     }
 
-    // masterStateMap entries are left untouched — only the broadcast/cache
-    // snapshot gets the extrapolated position, so a real update arriving
-    // late still merges against the last genuine state, not a guess.
-    let states = Array.from(masterStateMap.values());
+    // [2026-08-31] Predictions used to overwrite (then later just annotate)
+    // the broadcast lat/lng. Reverted to tar1090's behavior — hold the last
+    // real position, never guess one. MapView.jsx's Phase 2 blend, the only
+    // consumer of predictedLat/Lng, is disabled (PHASE2_ENABLED = false), so
+    // [2026-09-23] predictions are no longer attached to broadcast states at
+    // all, and the call is not awaited: broadcasting must never wait on (or
+    // be skipped because of) the predictor. Re-attach here if Phase 2 returns.
     if (predictItems.length > 0) {
         const stepsAheadByIcao = new Map(predictItems.map(it => [it.icao24, it.stepsAhead]));
-        const predictions = await predictBatch(predictItems);
-        if (predictions.size > 0) {
+        predictBatch(predictItems).then((predictions) => {
             for (const [icao24, pred] of predictions) {
                 const p = masterStateMap.get(icao24);
                 pendingPredictions.set(icao24, {
@@ -313,29 +329,10 @@ async function _pruneAndBroadcastImpl() {
                     baselinePosUpdatedAt: p?._posUpdatedAt ?? p?._lastSeen ?? now,
                 });
             }
-            states = states.map((p) => {
-                const pred = predictions.get(p.icao24);
-                if (!pred) return p;
-                // [2026-08-31] Was overwriting lat/lng/altitude with the
-                // model's prediction once a plane went stale past
-                // PREDICT_GRACE_MS ("gap-fill"). Reverted: checked tar1090
-                // (the reference open-source ADS-B web client) — it never
-                // guesses a position, it just holds the last real one until
-                // the next update arrives. Doing the same here: attach
-                // predictedLat/Lng/Altitude as extra info only, never touch
-                // the actual displayed lat/lng/altitude. Frontend's Phase 2
-                // blend (which consumed these fields) is also disabled for
-                // the same reason — see MapView.jsx.
-                return {
-                    ...p,
-                    predictedLat: pred.lat,
-                    predictedLng: pred.lng,
-                    predictedAltitude: pred.altitude,
-                };
-            });
-        }
+        });
     }
 
+    const states = Array.from(masterStateMap.values());
     setGlobalPlanesCache({ states, time: Math.floor(Date.now() / 1000), stale: false });
     _broadcastDirty = true; // picked up by the flush ticker below
 }
