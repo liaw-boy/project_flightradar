@@ -20,7 +20,7 @@ const DATA_FRESHNESS_THRESHOLDS = {
 // mutated in place.
 function registerHealthRoutes(app, deps) {
     const {
-        requireAdminAccess, syncLog, accountPool, rawAccounts, activeSessions,
+        requireAdminAccess, syncLog, activeSessions,
         ingestionStats, sourceHealth, apiStats, TrackPoint, FlightSession,
         getMasterStateMap, getGlobalPlanesCache, getCpuUsage, backendDir,
     } = deps;
@@ -78,8 +78,6 @@ function registerHealthRoutes(app, deps) {
             status: 'ok',
             uptime: process.uptime(),
             cacheSize: masterStateMap?.size ?? globalPlanesCache.states?.length ?? 0,
-            activeAccount: accountPool.getCurrentUser(),
-            totalAccounts: rawAccounts.length,
             activeSessions: activeSessions.size,
             ingestion: ingestionStats,
             performance: {
@@ -133,14 +131,11 @@ function registerHealthRoutes(app, deps) {
             stateCalls: apiStats.stateCalls,
             metadataCalls: apiStats.metadataCalls,
             cacheHits: apiStats.cacheHits,
-            accounts: accountPool.getStats(),
             errors: apiStats.errors,
             lastError: apiStats.lastError,
             lastErrorTime: apiStats.lastErrorTime,
             lastSuccessTime: apiStats.lastSuccessTime,
             uptimeMinutes: Math.round((Date.now() - apiStats.startTime) / 60000),
-            recommendedInterval: Math.round(accountPool.getRecommendedInterval(15000) / 1000),
-            activeAccount: accountPool.getCurrentUser(),
             // [v11.0] Per-source health for DevPanel
             sourceHealth,
             totalPlanes: masterStateMap?.size ?? globalPlanesCache.states?.length ?? 0,

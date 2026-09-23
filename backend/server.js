@@ -58,7 +58,6 @@ const { crawlFlightSchedules } = require('./crawler');
 const NodeCache = require('node-cache');
 const flightController = require('./controllers/flightController');
 const AEROSTRAT_VERSION = 'v10.5-Hybrid';
-const AccountPool = require('./accountPool');
 
 // ==========================================
 // [v12.8] CPU Usage Tracker (Task Manager Logic)
@@ -401,113 +400,6 @@ app.post('/api/viewport', (req, res) => res.json({ status: 'ok', received: true 
 app.get('/api/planes/bbox-ping', (req, res) => res.json({ status: 'active' }));
 
 
-// ==========================================
-// [v8.0] High-Availability Live Data Endpoint
-// ==========================================
-app.get('/api/flights/live', async (req, res) => {
-    const { lamin, lomin, lamax, lomax } = req.query;
-    
-    // Normalize to standard JSON structure
-    const normalize = (icao24, lat, lon, alt, hdg, gs, vrate, squawk, callsign, onGround, category, typecode) => ({
-        hex: icao24?.toLowerCase() || 'unknown',
-        lat: parseFloat(lat) || 0,
-        lon: parseFloat(lon) || 0,
-        alt: Math.round(alt) || 0,
-        hdg: Math.round(hdg) || 0,
-        gs: Math.round(gs) || 0,
-        vrate: Math.round(vrate) || 0,
-        squawk: squawk || '0000',
-        callsign: (callsign || 'N/A').trim(),
-        onGround: !!onGround,
-        category: category || 0,
-        typecode: typecode || null
-    });
-
-    try {
-        // [Phase 17] Adaptive Primary Telemetry Resolver
-        const primaryUrl = process.env.PRIMARY_TELEMETRY_URL || 'https://opensky-network.org/api/states/all';
-        let rawPlanes = [];
-        let sourceName = 'primary';
-
-        if (primaryUrl.includes('opensky-network.org')) {
-            // Format 1: OpenSky Network (Uses built-in credential rotator fetcher)
-            const osData = await fetchOpenSky({ lamin, lomin, lamax, lomax });
-            rawPlanes = osData.states.map(s => normalize(
-                s.icao24, s.lat, s.lng, s.altitude, s.heading, 
-                s.velocity, s.vRate, s.squawk, s.callsign, s.onGround,
-                s.category, s.typecode
-            ));
-            sourceName = 'opensky';
-        } else {
-            // Format 2: Custom SDR JSON (Raspberry Pi readsb / tar1090)
-            const sdrRes = await fetch(primaryUrl, { signal: AbortSignal.timeout(5000) });
-            if (!sdrRes.ok) throw new Error(`Custom Telemetry Source responded with ${sdrRes.status}`);
-            const sdrData = await sdrRes.json();
-
-            // Intelligent payload detection
-            if (sdrData.aircraft) {
-                // readsb / tar1090 array
-                rawPlanes = sdrData.aircraft.map(ac => normalize(
-                    ac.hex, ac.lat, ac.lon, ac.alt_baro, ac.track,
-                    ac.gs, ac.baro_rate, ac.squawk, ac.flight, ac.alt_baro === 'ground',
-                    ac.category, ac.t
-                ));
-            } else if (sdrData.states) {
-                // Raw OpenSky-like structure without fetchOpenSky wrapping
-                rawPlanes = sdrData.states.map(s => normalize(
-                    s[0], s[6], s[5], s[7] || s[13], s[10], 
-                    s[9], s[11], s[14], s[1], s[8],
-                    s[17], null
-                ));
-            } else {
-                throw new Error("Unrecognized telemetry payload schema.");
-            }
-            
-            // Client requests bounding box, SDR usually returns full global. Filter locally.
-            const latMin = parseFloat(lamin); const latMax = parseFloat(lamax);
-            const lonMin = parseFloat(lomin); const lonMax = parseFloat(lomax);
-            rawPlanes = rawPlanes.filter(p => 
-                p.lat >= latMin && p.lat <= latMax &&
-                p.lon >= lonMin && p.lon <= lonMax
-            );
-            sourceName = 'sdr_local';
-        }
-
-        console.log(`📡 [LIVE] Primary Telemetry (${sourceName}) Success: ${rawPlanes.length} planes`);
-        return res.json({ source: sourceName, planes: rawPlanes, timestamp: Date.now() });
-
-    } catch (primaryErr) {
-        console.warn(`⚠️ [LIVE] Primary Telemetry Failed (${primaryErr.message}). Switching to fallback...`);
-        
-        try {
-            // [Fallback] Dynamic Fallback Telemetry
-            const fallbackBase = process.env.FALLBACK_TELEMETRY_URL || 'https://api.adsb.lol';
-            const lat = (parseFloat(lamin) + parseFloat(lamax)) / 2;
-            const lon = (parseFloat(lomin) + parseFloat(lomax)) / 2;
-            const dist = 250; // default 250km radius
-            
-            const fallbackRes = await fetch(`${fallbackBase}/v2/lat/${lat}/lon/${lon}/dist/${dist}`, {
-                headers: { 'User-Agent': 'AEROSTRAT/5.0' },
-                signal: AbortSignal.timeout(5000)
-            });
-            
-            if (!fallbackRes.ok) throw new Error(`Fallback status ${fallbackRes.status}`);
-            const fallbackData = await fallbackRes.json();
-            
-            const results = (fallbackData.ac || []).map(ac => normalize(
-                ac.hex, ac.lat, ac.lon, ac.alt_baro, ac.track,
-                ac.gs, ac.baro_rate, ac.squawk, ac.flight, ac.alt_baro === 'ground',
-                ac.category, ac.t
-            ));
-            
-            console.log(`✅ [LIVE] Fallback Success: ${results.length} planes`);
-            return res.json({ source: 'fallback', planes: results, timestamp: Date.now() });
-        } catch (fallbackErr) {
-            console.error(`❌ [LIVE] All telemetry sources failed:`, fallbackErr.message);
-            res.status(503).json({ error: 'Live data unavailable from all sources', details: fallbackErr.message });
-        }
-    }
-});
 
 // ==========================================
 // [v8.0] Multi-Source Flight Details Fusion
@@ -535,9 +427,13 @@ app.get('/api/flight-details/:hex/:callsign', async (req, res) => {
 
     // 2. Convergent Parallel Fetch
     const results = await Promise.allSettled([
-        // a. [OpenSky State] Latest telemetry
-        fetchOpenSky({ icao24: hex }).catch(() => null),
-        
+        // a. [Live State] Latest telemetry straight from the in-memory fusion
+        // engine (masterStateMap) — replaces a dead OpenSky states/all call
+        // (OpenSky's API is gone; see accountPool.js removal, git history).
+        // Shaped as { states: [...] } to match what downstream normalization
+        // below already expects from osRes?.states?.[0].
+        Promise.resolve(masterStateMap.has(hex) ? { states: [masterStateMap.get(hex)] } : null),
+
         // b. [Route Supplement] Using AeroDataBox as Route API fallback
         fetch(`https://aerodatabox.p.rapidapi.com/flights/callsign/${encodeURIComponent(callsign)}`, {
             headers: { 'X-RapidAPI-Key': process.env.AERODATABOX_API_KEY, 'X-RapidAPI-Host': 'aerodatabox.p.rapidapi.com' },
@@ -829,23 +725,6 @@ async function fetchRouteData(callsign) {
 }
 
 // ==========================================
-// OpenSky API OAuth2 認證 Header
-// ==========================================
-// ==========================================
-// OpenSky API 多帳號池（AccountPool）
-// ==========================================
-const _rawAccounts = [
-    { user: process.env.OPENSKY_USER1 || process.env.OPENSKY_USER, pass: process.env.OPENSKY_PASS1 || process.env.OPENSKY_PASS },
-    { user: process.env.OPENSKY_USER2, pass: process.env.OPENSKY_PASS2 },
-    { user: process.env.OPENSKY_USER3, pass: process.env.OPENSKY_PASS3 },
-    { user: process.env.OPENSKY_USER4, pass: process.env.OPENSKY_PASS4 },
-    { user: process.env.OPENSKY_USER5, pass: process.env.OPENSKY_PASS5 },
-].filter(a => a.user && a.pass);
-
-const QUOTA_CACHE_FILE = path.join(__dirname, 'quota-cache.json');
-const accountPool = new AccountPool(_rawAccounts, { safeFloor: 5 });
-
-// ==========================================
 // 動作紀錄 API (讓前端的操作顯示在後台終端並寫入 log 檔)
 app.post('/api/log', (req, res) => {
     const { message, type = 'info', data = {} } = req.body;
@@ -1120,33 +999,13 @@ var apiStats = {
     lastErrorTime: null,
     lastSuccessTime: null,
     startTime: Date.now(),
-    // accounts 動態從 pool 讀取，不再在此儲存
-    get accounts() { return accountPool.getStats(); },
 };
-
-// /api/planes/bbox is the site's highest-traffic, fully public, unauthenticated
-// endpoint — serving raw apiStats there exposed each OpenSky account's real
-// username alongside its credit balance/fail counts to any visitor (devtools
-// on the response). The /monitor dashboard (behind requireMonitorAuth) still
-// gets the real usernames via apiStats.accounts directly; this redacted copy
-// is only for the public bbox HUD, which only needs credit/health numbers.
-function publicApiStats() {
-    return {
-        ...apiStats,
-        accounts: accountPool.getStats().map((a, i) => ({ ...a, user: `account-${i + 1}` })),
-    };
-}
-
-// calculateRecommendedInterval 委派給 accountPool（保留名稱供舊呼叫點使用）
-function calculateRecommendedInterval() {
-    return Math.round(accountPool.getRecommendedInterval(15000) / 1000);
-}
 
 // ==========================================
 // 外部 API 狀態同步（給 service_hub 拉取，不主動額外呼叫上游）
-// 資料完全來自既有的真實請求結果（accountPool / sourceHealth 的
-// circuit breaker 紀錄），這裡只是把已經在記憶體裡的狀態轉成 JSON，
-// 不會對 OpenSky / adsb.lol / adsb.fi 等來源多發任何請求。
+// 資料完全來自既有的真實請求結果（sourceHealth 的 circuit breaker
+// 紀錄），這裡只是把已經在記憶體裡的狀態轉成 JSON，不會對
+// adsb.lol / adsb.fi 等來源多發任何請求。
 // ==========================================
 app.get('/api/external-status', (req, res) => {
     const now = Date.now();
@@ -1160,15 +1019,7 @@ app.get('/api/external-status', (req, res) => {
             cbUntil: (h.cbUntil || 0) > now ? h.cbUntil : null,
         }])
     );
-    const accounts = accountPool.getStats().map((a, i) => ({
-        id: `opensky-${i + 1}`, // 帳號名稱不外露，只給序號
-        remainingCredits: a.remainingCredits,
-        unlockTime: a.unlockTime,
-        rateLimits: a.rateLimits,
-        consecutiveFails: a.consecutiveFails,
-        dailyUsed: a.dailyUsed,
-    }));
-    res.json({ service: 'aerostrat', updatedAt: now, accounts, sources });
+    res.json({ service: 'aerostrat', updatedAt: now, sources });
 });
 
 // ==========================================
@@ -1258,14 +1109,11 @@ function isPlausibleRoute(groundAirport, depCode, arrCode) {
            arr === groundAirport.icao || arr === groundAirport.iata;
 }
 
-const { createPlaneSources } = require('./services/planeSources');
-const { fetchOpenSky, fetchOpenSkyBaselineFallback, normalizeAcRecord } = createPlaneSources({
-    accountPool, apiStats, cbOpen, cbTrip, cbReset, logSuppressedSource, logger, backendDir: __dirname,
-});
+const { normalizeAcRecord } = require('./services/planeSources');
 
 const { registerHealthRoutes, DATA_FRESHNESS_THRESHOLDS } = require('./routes/health');
 registerHealthRoutes(app, {
-    requireAdminAccess, syncLog, accountPool, rawAccounts: _rawAccounts, activeSessions,
+    requireAdminAccess, syncLog, activeSessions,
     ingestionStats, sourceHealth, apiStats, TrackPoint, FlightSession,
     getMasterStateMap: () => masterStateMap,
     getGlobalPlanesCache,
@@ -1278,7 +1126,7 @@ const { ingestTrackPoints } = createTrackIngest({ Route, TrackPoint, FlightSessi
 
 const { createPollers } = require('./services/pollers');
 const { fetchGlobalBaseline, fetchViewportOverlay, fetchSpecialCategories, enrichAndIngest } = createPollers({
-    normalizeAcRecord, fetchOpenSkyBaselineFallback, ingestTrackPoints, triggerBackgroundResolution,
+    normalizeAcRecord, ingestTrackPoints, triggerBackgroundResolution,
 });
 
 // Non-primary instances (e.g. a staging deployment sharing the same upstream
@@ -1367,15 +1215,10 @@ if (BACKGROUND_JOBS_ENABLED) {
     setTimeout(reapStaleDbSessions, 10_000);
 }
 
-// 啟動時讀取快取並初始化（委派給 AccountPool）
-const isFreshQuota = accountPool.loadCache(QUOTA_CACHE_FILE);
 if (BACKGROUND_JOBS_ENABLED) {
-    (async () => {
-        await accountPool.warmup(isFreshQuota);
-        // [v11.0] Immediate first-run: global baseline first, then special categories 3s later
-        fetchGlobalBaseline();
-        setTimeout(fetchSpecialCategories, 3_000);
-    })();
+    // [v11.0] Immediate first-run: global baseline first, then special categories 3s later
+    fetchGlobalBaseline();
+    setTimeout(fetchSpecialCategories, 3_000);
 }
 
 // Automatic "stuck/zombie plane" diagnostic beacon (2026-09-01) — see
@@ -1434,7 +1277,11 @@ app.get('/api/planes/bbox', async (req, res) => {
         states: planesInBBox,
         source: 'global_cache_prestitched',
         stale: !!getGlobalPlanesCache().stale,
-        stats: publicApiStats() // [v4.3.6] Restore API stats for HUD synchronization — redacted, see publicApiStats()
+        // [v4.3.6] Restore API stats for HUD synchronization. Used to go through
+        // publicApiStats() to redact each OpenSky account's real username before
+        // this public, unauthenticated response — apiStats carries no per-account
+        // data any more now that OpenSky is gone, so the redaction wrapper is too.
+        stats: apiStats
     });
 });
 
@@ -1580,52 +1427,21 @@ app.get('/api/metadata/:icao24', async (req, res) => {
             return res.json(attachOpenAP(dbAircraft));
         }
 
-        // 3. 抓取外部 API
-        const url = `https://opensky-network.org/api/metadata/aircraft/icao/${icao24}`;
-        console.log(`🌐 [METADATA] Fetching metadata for ${icao24}...`);
-        const { headers: metaHeaders, account: metaAccount } = await accountPool.getHeaders();
-        const response = await fetch(url, {
-            headers: metaHeaders,
-            signal: AbortSignal.timeout(10000)
-        });
-
-        accountPool.recordResponse(metaAccount, response.status, response.headers);
-
-        if (response.status === 404) {
-            // 404 = OpenSky 確認無此飛機資料，永久標記避免重複查詢
-            await Aircraft.findOneAndUpdate(
-                { icao24 },
-                { icao24, noData: true, lastUpdated: new Date() },
-                { upsert: true }
-            );
-            logMissingData(icao24, 'metadata');
-            return res.json({ icao24, noData: true });
-        }
-        if (!response.ok) {
-            // 429/5xx 為暫時性錯誤，不標記 noData，讓下次請求重試
-            return res.json({ icao24, noData: false, error: `OpenSky HTTP ${response.status}` });
-        }
-
-        const data = await response.json();
-        const metadata = {
-            icao24: icao24,
-            registration: data.registration || '',
-            manufacturerName: data.manufacturerName || '',
-            model: data.model || '',
-            typecode: data.typecode || '',
-            owner: data.owner || '',
-            operatorCallsign: data.operatorCallsign || '',
-            built: data.built || '',
-            categoryDescription: data.categoryDescription || '',
-            lastUpdated: new Date()
-        };
-
-        // 存入 Aircraft store
-        await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true });
-        resolveMissingData(icao24, 'metadata');
-        console.log(`${getTime()} 📦 [METADATA] Cached to DB: ${icao24} = ${metadata.typecode} ${metadata.model}`);
-
-        res.json(metadata);
+        // 3. [2026-09] External API step removed — OpenSky's metadata endpoint
+        // is dead (returns 410 Gone). Nothing else in this waterfall replaced
+        // it; static dict (step 1) / Aircraft store (step 2) are populated by
+        // other means instead (mictronics/VRS/OSINT syncs, the aircraft.csv.gz
+        // startup index, and flightController.js's background resolution
+        // waterfall triggered from live traffic). Mark noData like a real
+        // upstream 404 used to, so the frontend still gets a definite answer
+        // instead of hanging, and this icao24 isn't retried every request.
+        await Aircraft.findOneAndUpdate(
+            { icao24 },
+            { icao24, noData: true, lastUpdated: new Date() },
+            { upsert: true }
+        );
+        logMissingData(icao24, 'metadata');
+        res.json({ icao24, noData: true });
     } catch (error) {
         console.error(`❌ [METADATA ERROR] ${icao24}: ${error.message}`);
         res.json({ icao24, noData: true, error: error.message });
@@ -1653,66 +1469,18 @@ app.post('/api/metadata/batch', async function (req, res) {
             return res.json({ fetched: 0, reason: 'all_cached' });
         }
 
-        // [OPT 5.1] 如果所有帳號 quota 均低於安全線，跳過本次批次
-        const bestStats = accountPool.getStats().find(a => a.remainingCredits === null || a.remainingCredits > 50);
-        if (!bestStats) {
-            return res.json({ fetched: 0, skipped: uncached.length, reason: 'quota_low' });
-        }
-
-        // 最多同時查詢 10 架
+        // [2026-09] OpenSky-quota-gated prefetch loop removed — OpenSky's
+        // metadata endpoint is dead (returns 410 Gone) and this endpoint has
+        // no other external source to fall back to. Mark the batch noData,
+        // same degraded behavior as the single-lookup /api/metadata/:icao24.
         const toFetch = uncached.slice(0, 10);
-        let fetched = 0;
-
-        for (let i = 0; i < toFetch.length; i++) {
-            const icao24 = toFetch[i].toLowerCase();
-            try {
-                const { headers: bHeaders, account: bAccount } = await accountPool.getHeaders();
-                apiStats.totalCalls++;
-                apiStats.metadataCalls++;
-                const response = await fetch(
-                    'https://opensky-network.org/api/metadata/aircraft/icao/' + icao24,
-                    { headers: bHeaders, signal: AbortSignal.timeout(8000) }
-                );
-
-                accountPool.recordResponse(bAccount, response.status, response.headers);
-
-                if (response.status === 429 || response.status >= 500) {
-                    // 429 = 配額耗盡；5xx = 伺服器暫時錯誤 — 兩者皆停止批次，不標記 noData
-                    break;
-                }
-
-                if (response.ok) {
-                    const data = await response.json();
-                    const metadata = {
-                        icao24: icao24,
-                        registration: data.registration || '',
-                        manufacturerName: data.manufacturerName || '',
-                        model: data.model || '',
-                        typecode: data.typecode || '',
-                        owner: data.owner || '',
-                        operatorCallsign: data.operatorCallsign || '',
-                        built: data.built || '',
-                        categoryDescription: data.categoryDescription || '',
-                        lastUpdated: new Date()
-                    };
-                    await Aircraft.findOneAndUpdate({ icao24 }, metadata, { upsert: true });
-                    resolveMissingData(icao24, 'metadata');
-                    fetched++;
-                } else {
-                    await Aircraft.findOneAndUpdate({ icao24 }, { icao24, noData: true, lastUpdated: new Date() }, { upsert: true });
-                    logMissingData(icao24, 'metadata');
-                }
-            } catch (e) {
-                apiStats.errors++;
-            }
-
-            if (i < toFetch.length - 1) {
-                await new Promise(r => setTimeout(r, 300));
-            }
+        for (const id of toFetch) {
+            const icao24 = id.toLowerCase();
+            await Aircraft.findOneAndUpdate({ icao24 }, { icao24, noData: true, lastUpdated: new Date() }, { upsert: true });
+            logMissingData(icao24, 'metadata');
         }
 
-        console.log(`${getTime()} 📦 [BATCH] Fetched ${fetched}/${toFetch.length} metadata to cache`);
-        res.json({ fetched: fetched, requested: toFetch.length });
+        res.json({ fetched: 0, requested: toFetch.length });
     } catch (err) {
         console.error('❌ [BATCH ERROR]', err.message);
         res.status(500).json({ fetched: 0, error: 'Internal server error' });
@@ -2150,10 +1918,7 @@ app.get('/api/airline/:callsign', (req, res) => {
 });
 
 // ==========================================
-// 飛機詳細資訊 API (整合 OpenSky & AircraftRegistry)
-// ==========================================
-// ==========================================
-// 飛機詳細資訊 API (專業級多源融合：adsb.fi > OpenSky > Internal)
+// 飛機詳細資訊 API (專業級多源融合：adsb.fi > Internal)
 // ==========================================
 app.get('/api/aircraft/:icao24', async (req, res) => {
     const icao24 = req.params.icao24.toLowerCase();
@@ -2206,27 +1971,10 @@ app.get('/api/aircraft/:icao24', async (req, res) => {
                 }
             }
         } catch (e) { logger.debug('FUSION', `adsb.fi failed for ${icao24}: ${e.message}`); }
-
-        // --- Tier 3: OpenSky Network (Detailed, but slow/rate-limited) ---
-        if (!fusionData || !fusionData.typecode) {
-            try {
-                const osRes = await fetch(`https://opensky-network.org/api/metadata/aircraft/icao/${icao24}`, { signal: AbortSignal.timeout(5000) });
-                if (osRes.ok) {
-                    const osData = await osRes.json();
-                    logger.info('FUSION', `OpenSky solved ${icao24}: ${osData.registration} (${osData.typecode})`);
-                    fusionData = {
-                        registration: osData.registration || fusionData?.registration || '',
-                        manufacturerName: osData.manufacturerName || '',
-                        model: osData.model || fusionData?.model || '',
-                        typecode: osData.typecode || fusionData?.typecode || '',
-                        owner: osData.owner || '',
-                        operatorCallsign: osData.operatorCallsign || fusionData?.operatorCallsign || '',
-                        categoryDescription: osData.categoryDescription || '',
-                        source: 'opensky'
-                    };
-                }
-            } catch (e) { logger.warn('FUSION', `OpenSky failed for ${icao24}: ${e.message}`); }
-        }
+        // [2026-09] Tier 3 (OpenSky Network) removed — its metadata endpoint
+        // is dead (returns 410 Gone). No replacement tier: if adsb.fi didn't
+        // have a typecode, fusionData stays as-is and falls through to
+        // whatever "Finalize & Save" below does with partial/null data.
 
         // --- Finalize & Save ---
         if (fusionData) {
@@ -2586,25 +2334,22 @@ app.get('/api/route/external', async (req, res) => {
 const trackCache = new Map();
 const TRACK_CACHE_TTL = 30000; // 30 秒快取
 
-// Cache for OpenSky historical tracks — longer TTL since data changes slowly mid-flight
-const historicalTrackCache = new Map();
-const HISTORICAL_TRACK_TTL = 90000; // 90 seconds
-
-// [MEM-LEAK] trackCache/historicalTrackCache/routeCache/_registryCache are all
-// icao24-keyed and only ever checked for staleness on READ (a cache miss just
-// means "fetch again"), which never frees a stale entry that's never read
-// again — an aircraft looked up once and never revisited (the common case for
-// a global feed running for weeks) keeps its entry, including trackCache's
-// full flight-path arrays, forever. Sweep all four on the same interval as
-// the session reaper above so cold entries actually get freed.
+// [MEM-LEAK] trackCache/routeCache/_registryCache are all icao24-keyed and
+// only ever checked for staleness on READ (a cache miss just means "fetch
+// again"), which never frees a stale entry that's never read again — an
+// aircraft looked up once and never revisited (the common case for a global
+// feed running for weeks) keeps its entry, including trackCache's full
+// flight-path arrays, forever. Sweep all three on the same interval as the
+// session reaper above so cold entries actually get freed.
+//
+// [2026-09] historicalTrackCache used to be swept here too, alongside
+// fetchOpenSkyHistoricalTrack() below it — both removed once OpenSky's API
+// went dead; that cache had no other writer.
 if (BACKGROUND_JOBS_ENABLED) setInterval(() => {
     const now = Date.now();
     let purged = 0;
     for (const [key, entry] of trackCache) {
         if (now - entry.timestamp > TRACK_CACHE_TTL) { trackCache.delete(key); purged++; }
-    }
-    for (const [key, entry] of historicalTrackCache) {
-        if (now - entry.timestamp > HISTORICAL_TRACK_TTL) { historicalTrackCache.delete(key); purged++; }
     }
     for (const [key, entry] of routeCache) {
         const ttl = entry.data?.noData ? 120000 : ROUTE_CACHE_TTL;
@@ -2614,48 +2359,8 @@ if (BACKGROUND_JOBS_ENABLED) setInterval(() => {
     for (const [key, entry] of _registryCache) {
         if (now - (entry._updatedAt || 0) > REGISTRY_CACHE_TTL) { _registryCache.delete(key); purged++; }
     }
-    if (purged > 0) logger.info('CACHE', `Reaper purged ${purged} stale entries (trackCache/historicalTrackCache/routeCache/_registryCache)`);
+    if (purged > 0) logger.info('CACHE', `Reaper purged ${purged} stale entries (trackCache/routeCache/_registryCache)`);
 }, 300000);
-
-/**
- * Fetch historical track for a single aircraft from OpenSky Network.
- * time=0 returns the most recent flight track (current or last completed).
- * Returns the parsed response object or null if unavailable.
- * Results are cached for HISTORICAL_TRACK_TTL ms to prevent rate-limit hammering.
- */
-async function fetchOpenSkyHistoricalTrack(icao24) {
-    const cached = historicalTrackCache.get(icao24);
-    if (cached && (Date.now() - cached.timestamp < HISTORICAL_TRACK_TTL)) {
-        return cached.data;
-    }
-
-    try {
-        if (accountPool._accounts.length === 0) return null;
-        // OpenSky 已全面改用 OAuth2 Bearer Token，Basic Auth 已棄用
-        const { headers: basicHeaders, account: histAccount } = await accountPool.getHeaders();
-        const url = `https://opensky-network.org/api/tracks/all?icao24=${icao24}&time=0`;
-
-        const res = await fetch(url, {
-            headers: basicHeaders,
-            signal: AbortSignal.timeout(5000)
-        });
-        accountPool.recordResponse(histAccount, res.status, res.headers);
-
-        if (!res.ok) {
-            // 404 = no track data for this aircraft, cache as null to avoid retries
-            historicalTrackCache.set(icao24, { data: null, timestamp: Date.now() });
-            return null;
-        }
-
-        const data = await res.json();
-        historicalTrackCache.set(icao24, { data, timestamp: Date.now() });
-        return data;
-    } catch (e) {
-        logger.debug('TRACK', `OpenSky historical unavailable for ${icao24}: ${e.message}`);
-        historicalTrackCache.set(icao24, { data: null, timestamp: Date.now() });
-        return null;
-    }
-}
 
 /**
  * Fetch track for an aircraft — always session-scoped to prevent mixing flights.

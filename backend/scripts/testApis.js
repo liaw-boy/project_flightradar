@@ -156,47 +156,6 @@ async function testD_ReApi() {
 }
 
 // ═══════════════════════════════════════════════════════
-// 測試 E — OpenSky OAuth2 vs Basic Auth
-// ═══════════════════════════════════════════════════════
-async function testE_OpenSkyAuth() {
-  console.log(hdr('測試 E — OpenSky 認證狀態'));
-
-  const user = process.env.OPENSKY_USER || process.env.OPENSKY_USER1 || '';
-  const pass = process.env.OPENSKY_PASS || process.env.OPENSKY_PASS1 || '';
-  const basicHeader = user ? 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64') : null;
-
-  // a) Basic Auth（舊式）
-  console.log(inf('Basic Auth 測試（應失效）'));
-  const r1 = await GET('https://opensky-network.org/api/states/all?lamin=21&lomin=119&lamax=27&lomax=124');
-  console.log(`  無認證: HTTP ${r1.status} | ${r1.json?.states?.length ?? '?'} ac`);
-
-  if (basicHeader) {
-    const r2 = await fetch('https://opensky-network.org/api/states/all?lamin=21&lomin=119&lamax=27&lomax=124', {
-      headers: { Authorization: basicHeader }, signal: AbortSignal.timeout(10000)
-    });
-    const j2 = await r2.json().catch(() => null);
-    const count = j2?.states?.length ?? '?';
-    const verdict = r2.status === 401 ? `${C.red}401 Basic Auth 已失效${C.reset}`
-                  : r2.ok ? `${C.green}${r2.status} 仍有效 (${count} ac)${C.reset}`
-                  : `${C.yellow}HTTP ${r2.status}${C.reset}`;
-    console.log(`  Basic Auth (${user}): ${verdict}`);
-  }
-
-  // b) /states/own（自己的天線，免費）
-  console.log(inf('/states/own 測試（feeder 免費端點）'));
-  const r3 = await GET('https://opensky-network.org/api/states/own');
-  const count3 = r3.json?.states?.length ?? '?';
-  console.log(`  /states/own: HTTP ${r3.status} | ${count3} ac | ${r3.ms}ms`);
-  if (basicHeader && !r3.ok) {
-    const r4 = await fetch('https://opensky-network.org/api/states/own', {
-      headers: { Authorization: basicHeader }, signal: AbortSignal.timeout(10000)
-    });
-    const j4 = await r4.json().catch(() => null);
-    console.log(`  /states/own (auth): HTTP ${r4.status} | ${j4?.states?.length ?? '?'} ac`);
-  }
-}
-
-// ═══════════════════════════════════════════════════════
 // Main
 // ═══════════════════════════════════════════════════════
 (async () => {
@@ -209,7 +168,8 @@ async function testE_OpenSkyAuth() {
   await testB_AirplanesLiveFields();
   await testC_AdsbFiSnapshot();
   await testD_ReApi();
-  await testE_OpenSkyAuth();
+  // [2026-09] testE_OpenSkyAuth removed — OpenSky's API is fully dead
+  // (metadata endpoint returns 410 Gone; states/all no longer worth probing).
 
   console.log(`\n${C.bold}${C.green}全部測試完成。${C.reset}\n`);
 })();

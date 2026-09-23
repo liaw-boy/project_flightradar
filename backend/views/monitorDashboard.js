@@ -136,18 +136,6 @@ a:hover{opacity:.75}
 .src-pill.cb{color:var(--amber);border-color:rgba(252,184,89,.3);background:rgba(252,184,89,.08)}
 .src-dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
 
-/* ── OpenSky accounts ── */
-.acct-table{display:flex;flex-direction:column;gap:0}
-.acct-hd-row{display:grid;grid-template-columns:160px 90px 1fr 80px;gap:12px;padding:0 0 8px;border-bottom:1px solid var(--border);font-size:10px;font-weight:600;color:var(--td);text-transform:uppercase;letter-spacing:.08em}
-.acct-row{display:grid;grid-template-columns:160px 90px 1fr 80px;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);align-items:center;font-size:12px}
-.acct-row:last-child{border-bottom:none}
-.acct-row.is-active .acct-name{color:var(--teal);font-weight:600}
-.acct-name{font-weight:500;color:var(--t);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.acct-status{display:flex;align-items:center;gap:6px}
-.acct-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.acct-bar-wrap{height:5px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden}
-.acct-bar-fill{height:100%;border-radius:3px;transition:width 1s cubic-bezier(.4,0,.2,1)}
-.acct-credits{font-weight:600;text-align:right;color:var(--t)}
 
 /* ── Hardware info strip ── */
 .hw-strip{background:var(--panel2);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px}
@@ -222,9 +210,6 @@ a:hover{opacity:.75}
       </a>
       <div class="sb-divider"></div>
       <div class="sb-section-lbl">Operations</div>
-      <a class="sb-nav-item" href="#opensky" onclick="setActive(this)">
-        <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="M21 2l-9.6 9.6"/><path d="M15.5 7.5l3 3L21 8l-3-3"/></svg></span> OpenSky Pool
-      </a>
       <a class="sb-nav-item" href="#sync" onclick="setActive(this)">
         <span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg></span> Sync Engine
       </a>
@@ -264,7 +249,6 @@ a:hover{opacity:.75}
       <a href="#kpi" class="active">Overview</a>
       <a href="#hw">Hardware</a>
       <a href="#storage">Storage</a>
-      <a href="#opensky">OpenSky</a>
       <a href="#sync">Sync</a>
       <a href="#sessions">Sessions</a>
       <a href="#api">API</a>
@@ -357,21 +341,6 @@ a:hover{opacity:.75}
         </div>
       </div>
 
-      <!-- OpenSky Accounts -->
-      <div id="opensky" class="card">
-        <div class="card-hd">
-          <span class="card-title">OpenSky Account Pool</span>
-          <span class="card-badge" id="acct-badge">— Accounts</span>
-        </div>
-        <div class="card-body">
-          <div class="acct-table">
-            <div class="acct-hd-row">
-              <span>Account</span><span>Status</span><span>Quota</span><span>Credits</span>
-            </div>
-            <div id="accounts-body"></div>
-          </div>
-        </div>
-      </div>
 
       <!-- Sync + Sessions + API -->
       <div class="grid-3">
@@ -618,25 +587,6 @@ async function refresh() {
       row('Sessions created', (ing.sessionsCreated||0).toLocaleString(), '') +
       row('Disk free', formatBytes(disk.free||0), 'ok');
 
-    // ── OpenSky accounts ──
-    const accts = stats.accounts || [];
-    document.getElementById('acct-badge').textContent = accts.length + ' Accounts';
-    document.getElementById('accounts-body').innerHTML = accts.map(a => {
-      const pct   = Math.max(0, Math.min(100, Math.round((a.remainingCredits||0) / 4000 * 100)));
-      const locked = a.unlockTime && new Date(a.unlockTime) > new Date();
-      const isActive = a.user === health.activeAccount;
-      const barColor = locked ? '#ef4444' : pct > 50 ? '#a9dfd8' : pct > 20 ? '#fcb859' : '#ef4444';
-      const dotColor = locked ? '#ef4444' : '#34d399';
-      const statusTxt = locked ? 'Locked' : isActive ? 'Active' : 'Standby';
-      const shortName = (a.user||'').replace(/-api-client$/,'');
-      return '<div class="acct-row' + (isActive?' is-active':'') + '">' +
-        '<span class="acct-name">' + shortName + '</span>' +
-        '<span class="acct-status"><span class="acct-dot" style="background:' + dotColor + '"></span><span style="color:' + dotColor + '">' + statusTxt + '</span></span>' +
-        '<div class="acct-bar-wrap"><div class="acct-bar-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>' +
-        '<span class="acct-credits" style="color:' + barColor + '">' + (locked ? 'LOCKED' : (a.remainingCredits||0).toLocaleString()) + '</span>' +
-        '</div>';
-    }).join('');
-
     // ── Sync ──
     const sh = stats.sourceHealth || {};
     const now = Date.now();
@@ -665,8 +615,7 @@ async function refresh() {
       srcPill('adsb.fi-snap', srcStatus('adsb.fi-snap')) +
       srcPill('adsb.lol', srcStatus('adsb.lol')) +
       srcPill('al-mil', srcStatus('al-mil')) +
-      srcPill('al-ladd', srcStatus('al-ladd')) +
-      srcPill('OpenSky', stats.activeAccount ? 'up' : 'dim');
+      srcPill('al-ladd', srcStatus('al-ladd'));
 
     document.getElementById('sync-badge').textContent = 'Cycle #' + (ing.totalBatches||0);
     document.getElementById('sync-body').innerHTML =
@@ -674,8 +623,7 @@ async function refresh() {
       row('adsb.lol', srcDetail('adsb.lol') || '—', srcStatus('adsb.lol') === 'up' ? 'ok' : 'warn') +
       row('al-mil', srcDetail('al-mil') || '—', srcStatus('al-mil') === 'up' ? 'ok' : 'dim') +
       row('al-ladd', srcDetail('al-ladd') || '—', srcStatus('al-ladd') === 'up' ? 'ok' : 'dim') +
-      row('Last batch', (ing.lastBatchSize||0) + ' planes · ' + (ing.lastBatchMs||0) + 'ms', (ing.lastBatchMs||0) < 3000 ? 'ok' : 'warn') +
-      row('Active account', (stats.activeAccount||'—').replace(/-api-client$/,''), '');
+      row('Last batch', (ing.lastBatchSize||0) + ' planes · ' + (ing.lastBatchMs||0) + 'ms', (ing.lastBatchMs||0) < 3000 ? 'ok' : 'warn');
 
     // ── Sync Log ──
     const logEl = document.getElementById('synclog-body');
@@ -806,7 +754,7 @@ const observer = new IntersectionObserver(entries => {
 }, { root: document.querySelector('.scroll'), threshold: 0.4 });
 
 document.addEventListener('DOMContentLoaded', () => {
-  ['kpi','hardware','storage','dbstatus','opensky','sync','synclog','sessions','api'].forEach(id => {
+  ['kpi','hardware','storage','dbstatus','sync','synclog','sessions','api'].forEach(id => {
     const el = document.getElementById(id);
     if (el) observer.observe(el);
   });

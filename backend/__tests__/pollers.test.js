@@ -2,16 +2,21 @@
 /**
  * Unit test for the total-outage alert in services/pollers.js
  * fetchGlobalBaseline — escalates to an ERROR-level log only after
- * adsb.lol + adsb.fi-snap + the OpenSky fallback have ALL failed for
- * several consecutive cycles (not on a single transient miss), and is
- * throttled so a sustained outage doesn't spam the log every 5s.
+ * adsb.lol + adsb.fi-snap have BOTH failed for several consecutive
+ * cycles (not on a single transient miss), and is throttled so a
+ * sustained outage doesn't spam the log every 5s.
  *
- * Mocks global.fetch so every upstream call fails, and injects a
- * fetchOpenSkyBaselineFallback that always returns [] (fallback also dark).
+ * Mocks global.fetch so every upstream call fails.
+ *
+ * [2026-09] A third fallback tier (OpenSky) used to sit behind adsb.lol/
+ * adsb.fi-snap and was injected here as a mocked fetchOpenSkyBaselineFallback
+ * — removed along with the rest of the OpenSky integration (its API is
+ * dead). "Total outage" is now strictly a two-source check.
  */
 const logger = require('../logger');
 const { getGlobalPlanesCache, sourceHealth } = require('../state/appState');
 const { createPollers } = require('../services/pollers');
+const { cbReset } = require('../services/circuitBreaker');
 
 describe('fetchGlobalBaseline total-outage alert', () => {
     let errorSpy;
@@ -35,7 +40,6 @@ describe('fetchGlobalBaseline total-outage alert', () => {
     function makePollers() {
         return createPollers({
             normalizeAcRecord: p => p,
-            fetchOpenSkyBaselineFallback: jest.fn().mockResolvedValue([]), // fallback also dark
             ingestTrackPoints: jest.fn().mockResolvedValue(undefined),
             triggerBackgroundResolution: () => {},
         });
@@ -53,10 +57,8 @@ describe('fetchGlobalBaseline total-outage alert', () => {
     test('alerts once total outage reaches the consecutive-cycle threshold', async () => {
         const { fetchGlobalBaseline } = makePollers();
 
-        // Threshold is 8 cycles (~40s) — raised from 3 (~15s) on 2026-09-01
-        // because 15s was shorter than OpenSky's own 30s fallback throttle
-        // (planeSources.js OPENSKY_FALLBACK_MIN_GAP_MS), so every normal gap
-        // between OpenSky's throttled attempts falsely tripped this alert.
+        // Threshold is 8 cycles (~40s) — see the rationale comment in
+        // pollers.js next to TOTAL_OUTAGE_ALERT_THRESHOLD.
         for (let i = 0; i < 7; i++) await fetchGlobalBaseline();
         expect(errorSpy.mock.calls.filter(c => c[0] === 'ALERT')).toHaveLength(0);
 
@@ -75,22 +77,29 @@ describe('fetchGlobalBaseline total-outage alert', () => {
     });
 
     test('outage counter resets once a source recovers — no alert on the next isolated blip', async () => {
-        const fallback = jest.fn()
-            .mockResolvedValueOnce([])
-            .mockResolvedValueOnce([])
-            .mockResolvedValueOnce([{ icao24: 'abc123', lat: 25, lng: 121, posTime: Date.now() / 1000 }]) // recovers
-            .mockResolvedValueOnce([]);
-        const { fetchGlobalBaseline } = createPollers({
-            normalizeAcRecord: p => p,
-            fetchOpenSkyBaselineFallback: fallback,
-            ingestTrackPoints: jest.fn().mockResolvedValue(undefined),
-            triggerBackgroundResolution: () => {},
-        });
+        // Cycle 1: both adsb.lol and adsb.fi-snap fetch calls reject, tripping
+        // both circuit breakers (short "transient" cooldown). Cycle 2: both
+        // breakers are still open, so fetchGlobalBaseline never calls
+        // global.fetch at all that cycle (suppressed at the cbOpen check).
+        // Before cycle 3, adsb.lol's breaker is reset directly (simulating its
+        // cooldown having elapsed) so its single fetch call actually happens
+        // and is mocked to succeed — a "recovery". adsb.fi-snap's breaker is
+        // still open on cycles 3-4, so only adsb.lol's calls reach the mock.
+        global.fetch = jest.fn()
+            .mockRejectedValueOnce(new Error('fetch failed'))   // cycle 1: adsb.lol
+            .mockRejectedValueOnce(new Error('fetch failed'))   // cycle 1: adsb.fi-snap
+            .mockResolvedValueOnce({                            // cycle 3: adsb.lol recovers
+                ok: true,
+                json: async () => ({ ac: [{ hex: 'abc123', lat: 25, lng: 121, seen_pos: 0 }], now: Date.now() }),
+            })
+            .mockRejectedValueOnce(new Error('fetch failed'));  // cycle 4: adsb.lol fails again
+        const { fetchGlobalBaseline } = makePollers();
 
         await fetchGlobalBaseline(); // outage cycle 1
-        await fetchGlobalBaseline(); // outage cycle 2
-        await fetchGlobalBaseline(); // recovers — counter resets
-        await fetchGlobalBaseline(); // outage cycle 1 again, not 4th consecutive
+        await fetchGlobalBaseline(); // outage cycle 2 — both breakers still open, no new fetch attempts
+        cbReset('adsb.lol', 0, 0);   // simulate adsb.lol's cooldown having elapsed naturally
+        await fetchGlobalBaseline(); // recovers — adsb.lol succeeds, counter resets
+        await fetchGlobalBaseline(); // adsb.lol fails again — outage cycle 1, not 4th consecutive
 
         const alerts = errorSpy.mock.calls.filter(c => c[0] === 'ALERT');
         expect(alerts).toHaveLength(0);

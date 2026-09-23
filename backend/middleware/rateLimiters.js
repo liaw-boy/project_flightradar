@@ -12,7 +12,7 @@ const apiLimiter = rateLimit({
     // external services including a paid AeroDataBox subscription and was
     // previously exempt from ALL rate limiting — see fusionLimiter below,
     // which is now applied to it in server.js.
-    skip: (req) => ['/api/events', '/api/flights/live'].some(p => req.path.startsWith(p)),
+    skip: (req) => ['/api/events'].some(p => req.path.startsWith(p)),
 });
 
 // Strict limiter for expensive fusion endpoints (fan out to 5 external APIs)

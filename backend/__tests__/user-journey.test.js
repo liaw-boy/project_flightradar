@@ -116,10 +116,10 @@ describe('Journey 3: 資料管線健康度', () => {
     });
 
     test('bbox 資料最終會恢復不 stale（容許上游來源暫時性抖動）', async () => {
-        // stale=true 表示這一輪三個上游來源（adsb.lol / adsb.fi-snap / OpenSky
-        // fallback）全部失敗，融合引擎正在用舊快取撐著——這是設計內的正常行為
+        // stale=true 表示這一輪兩個上游來源（adsb.lol / adsb.fi-snap）
+        // 全部失敗，融合引擎正在用舊快取撐著——這是設計內的正常行為
         // （見 services/pollers.js 的 total-outage alert），不代表系統壞了，
-        // 只代表當下這一刻剛好三個外部 API 都不順。
+        // 只代表當下這一刻剛好兩個外部 API 都不順。
         // 斷言「永遠不 stale」對外部依賴來說太嚴格；這裡改成「在合理時間內
         // 至少有一次恢復」，真正測的是融合引擎會自我修復，而不是外部網路的
         // 即時可用性。

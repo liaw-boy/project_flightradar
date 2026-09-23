@@ -3,14 +3,14 @@
 // (viewport overlay), Tier 3 (special categories: military/LADD), plus
 // enrichAndIngest (typecode/operator/model enrichment + TrackPoint write).
 //
-// normalizeAcRecord/fetchOpenSkyBaselineFallback and ingestTrackPoints are
-// factory-injected rather than required directly: both are produced by
-// server.js's createPlaneSources()/createTrackIngest() calls, which close
-// over accountPool/apiStats and Route/TrackPoint/FlightSession/
-// broadcastTrackPoint respectively — re-requiring those factories here
-// would construct a second, unsynced set of instances. triggerBackgroundResolution
-// is likewise a plain function living in server.js's module scope (its own
-// pendingResolutions Set), not something requirable on its own.
+// ingestTrackPoints is factory-injected rather than required directly: it's
+// produced by server.js's createTrackIngest() call, which closes over
+// Route/TrackPoint/FlightSession/broadcastTrackPoint — re-requiring that
+// factory here would construct a second, unsynced set of instances.
+// triggerBackgroundResolution is likewise a plain function living in
+// server.js's module scope (its own pendingResolutions Set), not something
+// requirable on its own. normalizeAcRecord has no such state and could be
+// required directly from planeSources.js, but stays injected for symmetry.
 const logger = require('../logger');
 const { cbOpen, cbTrip, cbReset, logSuppressedSource } = require('./circuitBreaker');
 const { mergeStates } = require('./stateMerge');
@@ -25,7 +25,7 @@ const Aircraft = require('../db/aircraftStore');
 const MictronicsDb = require('../db/mictronicsDb');
 const { notifyDiscord } = require('./discordNotifier');
 
-function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingestTrackPoints, triggerBackgroundResolution }) {
+function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackgroundResolution }) {
 
     // ── Tier 1: Global Baseline ────────────────────────────────────────────────
     // Primary: adsb.lol (no quota, 5s interval)
@@ -33,24 +33,21 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
     let _baselineRunning = false;
 
     // A single failed cycle (one source hiccup) is normal and already handled by
-    // the per-source circuit breakers. This tracks the harder failure: adsb.lol,
-    // adsb.fi-snap, AND the OpenSky fallback all empty in the same cycle — the
-    // whole tier is dark, not just one upstream. Escalates to an ERROR-level,
-    // throttled alert once that's been true for several consecutive cycles, so
-    // it's visible without a human having to notice the map went stale.
+    // the per-source circuit breakers. This tracks the harder failure: adsb.lol
+    // AND adsb.fi-snap both empty in the same cycle — the whole tier is dark,
+    // not just one upstream. Escalates to an ERROR-level, throttled alert once
+    // that's been true for several consecutive cycles, so it's visible without
+    // a human having to notice the map went stale.
     let _consecutiveTotalOutageCycles = 0;
-    // [2026-09-01] Was 3 (~15s) — SHORTER than planeSources.js's own
-    // OPENSKY_FALLBACK_MIN_GAP_MS (30s), the deliberate throttle on how often
-    // the last-resort fallback is even allowed to try. Whenever adsb.lol AND
-    // adsb.fi are both circuit-broken at the same time (their own cooldowns
-    // are independent of this poll loop), every cycle in between OpenSky's
-    // once-per-30s attempts legitimately reports "all sources failed" — that
-    // is the system working as designed, not a real outage, but a 15s
-    // threshold fired a false "total outage" alert on every single one of
-    // those normal throttle gaps. Raised to 8 (~40s) — safely past one full
-    // OpenSky throttle window (30s) plus its own request latency (~1-2s
-    // observed) — so this only fires when OpenSky's own scheduled attempt
-    // ALSO failed to recover the map, a genuine outage.
+    // [2026-09-01] Was 3 (~15s). Raised to 8 (~40s) back when there was a third
+    // fallback tier (OpenSky, since removed — see git history) whose own
+    // independent 30s throttle window meant every gap between its attempts
+    // legitimately reported "all sources failed" and falsely tripped a 15s
+    // threshold. That specific false-positive source is gone now that this is
+    // strictly a two-source (adsb.lol/adsb.fi-snap) check, but the 8-cycle
+    // debounce is still a reasonable guard against a handful of transient
+    // blips landing back-to-back, so it's left as-is rather than re-tuned
+    // without real outage data to tune it against.
     const TOTAL_OUTAGE_ALERT_THRESHOLD = 8;       // ~40s of zero data at the 5s poll interval
     const TOTAL_OUTAGE_ALERT_THROTTLE_MS = 5 * 60_000; // re-announce at most once per 5 min while it persists
     let _lastTotalOutageAlertAt = 0;
@@ -128,18 +125,8 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
             }
 
             // Prefer adsb.lol; fall back to adsb.fi instantly (data already fetched)
-            let states = lolStates.length > 0 ? lolStates : fiStates;
-            let source = lolStates.length > 0 ? 'adsb.lol' : (fiStates.length > 0 ? 'adsb.fi-snap' : '');
-
-            // Tier 1c: both ADS-B aggregators came back empty — fall back to OpenSky.
-            // Credit-metered, so it throttles itself rather than following the 5s loop.
-            if (states.length === 0) {
-                const osStates = await fetchOpenSkyBaselineFallback();
-                if (osStates.length > 0) {
-                    states = osStates;
-                    source = 'opensky';
-                }
-            }
+            const states = lolStates.length > 0 ? lolStates : fiStates;
+            const source = lolStates.length > 0 ? 'adsb.lol' : (fiStates.length > 0 ? 'adsb.fi-snap' : '');
 
             if (states.length === 0) {
                 logger.warn('SYNC', 'Global baseline: all sources failed — using stale cache');
@@ -153,11 +140,11 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
                         _lastTotalOutageAlertAt = now;
                         _outageAlertActive = true;
                         const outageSec = _consecutiveTotalOutageCycles * 5;
-                        logger.error('ALERT', `Global baseline dark for ${outageSec}s+ — adsb.lol, adsb.fi-snap, AND OpenSky fallback all failed this cycle. Map is serving stale data.`);
+                        logger.error('ALERT', `Global baseline dark for ${outageSec}s+ — adsb.lol AND adsb.fi-snap both failed this cycle. Map is serving stale data.`);
                         notifyDiscord({
                             icon: 'outageDown', color: 'orange',
                             title: 'AEROSTRAT 資料來源全滅',
-                            description: `adsb.lol、adsb.fi-snap、OpenSky 三個來源同一輪都失敗，已持續 **${outageSec} 秒**以上，地圖目前在用舊快取撐著（stale）。\n（每 5 分鐘最多重複提醒一次，直到恢復為止）`,
+                            description: `adsb.lol、adsb.fi-snap 兩個來源同一輪都失敗，已持續 **${outageSec} 秒**以上，地圖目前在用舊快取撐著（stale）。\n（每 5 分鐘最多重複提醒一次，直到恢復為止）`,
                         }, 'DISCORD_OUTAGE_WEBHOOK_URL');
                     }
                 }
@@ -186,9 +173,7 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
                 _consecutiveTotalOutageCycles = 0;
             }
 
-            // OpenSky carries no typecode/registration/operator — merge so the
-            // enrichment already collected from adsb.lol survives the outage.
-            mergeStates(states, source === 'opensky' ? 'merge' : 'upsert');
+            mergeStates(states, 'upsert');
             pruneAndBroadcast();
             logger.info('SYNC', `✅ Global baseline: ${states.length} planes | source: ${source} | ${Math.round(performance.now()-t0)}ms`);
 
