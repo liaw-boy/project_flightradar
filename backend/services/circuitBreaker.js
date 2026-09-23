@@ -5,25 +5,72 @@
 const logger = require('../logger');
 const { sourceHealth } = require('../state/appState');
 
-const SOURCE_CB_MS = 5 * 60_000;      // base backoff (also the explicit-ms default)
-const SOURCE_CB_MAX_MS = 30 * 60_000; // cap so a chronic outage doesn't lock a source out for hours
+const SOURCE_CB_MS = 5 * 60_000;      // legacy fixed-ms default, kept for explicit-ms callers
+const SOURCE_CB_MAX_MS = 30 * 60_000; // legacy cap
 
-const cbOpen  = k => (sourceHealth[k]?.cbUntil || 0) > Date.now();
+// [2026-09-06] adsb.lol/adsb.fi went "both failed" 58k times in 7 days
+// despite adsb.lol's own public status page showing 100% uptime that same
+// week (github.com/adsblol/status) — the upstream was fine; a single 5s
+// network blip was getting trip'd at a flat 5-minute cooldown (doubling to
+// 30m on the next unlucky cycle) regardless of what actually failed. Real
+// abuse blocks (403) and real quota signals (429) warrant a long cooldown;
+// a timeout or a 5xx from an otherwise-healthy host doesn't. Classifying the
+// failure lets each kind back off on its own, appropriately-sized curve
+// instead of one flat curve for everything — see cockatiel/opossum (Node's
+// two most common circuit-breaker libs), whose default reset timeouts sit
+// in the 10-30s range specifically for this reason.
+const FAILURE_TIERS = {
+    // Confirmed access block — retrying soon just extends the ban. adsb.fi's
+    // own published policy: "Requests returning a 400, 401, 403, 404, or 429
+    // status code count toward the [restriction] limit" — a fixed 1h cooldown
+    // that never escalated meant every hourly retry landed another 403,
+    // which by that policy re-armed the restriction forever. Observed: 70
+    // consecutive hourly 403s (2.9 days straight) on adsb.fi-snap, since the
+    // very first request this service instance made — never once recovered
+    // because we kept refreshing our own block. Escalate like rateLimited so
+    // a real temporary IP restriction gets long enough gaps to actually
+    // expire, instead of us re-triggering it every single hour indefinitely.
+    blocked:     { baseMs: 60 * 60_000, maxMs: 24 * 60 * 60_000 },
+    // A real quota/abuse signal from the host — back off meaningfully, but
+    // don't lock it out for as long as a confirmed block.
+    rateLimited: { baseMs: 5 * 60_000, maxMs: 30 * 60_000 },
+    // Timeout, connection reset, 5xx, or anything else with no explicit
+    // status — most likely a momentary blip on an otherwise-healthy host.
+    // Short base so the very next poll cycle (5s later) is already past a
+    // first-offense cooldown, escalating only if it keeps happening.
+    transient:   { baseMs: 10_000, maxMs: 5 * 60_000 },
+};
 
-// ms: explicit override (e.g. a known long-lived block like a 403 ban).
-// Omitted -> exponential backoff from consecutiveFails (5m, 10m, 20m, capped
-// at 30m), so a source that keeps failing every single cycle gets backed off
-// progressively instead of being retried at the same fixed cadence forever —
-// hammering a host that's already timing out on every request risks making
-// an upstream anti-abuse block worse, not better.
-const cbTrip  = (k, ms) => {
-    const consecutiveFails = (sourceHealth[k]?.consecutiveFails || 0) + 1;
-    const backoffMs = ms ?? Math.min(SOURCE_CB_MS * (2 ** (consecutiveFails - 1)), SOURCE_CB_MAX_MS);
+const cbOpen = k => (sourceHealth[k]?.cbUntil || 0) > Date.now();
+
+function classifyFailure(reason = '') {
+    if (/\b403\b/.test(reason)) return 'blocked';
+    if (/\b429\b/.test(reason)) return 'rateLimited';
+    return 'transient';
+}
+
+// reasonOrMs: a caught error's message string (preferred — gets classified
+// into a tier above) or, for backward compatibility, an explicit ms number.
+// Escalation (2x per consecutive fail, capped per-tier) only compounds
+// within the SAME tier — a source flapping between transient blips and a
+// real 429 shouldn't inherit backoff built up under the other failure kind.
+const cbTrip = (k, reasonOrMs) => {
+    const prev = sourceHealth[k];
+    const explicitMs = typeof reasonOrMs === 'number';
+    const tierKey = explicitMs ? null : classifyFailure(reasonOrMs);
+    const tier = tierKey ? FAILURE_TIERS[tierKey] : null;
+    const consecutiveFails = (!explicitMs && prev?.tier === tierKey) ? (prev.consecutiveFails || 0) + 1 : 1;
+    const backoffMs = explicitMs
+        ? reasonOrMs
+        : Math.min(tier.baseMs * (2 ** (consecutiveFails - 1)), tier.maxMs);
     sourceHealth[k] = {
-        ...sourceHealth[k],
+        ...prev,
         cbUntil: Date.now() + backoffMs,
         consecutiveFails,
+        tier: tierKey,
+        lastFailReason: typeof reasonOrMs === 'string' ? reasonOrMs : (prev?.lastFailReason ?? null),
     };
+    logger.warn('CB', `${k} tripped — ${tierKey ? `tier=${tierKey} (${reasonOrMs})` : 'explicit-ms'}, cooldown=${Math.round(backoffMs / 1000)}s, fail #${consecutiveFails}`);
 };
 
 const cbReset = (k, count, latency) => {
@@ -45,4 +92,4 @@ function logSuppressedSource(key) {
     logger.warn('SYNC', `${key} suppressed by circuit breaker — ${Math.ceil((until - now) / 60_000)} min left, ${fails} consecutive failures`);
 }
 
-module.exports = { SOURCE_CB_MS, cbOpen, cbTrip, cbReset, logSuppressedSource };
+module.exports = { SOURCE_CB_MS, FAILURE_TIERS, classifyFailure, cbOpen, cbTrip, cbReset, logSuppressedSource };

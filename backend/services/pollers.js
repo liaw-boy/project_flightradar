@@ -54,6 +54,16 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
     const TOTAL_OUTAGE_ALERT_THRESHOLD = 8;       // ~40s of zero data at the 5s poll interval
     const TOTAL_OUTAGE_ALERT_THROTTLE_MS = 5 * 60_000; // re-announce at most once per 5 min while it persists
     let _lastTotalOutageAlertAt = 0;
+    // [2026-09-09] Down-detection was debounced (8 consecutive failed cycles)
+    // but recovery was not — a single successful cycle right after the alert
+    // fired immediately reset the outage counter and sent "已恢復", even when
+    // the upstream was still flapping and died again on the very next cycle.
+    // That produced the 恢復→全滅→恢復 spam seen in Discord within minutes.
+    // Mirror the same debounce on the way back up: only announce recovery
+    // once the source has stayed healthy for several consecutive cycles.
+    let _outageAlertActive = false;   // true once the down-alert has actually fired
+    let _recoverySuccessStreak = 0;
+    const RECOVERY_CONFIRM_CYCLES = 3; // ~15s of sustained data before declaring recovered
 
     async function fetchGlobalBaseline() {
         if (_baselineRunning) return;
@@ -91,15 +101,15 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
                 const msg = lolR.reason?.message || '';
                 if (msg === 'CB open') logSuppressedSource('adsb.lol');
                 else {
-                    // Trip on ANY failure, not just explicit 429/503 — a network-level
+                    // Trip on ANY failure, not just explicit 429/403 — a network-level
                     // timeout ("fetch failed" / "operation was aborted") never carries
-                    // an HTTP status, so it fell through this check entirely and the
-                    // 5s poll kept hammering a host that wasn't responding at all,
-                    // which is the worst thing to do to a host that may be silently
-                    // rate-limiting/blocking this IP. cbTrip's exponential backoff
-                    // (circuitBreaker.js) means occasional single hiccups still only
-                    // cost 5 minutes; only a sustained outage backs off further.
-                    cbTrip('adsb.lol');
+                    // an HTTP status, so it fell through a status-only check entirely
+                    // and the 5s poll kept hammering a host that wasn't responding at
+                    // all. cbTrip classifies the reason itself now (circuitBreaker.js)
+                    // so a plain timeout only costs a short, quickly-escalating
+                    // cooldown while a confirmed 403/429 gets the longer one it
+                    // actually warrants.
+                    cbTrip('adsb.lol', msg);
                     logger.warn('SYNC', `adsb.lol failed: ${msg}`);
                 }
             }
@@ -112,8 +122,7 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
                 const msg = fiR.reason?.message || '';
                 if (msg === 'CB open') logSuppressedSource('adsb.fi-snap');
                 else {
-                    if (msg.includes('403')) cbTrip('adsb.fi-snap', 60 * 60_000);
-                    else if (msg.includes('429')) cbTrip('adsb.fi-snap');
+                    cbTrip('adsb.fi-snap', msg);
                     logger.warn('SYNC', `adsb.fi-snap failed: ${msg}`);
                 }
             }
@@ -137,10 +146,12 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
                 getGlobalPlanesCache().stale = true;
 
                 _consecutiveTotalOutageCycles++;
+                _recoverySuccessStreak = 0; // any failure cancels a recovery in progress
                 if (_consecutiveTotalOutageCycles >= TOTAL_OUTAGE_ALERT_THRESHOLD) {
                     const now = Date.now();
                     if (now - _lastTotalOutageAlertAt >= TOTAL_OUTAGE_ALERT_THROTTLE_MS) {
                         _lastTotalOutageAlertAt = now;
+                        _outageAlertActive = true;
                         const outageSec = _consecutiveTotalOutageCycles * 5;
                         logger.error('ALERT', `Global baseline dark for ${outageSec}s+ — adsb.lol, adsb.fi-snap, AND OpenSky fallback all failed this cycle. Map is serving stale data.`);
                         notifyDiscord({
@@ -152,17 +163,28 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
                 }
                 return;
             }
-            if (_consecutiveTotalOutageCycles >= TOTAL_OUTAGE_ALERT_THRESHOLD) {
-                // Was down long enough to have alerted — announce recovery too,
-                // so the channel isn't just a one-way stream of bad news.
-                const outageSec = _consecutiveTotalOutageCycles * 5;
-                notifyDiscord({
-                    icon: 'outageUp', color: 'green',
-                    title: 'AEROSTRAT 資料來源已恢復',
-                    description: `先前中斷約 **${outageSec} 秒**，目前來源: ${source}`,
-                }, 'DISCORD_OUTAGE_WEBHOOK_URL');
+            if (_outageAlertActive) {
+                // Require several consecutive healthy cycles before declaring
+                // recovery — a lone successful poll right after an outage is
+                // often just the upstream flickering, not a real recovery.
+                _recoverySuccessStreak++;
+                if (_recoverySuccessStreak < RECOVERY_CONFIRM_CYCLES) {
+                    // Still probationary: keep serving data (states aren't discarded
+                    // below) but don't reset the outage bookkeeping yet.
+                } else {
+                    const outageSec = _consecutiveTotalOutageCycles * 5;
+                    notifyDiscord({
+                        icon: 'outageUp', color: 'green',
+                        title: 'AEROSTRAT 資料來源已恢復',
+                        description: `先前中斷約 **${outageSec} 秒**，目前來源: ${source}`,
+                    }, 'DISCORD_OUTAGE_WEBHOOK_URL');
+                    _outageAlertActive = false;
+                    _recoverySuccessStreak = 0;
+                    _consecutiveTotalOutageCycles = 0;
+                }
+            } else {
+                _consecutiveTotalOutageCycles = 0;
             }
-            _consecutiveTotalOutageCycles = 0;
 
             // OpenSky carries no typecode/registration/operator — merge so the
             // enrichment already collected from adsb.lol survives the outage.
@@ -222,7 +244,7 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
                 cbReset('al-point', states.length, Math.round(performance.now() - t0));
             } else {
                 const msg = alR.reason?.message || '';
-                if (msg.includes('429')) cbTrip('al-point');
+                if (msg !== 'CB open') cbTrip('al-point', msg);
             }
 
             if (reR.status === 'fulfilled') {
@@ -234,7 +256,7 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
                 cbReset('re-api', states.length, Math.round(performance.now() - t0));
             } else {
                 const msg = reR.reason?.message || '';
-                if (msg.includes('429') || msg.includes('403')) cbTrip('re-api');
+                if (msg !== 'CB open') cbTrip('re-api', msg);
             }
 
             // Fallback: adsb.fi v3 if both AL and re-api failed
@@ -251,8 +273,7 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
                     vpSources.push('adsb.fi-v3');
                     cbReset('adsb.fi-v3', vpStates.length, Math.round(performance.now() - t0));
                 } catch (e) {
-                    if (e.message.includes('403')) cbTrip('adsb.fi-v3', 60 * 60_000);
-                    else if (e.message.includes('429')) cbTrip('adsb.fi-v3');
+                    cbTrip('adsb.fi-v3', e.message);
                 }
             }
 
@@ -315,7 +336,7 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
                     cbReset(key, states.length, Math.round(performance.now() - t0));
                 } else {
                     const msg = result.reason?.message || '';
-                    if (msg.includes('429')) cbTrip(key);
+                    if (msg !== 'CB open') cbTrip(key, msg);
                 }
             }
 
@@ -334,8 +355,28 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
     let _enrichRunning = false;
     // [perf] Per-icao24 cooldown: skip Aircraft upsert if written < 5 min ago and no clients
     const _aircraftWriteCooldown = new Map(); // icao24 → last write timestamp (ms)
+    // [MEM-LEAK] Never had its own cleanup — an icao24 that leaves masterStateMap
+    // (and is properly reaped everywhere else) stayed in here forever. Swept
+    // below on the same 5-minute cadence as the write-cooldown window itself.
+    let _lastCooldownSweepAt = 0;
+    const COOLDOWN_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+    // [2026-09-06 incident] Track-point ingestion silently stopped for ~27h
+    // with zero errors logged — the leading hypothesis is this guard tripping
+    // forever (a stuck _enrichRunning=true from some earlier hang never
+    // reaching its finally). Logging every skip (throttled) turns a silent
+    // freeze back into a visible one if it recurs.
+    let _enrichSkipCount = 0;
+    let _lastEnrichSkipLogAt = 0;
     async function enrichAndIngest() {
-        if (_enrichRunning) return;
+        if (_enrichRunning) {
+            _enrichSkipCount++;
+            const now = Date.now();
+            if (now - _lastEnrichSkipLogAt > 60_000) {
+                _lastEnrichSkipLogAt = now;
+                logger.warn('INGEST', `enrichAndIngest guard tripped — skipped ${_enrichSkipCount} call(s) since last log (stuck lock?)`);
+            }
+            return;
+        }
         _enrichRunning = true;
         const finalStates = Array.from(masterStateMap.values());
 
@@ -345,6 +386,15 @@ function createPollers({ normalizeAcRecord, fetchOpenSkyBaselineFallback, ingest
             const hasClients = getClientCount() > 0;
             const now = Date.now();
             const WRITE_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
+            if (now - _lastCooldownSweepAt > COOLDOWN_SWEEP_INTERVAL_MS) {
+                _lastCooldownSweepAt = now;
+                const liveIds = new Set(finalStates.map(p => p.icao24));
+                for (const icao24 of _aircraftWriteCooldown.keys()) {
+                    if (!liveIds.has(icao24)) _aircraftWriteCooldown.delete(icao24);
+                }
+            }
+
             const writebackOps = finalStates
                 .filter(p => {
                     if (!(p.registration || p.operator || p.typecode || p.description)) return false;

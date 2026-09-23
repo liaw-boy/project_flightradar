@@ -5,8 +5,18 @@
 // reassigned wholesale, only mutated in place).
 const { activeSessions, lastStoredPoint, recentTrackBuffer, ingestionStats } = require('../state/appState');
 const { isRealIcao24 } = require('../utils/planeGuards');
+const logger = require('../logger');
 
 const PREDICTOR_WINDOW_SIZE = 10; // must match ml_trajectory/model.py WINDOW_SIZE
+// [2026-09-06 incident] track_points went silently empty for ~27h with zero
+// errors — the input `states` were fine (valid icao24/lat/lng, confirmed via
+// /api/planes/bbox), so if it recurs the more likely cause is a real hang
+// upstream of this file (see pollers.js's _enrichRunning guard log). This
+// counter/log exists to rule that out too: if `states` keeps arriving but
+// every single cycle's batch comes back empty, that's a filter bug in the
+// per-plane loop below, not a hang, and this will make that visible.
+let _emptyBatchStreak = 0;
+let _lastEmptyBatchLogAt = 0;
 
 function createTrackIngest({ Route, TrackPoint, FlightSession, broadcastTrackPoint }) {
 
@@ -254,7 +264,19 @@ function createTrackIngest({ Route, TrackPoint, FlightSession, broadcastTrackPoi
             });
         }
 
-        if (batchTrackPoints.length === 0) return;
+        if (batchTrackPoints.length === 0) {
+            _emptyBatchStreak++;
+            const now = Date.now();
+            // Only worth flagging when there WAS real input to work with —
+            // an empty `states` array (no planes in view) is normal and not
+            // logged here.
+            if (states.length > 0 && _emptyBatchStreak >= 20 && now - _lastEmptyBatchLogAt > 60_000) {
+                _lastEmptyBatchLogAt = now;
+                logger.warn('INGEST', `${_emptyBatchStreak} consecutive cycles produced zero track points despite ${states.length} states this cycle — filter/dedup likely rejecting everything`);
+            }
+            return;
+        }
+        _emptyBatchStreak = 0;
 
         const batchStart = performance.now();
 

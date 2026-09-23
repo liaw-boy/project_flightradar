@@ -37,7 +37,7 @@ const AircraftRegistry = {
     findOneAndUpdate: (filter, update) => {
         const key = (filter?.icao24 || '').toLowerCase();
         const existing = _registryCache.get(key) || {};
-        const data = { ...existing, ...(update?.$set || update), icao24: key };
+        const data = { ...existing, ...(update?.$set || update), icao24: key, _updatedAt: Date.now() };
         _registryCache.set(key, data);
         return Promise.resolve(data);
     },
@@ -1143,6 +1143,35 @@ function calculateRecommendedInterval() {
 }
 
 // ==========================================
+// 外部 API 狀態同步（給 service_hub 拉取，不主動額外呼叫上游）
+// 資料完全來自既有的真實請求結果（accountPool / sourceHealth 的
+// circuit breaker 紀錄），這裡只是把已經在記憶體裡的狀態轉成 JSON，
+// 不會對 OpenSky / adsb.lol / adsb.fi 等來源多發任何請求。
+// ==========================================
+app.get('/api/external-status', (req, res) => {
+    const now = Date.now();
+    const sources = Object.fromEntries(
+        Object.entries(sourceHealth).map(([key, h]) => [key, {
+            healthy: !((h.cbUntil || 0) > now),
+            consecutiveFails: h.consecutiveFails || 0,
+            lastOk: h.lastOk || null,
+            lastCount: h.lastCount ?? null,
+            lastLatencyMs: h.lastLatency ?? null,
+            cbUntil: (h.cbUntil || 0) > now ? h.cbUntil : null,
+        }])
+    );
+    const accounts = accountPool.getStats().map((a, i) => ({
+        id: `opensky-${i + 1}`, // 帳號名稱不外露，只給序號
+        remainingCredits: a.remainingCredits,
+        unlockTime: a.unlockTime,
+        rateLimits: a.rateLimits,
+        consecutiveFails: a.consecutiveFails,
+        dailyUsed: a.dailyUsed,
+    }));
+    res.json({ service: 'aerostrat', updatedAt: now, accounts, sources });
+});
+
+// ==========================================
 // [v11.0] Multi-Source Polling Engine — Shared State
 // (masterStateMap/sourceHealth/airportSpatialGrid/aircraftMetadataIndex/
 // lastGlobalStatesMap/globalPlanesCache now live in ./state/appState)
@@ -1262,9 +1291,17 @@ if (!BACKGROUND_JOBS_ENABLED) {
 }
 
 // ── [v11.0] Three-Tier Engine Startup ─────────────────────────────────────
+// [2026-09-09] adsb.lol publishes no fixed rate limit ("dynamic based on
+// environment load... if you get 4xx you're doing something wrong" —
+// github.com/adsblol/api). Empirically, at a 5s cadence we were hitting a
+// 429 on an almost exact ~5.5-6min clock (~66 requests), cooling down 5min,
+// then repeating — a stable infinite loop, not an occasional blip. Slowed
+// to 10s as a first, reversible, evidence-based step (halves request
+// volume) — re-observe the 429 cadence after this and tune further from
+// there rather than guessing.
 if (BACKGROUND_JOBS_ENABLED) {
-    setInterval(fetchGlobalBaseline,    5_000);    // adsb.lol primary (5s), adsb.fi fallback
-    setInterval(fetchViewportOverlay,    5_000);   // viewport high-frequency overlay
+    setInterval(fetchGlobalBaseline,    10_000);   // adsb.lol primary (10s — see note above), adsb.fi fallback
+    setInterval(fetchViewportOverlay,    10_000);  // viewport high-frequency overlay
     setInterval(fetchSpecialCategories, 60_000);   // military + LADD (slow)
 }
 
@@ -1287,7 +1324,14 @@ if (BACKGROUND_JOBS_ENABLED) setInterval(() => {
     }
 
     if (staleIds.length > 0) {
-        for (const { icao24 } of staleIds) activeSessions.delete(icao24);
+        // lastStoredPoint's dedup cache has no cleanup of its own (see [MEM-LEAK]
+        // note near its Map definition) — a session's dedup entry is only ever
+        // meaningful while that session is live, so tie its lifetime to the
+        // session reaper instead of letting it grow forever.
+        for (const { icao24 } of staleIds) {
+            activeSessions.delete(icao24);
+            lastStoredPoint.delete(icao24);
+        }
         const closeOps = staleIds.map(s => ({
             updateOne: {
                 filter: { sessionId: s.sessionId },
@@ -2545,6 +2589,33 @@ const TRACK_CACHE_TTL = 30000; // 30 秒快取
 // Cache for OpenSky historical tracks — longer TTL since data changes slowly mid-flight
 const historicalTrackCache = new Map();
 const HISTORICAL_TRACK_TTL = 90000; // 90 seconds
+
+// [MEM-LEAK] trackCache/historicalTrackCache/routeCache/_registryCache are all
+// icao24-keyed and only ever checked for staleness on READ (a cache miss just
+// means "fetch again"), which never frees a stale entry that's never read
+// again — an aircraft looked up once and never revisited (the common case for
+// a global feed running for weeks) keeps its entry, including trackCache's
+// full flight-path arrays, forever. Sweep all four on the same interval as
+// the session reaper above so cold entries actually get freed.
+if (BACKGROUND_JOBS_ENABLED) setInterval(() => {
+    const now = Date.now();
+    let purged = 0;
+    for (const [key, entry] of trackCache) {
+        if (now - entry.timestamp > TRACK_CACHE_TTL) { trackCache.delete(key); purged++; }
+    }
+    for (const [key, entry] of historicalTrackCache) {
+        if (now - entry.timestamp > HISTORICAL_TRACK_TTL) { historicalTrackCache.delete(key); purged++; }
+    }
+    for (const [key, entry] of routeCache) {
+        const ttl = entry.data?.noData ? 120000 : ROUTE_CACHE_TTL;
+        if (now - entry.timestamp > ttl) { routeCache.delete(key); purged++; }
+    }
+    const REGISTRY_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h — circuit-breaker state is worthless once this stale
+    for (const [key, entry] of _registryCache) {
+        if (now - (entry._updatedAt || 0) > REGISTRY_CACHE_TTL) { _registryCache.delete(key); purged++; }
+    }
+    if (purged > 0) logger.info('CACHE', `Reaper purged ${purged} stale entries (trackCache/historicalTrackCache/routeCache/_registryCache)`);
+}, 300000);
 
 /**
  * Fetch historical track for a single aircraft from OpenSky Network.

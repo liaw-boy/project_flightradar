@@ -20,6 +20,12 @@ CHAMPION_SCALER_PATH = os.path.join(ARTIFACTS_DIR, "scaler.json")
 CHAMPION_Y_SCALER_PATH = os.path.join(ARTIFACTS_DIR, "y_scaler.json")
 
 
+EVAL_BATCH_SIZE = 4096  # a single unbatched forward over the whole (growing) val set
+# once OOM'd the nightly retrain at 17-20GiB against a 10.56GiB GPU once the
+# DB's history grew past ~380k validation windows (2026-09-05 incident) —
+# chunking keeps eval memory flat regardless of how large the val set grows.
+
+
 def evaluate_km_error(model, device, x_scaled, last_pos, y_real_delta, y_scaler):
     """Mean great-circle error (km) between predicted and actual absolute
     lat/lng. The model outputs a normalized DELTA, so both the true and
@@ -27,8 +33,12 @@ def evaluate_km_error(model, device, x_scaled, last_pos, y_real_delta, y_scaler)
     before measuring — see dataset.py's build_windows docstring for why
     absolute-position regression was the root cause of the 65-290km errors."""
     model.eval()
+    outs = []
     with torch.no_grad():
-        out = model(torch.tensor(x_scaled, dtype=torch.float32).to(device)).cpu().numpy()
+        for start in range(0, x_scaled.shape[0], EVAL_BATCH_SIZE):
+            chunk = x_scaled[start:start + EVAL_BATCH_SIZE]
+            outs.append(model(torch.tensor(chunk, dtype=torch.float32).to(device)).cpu().numpy())
+    out = np.concatenate(outs, axis=0)
     pred_delta = y_scaler.inverse_transform_targets(out)
     true_abs = last_pos + y_real_delta
     pred_abs = last_pos + pred_delta

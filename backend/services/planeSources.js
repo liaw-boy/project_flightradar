@@ -95,8 +95,15 @@ function createPlaneSources({ accountPool, apiStats, cbOpen, cbTrip, cbReset, lo
         } catch (e) {
             const msg = e?.message || String(e);
             // Quota exhaustion and rate limits both mean "stop asking for a while".
+            // Pass msg through so classifyFailure() can tell a real 429/quota
+            // signal apart from a momentary blip — previously called with no
+            // reason at all, so every OpenSky failure (429 included) was
+            // misclassified as 'transient' and capped at a 5-minute cooldown
+            // no matter how many times in a row it happened (observed: 161
+            // consecutive "transient" trips, i.e. it never once got the
+            // longer rateLimited backoff its actual failures warranted).
             if (msg.includes('429') || msg.includes('503') || /credit|quota/i.test(msg)) {
-                cbTrip('opensky');
+                cbTrip('opensky', msg);
             }
             logger.warn('SYNC', `OpenSky fallback failed: ${msg}`);
             return [];
