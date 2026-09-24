@@ -240,6 +240,11 @@ function createTrackIngest({ Route, TrackPoint, FlightSession, broadcastTrackPoi
                     altitude: (typeof p.altitude === 'number') ? p.altitude : 0,
                     velocity: p.velocity || 0,
                     heading: p.heading || 0,
+                    // Same clock as track_points.timestamp (what training
+                    // resamples on) — infer_server.py resamples this buffer
+                    // onto the model's 5s grid instead of assuming each row is
+                    // 5s apart, which stopped being true once polling slowed.
+                    ts: timeUnix,
                 });
                 if (buf.length > PREDICTOR_WINDOW_SIZE) buf.shift();
             } else {

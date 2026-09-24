@@ -2853,20 +2853,24 @@ function runNightlyRetrain(attempt) {
         };
         try {
             const result = JSON.parse(lastLine);
-            summary = result.promoted
-                ? `promoted — candidate ${result.candidate_km_error?.toFixed(1)}km vs champion ${result.champion_km_error?.toFixed(1)}km`
-                : `rejected — candidate ${result.candidate_km_error?.toFixed(1)}km did not beat champion`;
+            const km = v => (typeof v === 'number' ? `${v.toFixed(3)}km` : 'N/A');
+            summary = `${result.promoted ? 'promoted' : 'rejected'} — candidate ${km(result.candidate_km_error)} ` +
+                `vs champion ${km(result.champion_km_error)} vs physics ${km(result.physics_km_error)} ` +
+                `(${result.epochs_run ?? '?'} epochs, ${result.stop_reason ?? '?'})`;
+            const detail = `candidate: **${km(result.candidate_km_error)}**　champion(現役): ${km(result.champion_km_error)}　` +
+                `物理外推基準: ${km(result.physics_km_error)}\n` +
+                `epochs: ${result.epochs_run ?? '?'}（${result.stop_reason ?? '?'}）　驗證樣本: ${result.val_samples ?? '?'}` +
+                (result.beats_physics === false ? '\n仍未贏過物理外推基準' : result.beats_physics ? '\n已贏過物理外推基準' : '');
             embed = result.promoted
                 ? {
                     icon: 'promoted', color: 'green',
                     title: 'AEROSTRAT 航跡模型訓練 — 已晉升新模型',
-                    description: `candidate: **${result.candidate_km_error?.toFixed(1)}km**　champion(舊): ${result.champion_km_error?.toFixed(1) ?? 'N/A'}km\n` +
-                        `改善: **${result.improvement_pct?.toFixed(1) ?? 'N/A'}%**\nsessions: ${result.sessions}　windows: ${result.windows}`,
+                    description: `${detail}\n改善: **${result.improvement_pct?.toFixed(1) ?? 'N/A'}%**`,
                 }
                 : {
                     icon: 'rejected', color: 'gray',
                     title: 'AEROSTRAT 航跡模型訓練 — 候選未達門檻，維持現有模型',
-                    description: `candidate: ${result.candidate_km_error?.toFixed(1)}km　champion: ${result.champion_km_error?.toFixed(1) ?? 'N/A'}km`,
+                    description: detail,
                 };
         } catch (_) { /* fall back to raw last line if output shape changes */ }
         logger.info('TRAJECTORY', `Nightly retrain done — ${summary}\n--- stdout (tail) ---\n${_tailLines(stdout)}`);

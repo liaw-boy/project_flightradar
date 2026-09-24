@@ -7,17 +7,13 @@ import torch
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-from dataset import RESAMPLE_DT_S, Scaler, bearing_deg, haversine_km
+from dataset import Scaler, resample_window_at
 from model import WINDOW_SIZE, FlightTrajectoryLSTM
+from rollout import MAX_ROLLOUT_STEPS, rollout_absolute
 
-# The model was retrained to predict exactly RESAMPLE_DT_S seconds ahead (see
-# dataset.py's resampling fix) — it has no notion of longer horizons on its
-# own. To bridge broadcastEngine.js's up-to-90s gap-fill window, roll the
-# model forward autoregressively: feed each predicted point back in as the
-# newest window row, deriving velocity/heading from consecutive positions
-# since the model only outputs lat/lng/altitude. Capped at PLANE_TTL_MS/dt
-# (90s / 5s) — beyond that broadcastEngine.js prunes the plane anyway.
-MAX_ROLLOUT_STEPS = 18
+# The model predicts exactly RESAMPLE_DT_S seconds ahead per step (see
+# dataset.py's resampling fix); longer horizons (broadcastEngine.js's up-to-
+# 90s gap-fill window) are reached by autoregressive rollout — see rollout.py.
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(__file__), "artifacts")
 MODEL_PATH = os.path.join(ARTIFACTS_DIR, "model.pt")
@@ -80,11 +76,15 @@ class TrackPoint(BaseModel):
     altitude: float
     velocity: float = 0.0
     heading: float = 0.0
+    # Observation time (unix seconds). When every point has one, the raw
+    # sequence is resampled onto the model's RESAMPLE_DT_S grid here; without
+    # it, the sequence is assumed to already be that grid (legacy callers).
+    ts: float | None = None
 
 
 class PredictItem(BaseModel):
     icao24: str
-    sequence: list[TrackPoint] = Field(min_length=WINDOW_SIZE, max_length=WINDOW_SIZE)
+    sequence: list[TrackPoint] = Field(min_length=2, max_length=64)
     # How many RESAMPLE_DT_S-sized steps ahead to extrapolate. Caller (broadcastEngine.js)
     # computes this from how long the plane's data has actually been stale.
     stepsAhead: int = Field(default=1, ge=1, le=MAX_ROLLOUT_STEPS)
@@ -94,69 +94,36 @@ class PredictBatchRequest(BaseModel):
     items: list[PredictItem]
 
 
-def _to_feature_vector(seq: list[TrackPoint]) -> np.ndarray:
+def _to_window(seq: list[TrackPoint]):
+    """(WINDOW_SIZE, 6) model input, or None if the sequence can't fill one."""
+    if all(p.ts is not None for p in seq):
+        pts = sorted((p.ts, p.lat, p.lng, p.altitude, p.velocity, p.heading) for p in seq)
+        return resample_window_at(pts)
+    if len(seq) != WINDOW_SIZE:
+        return None
     arr = np.array([[p.lat, p.lng, p.altitude, p.velocity, p.heading] for p in seq], dtype=np.float64)
     heading_rad = np.deg2rad(arr[:, 4])
     return np.column_stack([arr[:, 0], arr[:, 1], arr[:, 2], arr[:, 3], np.sin(heading_rad), np.cos(heading_rad)])
 
 
-def _run_model(windows_batch: np.ndarray) -> np.ndarray:
-    """Returns ABSOLUTE (lat, lng, altitude), reconstructed from the model's
-    normalized-delta output plus each window's last known raw position."""
-    x_scaled = _scaler.transform(windows_batch)
-    with torch.no_grad():
-        xt = torch.tensor(x_scaled, dtype=torch.float32).to(_device)
-        out = _model(xt).cpu().numpy()
-    delta_real = _y_scaler.inverse_transform_targets(out)
-    last_pos = windows_batch[:, -1, :3]
-    return last_pos + delta_real
-
-
 @app.post("/predict_batch")
 def predict_batch(req: PredictBatchRequest):
-    if not req.items:
+    items, windows = [], []
+    for item in req.items:
+        w = _to_window(item.sequence)
+        if w is not None:
+            items.append(item)
+            windows.append(w)
+    if not items:
         return {"predictions": {}}
 
-    windows = [_to_feature_vector(item.sequence) for item in req.items]
-    remaining = [item.stepsAhead for item in req.items]
-    result = [None] * len(req.items)
-    last_pred = [None] * len(req.items)
-    active = list(range(len(req.items)))
-    step = 0
-
-    while active and step < MAX_ROLLOUT_STEPS:
-        step += 1
-        out_real = _run_model(np.stack([windows[i] for i in active]))
-        next_active = []
-        for k, i in enumerate(active):
-            pred_lat, pred_lng, pred_alt = (float(v) for v in out_real[k])
-            last_pred[i] = (pred_lat, pred_lng, pred_alt)
-            if remaining[i] <= step:
-                result[i] = (pred_lat, pred_lng, pred_alt)
-                continue
-            # Model only outputs position — reconstruct velocity/heading from
-            # consecutive points so the next rollout step has a full feature
-            # row to feed back in.
-            prev_lat, prev_lng = windows[i][-1, 0], windows[i][-1, 1]
-            vel_mps = haversine_km(prev_lat, prev_lng, pred_lat, pred_lng) * 1000.0 / RESAMPLE_DT_S
-            heading_rad = np.deg2rad(bearing_deg(prev_lat, prev_lng, pred_lat, pred_lng))
-            new_row = np.array([pred_lat, pred_lng, pred_alt, vel_mps, np.sin(heading_rad), np.cos(heading_rad)])
-            windows[i] = np.vstack([windows[i][1:], new_row])
-            next_active.append(i)
-        active = next_active
-
-    # Items whose stepsAhead exceeded MAX_ROLLOUT_STEPS: best-effort, use the
-    # furthest point actually reached rather than nothing.
-    for i in range(len(result)):
-        if result[i] is None:
-            result[i] = last_pred[i]
-
-    predictions = {
-        item.icao24: {"lat": row[0], "lng": row[1], "altitude": row[2]}
-        for item, row in zip(req.items, result)
-        if row is not None
-    }
-    return {"predictions": predictions}
+    model, scaler, y_scaler = _model, _scaler, _y_scaler  # one consistent snapshot across a hot reload
+    out = rollout_absolute(model, scaler, y_scaler, np.stack(windows),
+                           [item.stepsAhead for item in items], _device)
+    return {"predictions": {
+        item.icao24: {"lat": float(row[0]), "lng": float(row[1]), "altitude": float(row[2])}
+        for item, row in zip(items, out)
+    }}
 
 
 @app.get("/health")

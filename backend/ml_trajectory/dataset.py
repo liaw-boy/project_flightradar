@@ -130,29 +130,63 @@ def _split_on_gaps(pts, max_gap_s):
     return segments
 
 
-def _resample_segment(seg, dt_s):
-    """seg: list of (ts, lat, lng, altitude, velocity, heading) with only
-    natural (<=MAX_INTERP_GAP_S) gaps. Returns an (N, 6) array
-    [lat, lng, altitude, velocity, heading_sin, heading_cos] sampled on a
-    uniform dt_s grid via linear interpolation. Heading is interpolated as
-    its sin/cos components (not degrees) to avoid the 359deg/1deg wraparound
-    producing a fake reversal."""
-    arr = np.array(seg, dtype=np.float64)
+def _interp_features(arr, grid):
+    """arr: (M, 6) float array of (ts, lat, lng, altitude, velocity, heading),
+    ts ascending. Returns (len(grid), 6) features
+    [lat, lng, altitude, velocity, heading_sin, heading_cos]. Heading is
+    interpolated as its sin/cos components (not degrees) to avoid the
+    359deg/1deg wraparound producing a fake reversal."""
     ts, lat, lng, alt, vel, heading = arr.T
-    span = ts[-1] - ts[0]
-    if span < dt_s:
-        return np.empty((0, 6))
-    grid = np.arange(ts[0], ts[-1], dt_s)
     heading_rad = np.deg2rad(heading)
-    h_sin, h_cos = np.sin(heading_rad), np.cos(heading_rad)
     return np.column_stack([
         np.interp(grid, ts, lat),
         np.interp(grid, ts, lng),
         np.interp(grid, ts, alt),
         np.interp(grid, ts, vel),
-        np.interp(grid, ts, h_sin),
-        np.interp(grid, ts, h_cos),
+        np.interp(grid, ts, np.sin(heading_rad)),
+        np.interp(grid, ts, np.cos(heading_rad)),
     ])
+
+
+def _resample_segment(seg, dt_s):
+    """seg: list of (ts, lat, lng, altitude, velocity, heading) with only
+    natural (<=MAX_INTERP_GAP_S) gaps. Returns an (N, 6) feature array
+    sampled on a uniform dt_s grid via linear interpolation."""
+    arr = np.array(seg, dtype=np.float64)
+    ts = arr[:, 0]
+    if ts[-1] - ts[0] < dt_s:
+        return np.empty((0, 6))
+    return _interp_features(arr, np.arange(ts[0], ts[-1], dt_s))
+
+
+def resample_window_at(pts, n=WINDOW_SIZE, dt_s=RESAMPLE_DT_S, max_gap_s=MAX_INTERP_GAP_S):
+    """The inference-side counterpart of resample_session: pts is a ts-sorted
+    list of (ts, lat, lng, altitude, velocity, heading) ending at the newest
+    real observation. Returns an (n, 6) window on the same dt_s grid the
+    model was trained on, anchored so its last row IS that newest real point,
+    or None if the most recent gap-free stretch doesn't cover n rows.
+
+    Live track points arrive at whatever the polling cadence is (15s as of
+    2026-09-23), not dt_s — feeding them to the model row-for-row made each
+    step look 3x longer than anything it was trained on."""
+    seg = _split_on_gaps(pts, max_gap_s)[-1]
+    arr = np.array(seg, dtype=np.float64)
+    t_end = arr[-1, 0]
+    grid = t_end - dt_s * np.arange(n - 1, -1, -1)
+    if grid[0] < arr[0, 0]:
+        return None
+    return _interp_features(arr, grid)
+
+
+def physics_extrapolate(lat, lng, velocity_mps, heading_deg, seconds):
+    """Constant-velocity, constant-heading dead reckoning (flat-earth,
+    fine at these horizons). The baseline the LSTM has to beat to be worth
+    running at all. Vectorized; returns (lat, lng)."""
+    dist_m = velocity_mps * seconds
+    h = np.deg2rad(heading_deg)
+    dlat = dist_m * np.cos(h) / 111_320.0
+    dlng = dist_m * np.sin(h) / (111_320.0 * np.cos(np.deg2rad(lat)))
+    return lat + dlat, lng + dlng
 
 
 def resample_session(pts, dt_s=RESAMPLE_DT_S, max_gap_s=MAX_INTERP_GAP_S):
@@ -198,17 +232,74 @@ def build_windows(sessions):
     return np.stack(xs), np.stack(ys)
 
 
+def load_raw_sessions(db_path, min_points=WINDOW_SIZE + HORIZON, max_sessions=2000, seed=0,
+                      row_scan=ROW_SCAN_DEFAULT):
+    """Returns (sessions, icao24s): each session a ts-sorted list of raw
+    (ts, lat, lng, altitude, velocity, heading) observations — no resampling,
+    so callers can split train/val by session before any oversampling and
+    still evaluate against real (non-interpolated) points."""
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    rows = _fetch_recent_rows(conn, row_scan)
+    conn.close()
+    return _group_by_session(rows, min_points, max_sessions, seed)
+
+
+def build_realpoint_eval(raw_sessions, max_samples=None, seed=0, max_steps=18):
+    """Validation samples shaped exactly like live inference: input window =
+    resample_window_at(history up to real point i), target = the NEXT real
+    point, horizon = that gap rounded to whole dt steps (what
+    broadcastEngine.js would request). Scoring against build_windows' 5s-grid
+    targets overstated accuracy: most of those targets are linear
+    interpolations computed from the very next real point.
+
+    Returns dict of arrays: windows (N, WINDOW_SIZE, 6), steps (N,),
+    last (N, 4: lat, lng, velocity, heading), target (N, 2: lat, lng)."""
+    windows, steps, last, target = [], [], [], []
+    for pts in raw_sessions:
+        for i in range(1, len(pts) - 1):
+            gap = pts[i + 1][0] - pts[i][0]
+            if gap <= 0 or gap > MAX_INTERP_GAP_S:
+                continue
+            k = max(1, int(round(gap / RESAMPLE_DT_S)))
+            if k > max_steps:
+                continue
+            # Only the recent stretch matters for a WINDOW_SIZE*dt window.
+            lo = i
+            while lo > 0 and pts[i][0] - pts[lo - 1][0] <= (WINDOW_SIZE + 1) * RESAMPLE_DT_S + MAX_INTERP_GAP_S:
+                lo -= 1
+            w = resample_window_at(pts[lo:i + 1])
+            if w is None:
+                continue
+            _, lat, lng, _alt, vel, hdg = pts[i]
+            windows.append(w)
+            steps.append(k)
+            last.append((lat, lng, vel, hdg))
+            target.append((pts[i + 1][1], pts[i + 1][2]))
+    if not windows:
+        return None
+    out = {
+        "windows": np.stack(windows),
+        "steps": np.array(steps, dtype=np.int64),
+        "last": np.array(last, dtype=np.float64),
+        "target": np.array(target, dtype=np.float64),
+    }
+    if max_samples is not None and len(out["steps"]) > max_samples:
+        idx = np.random.default_rng(seed).choice(len(out["steps"]), max_samples, replace=False)
+        out = {key: val[idx] for key, val in out.items()}
+    return out
+
+
 def load_sessions(db_path, min_points=WINDOW_SIZE + HORIZON, max_sessions=2000, seed=0,
                    row_scan=ROW_SCAN_DEFAULT, boost_icao24s=None, oversample_factor=1):
     """boost_icao24s: icao24s (e.g. from load_hard_icao24s) whose sessions get
     duplicated `oversample_factor` times in the returned list — a plain,
     dependency-free way to bias training toward hard cases without touching
     the training loop's loss function."""
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    rows = _fetch_recent_rows(conn, row_scan)
-    conn.close()
+    grouped, icao24s = load_raw_sessions(db_path, min_points, max_sessions, seed, row_scan)
+    return resample_sessions(grouped, icao24s, boost_icao24s, oversample_factor)
 
-    grouped, icao24s = _group_by_session(rows, min_points, max_sessions, seed)
+
+def resample_sessions(grouped, icao24s, boost_icao24s=None, oversample_factor=1):
     sessions = []
     hard_count = 0
     for pts, icao24 in zip(grouped, icao24s):
