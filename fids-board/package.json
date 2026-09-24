@@ -1,0 +1,16 @@
+{
+  "name": "tpe-flight-board",
+  "version": "1.0.0",
+  "description": "桃園機場即時航班看板",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3"
+  }
+}

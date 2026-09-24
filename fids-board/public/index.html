@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TPE 桃園國際機場・即時航班看板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topnav">
+  <div class="topnav-inner">
+    <a class="topnav-brand" href="#">Airport Live Status</a>
+    <div class="topnav-selector">
+      <span class="material-symbols-outlined">location_on</span>
+      <select id="airportSelect" aria-label="機場"></select>
+      <span class="material-symbols-outlined">expand_more</span>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+
+  <div class="masthead">
+    <div class="masthead-id">
+      <h1 id="pageTitle">桃園國際機場<span id="pageSubtitle">即時航班看板・Taoyuan International Airport (TPE)</span></h1>
+      <div class="masthead-meta"><span class="live-dot" id="liveDot"></span><span id="liveLabel">即時</span><span class="updated-tag" id="updatedTag">載入中…</span></div>
+      <div class="masthead-stats" id="statsRow"></div>
+    </div>
+    <div class="masthead-controls">
+      <div class="seg" role="tablist" aria-label="航廈">
+        <button class="active" data-terminal="all">全部航廈</button>
+        <button data-terminal="1">T1</button>
+        <button data-terminal="2">T2</button>
+      </div>
+      <div class="seg" role="tablist" aria-label="方向">
+        <button class="active" data-direction="arrival">抵達</button>
+        <button data-direction="departure">出發</button>
+      </div>
+      <select class="field-select" id="airlineFilter" aria-label="航空公司">
+        <option value="">所有航空公司</option>
+      </select>
+      <label class="cargo-toggle">
+        <input type="checkbox" id="cargoToggle">
+        <span>顯示貨機</span>
+      </label>
+      <div class="field-search">
+        <span class="material-symbols-outlined">search</span>
+        <input id="searchBox" type="text" placeholder="航班號、城市、目的地…" autocomplete="off">
+      </div>
+      <button class="history-btn" id="historyBtn" type="button">查看更早航班</button>
+    </div>
+  </div>
+
+  <div class="board board-desktop">
+    <div class="board-scroll">
+      <table>
+        <colgroup>
+          <col class="c-airline"><col class="c-flightno"><col class="c-place"><col class="c-time">
+          <col class="c-gate"><col class="c-term"><col class="c-aircraft"><col class="c-sub"><col class="c-status">
+        </colgroup>
+        <thead>
+          <tr id="tableHead"></tr>
+        </thead>
+        <tbody id="tableBody">
+          <tr><td class="state-msg" colspan="9">載入航班資料中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="flight-cards" id="flightCards">
+    <p class="state-msg">載入航班資料中…</p>
+  </div>
+
+  <footer class="note">資料來源：交通部 TDX 運輸資料流通服務（FIDS）・每 5 分鐘自動更新（API 速率限制）</footer>
+</div>
+
+<div class="detail-backdrop" id="detailBackdrop">
+  <div class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="detailFlightNo">
+    <button class="detail-close" id="detailClose" aria-label="關閉">
+      <span class="material-symbols-outlined">close</span>
+    </button>
+
+    <header class="detail-header">
+      <img class="detail-logo" id="detailLogo" alt="">
+      <div>
+        <h2 id="detailFlightNo"></h2>
+        <p id="detailAirlineName"></p>
+      </div>
+      <span class="chip" id="detailStatusChip"></span>
+    </header>
+
+    <section class="detail-route">
+      <div class="detail-route-end">
+        <div class="detail-route-code" id="detailOrigin"></div>
+        <div class="detail-route-city" id="detailOriginCity"></div>
+        <div class="detail-route-label">出發地 ORIGIN</div>
+      </div>
+      <div class="detail-route-mid">
+        <span class="material-symbols-outlined">flight</span>
+      </div>
+      <div class="detail-route-end detail-route-end-right">
+        <div class="detail-route-code" id="detailDest"></div>
+        <div class="detail-route-city" id="detailDestCity"></div>
+        <div class="detail-route-label">目的地 DESTINATION</div>
+      </div>
+    </section>
+
+    <section class="detail-timeline">
+      <h3>時刻</h3>
+      <div class="tl-row">
+        <div class="tl-dot"></div>
+        <div class="tl-body"><span>表定時間</span><b id="detailSched"></b></div>
+      </div>
+      <div class="tl-row" id="detailEstRow">
+        <div class="tl-dot"></div>
+        <div class="tl-body"><span>預計時間</span><b id="detailEst"></b></div>
+      </div>
+      <div class="tl-row" id="detailActualRow">
+        <div class="tl-dot tl-dot-fill"></div>
+        <div class="tl-body"><span>實際時間</span><b id="detailActual"></b></div>
+      </div>
+      <p class="detail-remark" id="detailRemark"></p>
+    </section>
+
+    <section class="detail-grid">
+      <div><span>航廈</span><b id="detailTerm"></b></div>
+      <div><span>登機門</span><b id="detailGate"></b></div>
+      <div><span>機型</span><b id="detailAc"></b></div>
+      <div id="detailSubWrap"><span id="detailSubLabel"></span><b id="detailSub"></b></div>
+    </section>
+
+    <p class="detail-updated" id="detailUpdated"></p>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

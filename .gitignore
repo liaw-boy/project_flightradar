@@ -89,6 +89,7 @@ client/public/shapes/
 backend/data/standing-data/
 *.html
 !client/public/page-*.html
+!fids-board/public/index.html
 *.log
 
 # Garbage & Duplicates
