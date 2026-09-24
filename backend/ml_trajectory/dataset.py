@@ -69,23 +69,35 @@ def _group_by_session(rows, min_points, max_sessions, seed):
     return [eligible[sid] for sid in sids], [session_icao24[sid] for sid in sids]
 
 
-def load_hard_icao24s(db_path, error_threshold_km=100.0, limit=2000):
+HARD_ROW_SCAN_DEFAULT = 20_000_000  # newest prediction_log ids to consider
+
+
+def load_hard_icao24s(db_path, error_threshold_km=100.0, limit=2000, row_scan=HARD_ROW_SCAN_DEFAULT):
     """icao24s whose logged predictions (prediction_log, populated live by
     broadcastEngine.js) missed badly — these get oversampled during training
     so the model spends more gradient steps on aircraft/maneuvers it's
     actually getting wrong in production, not just whatever the random
-    session sample happens to include."""
+    session sample happens to include.
+
+    Bounded to the newest `row_scan` ids, like _fetch_recent_rows: SQLite
+    otherwise picks idx_pl_icao24 to satisfy the GROUP BY and reads the whole
+    table through it with a random lookup per row — 20GB+ of disk reads and
+    12+ minutes against 221M rows (2026-09-24), a large part of why the
+    nightly retrain hit its timeout. NOT INDEXED forces the rowid range scan
+    (1.4s for 20M rows); a plain `id > ?` filter alone does not change the plan."""
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     cur = conn.cursor()
+    cur.execute("SELECT MAX(id) FROM prediction_log")
+    max_id = cur.fetchone()[0] or 0
     cur.execute(
         """
-        SELECT icao24, AVG(error_km) AS avg_err FROM prediction_log
-        WHERE error_km >= ?
+        SELECT icao24, AVG(error_km) AS avg_err FROM prediction_log NOT INDEXED
+        WHERE id > ? AND error_km >= ?
         GROUP BY icao24
         ORDER BY avg_err DESC
         LIMIT ?
         """,
-        (error_threshold_km, limit),
+        (max_id - row_scan, error_threshold_km, limit),
     )
     result = {row[0] for row in cur.fetchall()}
     conn.close()
