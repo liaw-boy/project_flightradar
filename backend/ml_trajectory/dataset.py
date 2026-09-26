@@ -299,12 +299,16 @@ def build_realpoint_eval(raw_sessions, max_samples=None, seed=0, max_steps=18):
     interpolations computed from the very next real point.
 
     Returns dict of arrays: windows (N, WINDOW_SIZE, 6), steps (N,),
-    last (N, 4: lat, lng, velocity, heading), target (N, 2: lat, lng)."""
-    windows, steps, last, target = [], [], [], []
+    last (N, 4: lat, lng, velocity, heading), target (N, 2: lat, lng), plus
+    scenario metadata for per-situation reporting: alt (ft), vrate (ft/min
+    over the previous interval), turn (deg of heading change over the last two
+    intervals)."""
+    windows, steps, last, target, meta = [], [], [], [], []
     for pts in raw_sessions:
-        for i in range(1, len(pts) - 1):
+        for i in range(2, len(pts) - 1):
             gap = pts[i + 1][0] - pts[i][0]
-            if gap <= 0 or gap > MAX_INTERP_GAP_S:
+            prev_gap = pts[i][0] - pts[i - 1][0]
+            if gap <= 0 or gap > MAX_INTERP_GAP_S or prev_gap <= 0:
                 continue
             k = max(1, int(round(gap / RESAMPLE_DT_S)))
             if k > max_steps:
@@ -321,9 +325,13 @@ def build_realpoint_eval(raw_sessions, max_samples=None, seed=0, max_steps=18):
             steps.append(k)
             last.append((lat, lng, vel, hdg))
             target.append((pts[i + 1][1], pts[i + 1][2]))
+            meta.append((_alt, (_alt - pts[i - 1][3]) / prev_gap * 60.0,
+                         abs((hdg - pts[i - 2][5] + 180) % 360 - 180)))
     if not windows:
         return None
+    meta = np.array(meta, dtype=np.float64)
     out = {
+        "alt": meta[:, 0], "vrate": meta[:, 1], "turn": meta[:, 2],
         "windows": np.stack(windows),
         "steps": np.array(steps, dtype=np.int64),
         "last": np.array(last, dtype=np.float64),

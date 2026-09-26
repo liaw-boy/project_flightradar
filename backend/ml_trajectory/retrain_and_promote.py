@@ -24,22 +24,52 @@ CHAMPION_SCALER_PATH = os.path.join(ARTIFACTS_DIR, "scaler.json")
 CHAMPION_Y_SCALER_PATH = os.path.join(ARTIFACTS_DIR, "y_scaler.json")
 
 
-def evaluate_km_error(model, scaler, y_scaler, val, device):
-    """Mean great-circle error (km) against REAL next observations, via the
-    same resample + autoregressive rollout path infer_server.py serves with
-    (see dataset.build_realpoint_eval for why 5s-grid targets overstated
+def per_sample_km_error(model, scaler, y_scaler, val, device):
+    """Great-circle error (km) per sample against REAL next observations, via
+    the same resample + autoregressive rollout path infer_server.py serves
+    with (see dataset.build_realpoint_eval for why 5s-grid targets overstated
     accuracy). Each model is scored through its own scalers."""
     model.eval()
     pred = rollout_absolute(model, scaler, y_scaler, val["windows"], val["steps"], device)
     t = val["target"]
-    return float(np.mean(haversine_km(t[:, 0], t[:, 1], pred[:, 0], pred[:, 1])))
+    return haversine_km(t[:, 0], t[:, 1], pred[:, 0], pred[:, 1])
 
 
-def physics_km_error(val):
+def evaluate_km_error(model, scaler, y_scaler, val, device):
+    return float(np.mean(per_sample_km_error(model, scaler, y_scaler, val, device)))
+
+
+def physics_per_sample_km(val):
     """Dead-reckoning baseline on the same samples and horizons."""
     last, t = val["last"], val["target"]
     lat, lng = physics_extrapolate(last[:, 0], last[:, 1], last[:, 2], last[:, 3], val["steps"] * RESAMPLE_DT_S)
-    return float(np.mean(haversine_km(t[:, 0], t[:, 1], lat, lng)))
+    return haversine_km(t[:, 0], t[:, 1], lat, lng)
+
+
+def physics_km_error(val):
+    return float(np.mean(physics_per_sample_km(val)))
+
+
+def scenario_report(val, errors):
+    """errors: {name: per-sample km array}. Mean error per situation. The
+    overall mean is ~99% short-gap, mostly-straight samples; signal-loss gaps
+    (the case the predictor exists for) are 1.3% of samples but 15% of dead
+    reckoning's total error, and turns have ~2x its error — averaging hides
+    whether a model helps exactly there."""
+    masks = {
+        "all": np.ones(len(val["steps"]), bool),
+        "short_gap": val["steps"] <= 4,
+        "long_gap": val["steps"] > 4,
+        "straight": val["turn"] < 3,
+        "turning": val["turn"] >= 3,
+        "climb": val["vrate"] > 500,
+        "descent": val["vrate"] < -500,
+        "level": np.abs(val["vrate"]) <= 500,
+        "low_alt": val["alt"] < 3000,
+        "high_alt": val["alt"] >= 20000,
+    }
+    return {name: {"n": int(m.sum()), **{k: round(float(e[m].mean()), 4) for k, e in errors.items()}}
+            for name, m in masks.items() if m.sum() >= 50}
 
 
 def train_candidate(x_train_s, y_train_s, device, max_epochs, batch_size, lr,
@@ -234,7 +264,8 @@ def main(args):
         print(f"physics-residual: Huber delta {huber_delta:.5f} (scaled), lr decay {lr_decay}/epoch, "
               f"scaler span lat/lng {(y_scaler.maxs - y_scaler.mins)[:2]}")
 
-    physics_km = physics_km_error(val)
+    physics_err = physics_per_sample_km(val)
+    physics_km = float(physics_err.mean())
     print(f"physics (dead-reckoning) baseline: {physics_km:.3f} km on {n_val} real-point samples")
     # Training gets whatever is left of the whole-run deadline after loading,
     # minus a reserve for scoring candidate + champion on the full val set.
@@ -250,7 +281,8 @@ def main(args):
     )
     print(f"stopped after {epochs_run} epochs ({stop_reason})")
     lap("train_candidate")
-    candidate_km = evaluate_km_error(candidate, scaler, y_scaler, val, device)
+    candidate_err = per_sample_km_error(candidate, scaler, y_scaler, val, device)
+    candidate_km = float(candidate_err.mean())
     print(f"candidate val error: {candidate_km:.3f} km")
     lap("eval_candidate")
 
@@ -335,7 +367,8 @@ def main(args):
         # Same samples, but through the CHAMPION's own saved scalers — the
         # exact transform its deployed weights were trained against, so this
         # mirrors what infer_server.py produces for these inputs today.
-        champion_km = evaluate_km_error(champion, champion_scaler, champion_y_scaler, val, device)
+        champion_err = per_sample_km_error(champion, champion_scaler, champion_y_scaler, val, device)
+        champion_km = float(champion_err.mean())
         lap("eval_champion")
         improvement = (champion_km - candidate_km) / champion_km if champion_km > 0 else 0
         should_promote = improvement > args.min_improvement
@@ -357,6 +390,15 @@ def main(args):
     # over night even while it still trails dead reckoning (2026-09-24: live
     # champion 0.561km vs physics 0.171km). Beating physics is the bar for
     # ever showing predictions on the map again (MapView.jsx PHASE2_ENABLED).
+    errors = {"physics": physics_err, "candidate": candidate_err}
+    if champion is not None:
+        errors["champion"] = champion_err
+    result["scenarios"] = scenario_report(val, errors)
+    for name in ("long_gap", "turning", "short_gap", "straight"):
+        r = result["scenarios"].get(name)
+        if r:
+            print(f"[scenario] {name:10s} n={r['n']:>7}  physics {r['physics']:.3f}  candidate {r['candidate']:.3f}"
+                  + (f"  champion {r['champion']:.3f}" if "champion" in r else "") + " km")
     result["beats_physics"] = bool(candidate_km < physics_km)
     print(f"vs physics baseline: {'BEATS' if result['beats_physics'] else 'still trails'} "
           f"({candidate_km:.3f} vs {physics_km:.3f} km)")
