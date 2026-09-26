@@ -2812,12 +2812,14 @@ function runNightlyRetrain(attempt) {
     syncLog.start('trajectory-retrain');
     // -u: unbuffered, so progress lines printed before a timeout kill actually
     // reach stdout here instead of dying in Python's pipe buffer.
-    // --physics-residual: the model learns a correction on top of dead
-    // reckoning. 2026-09-25 dry run on real next observations: 0.222km vs the
-    // live delta-model champion's 0.338km, and level with plain dead reckoning
-    // (0.212km). Each model is scored through its own kind, so a residual
-    // candidate is still compared fairly against a delta champion.
-    execFile(pythonBin, ['-u', 'retrain_and_promote.py', '--use-prediction-log', '--physics-residual'], {
+    // --direct-horizons 9: one forward pass outputs corrections on dead
+    // reckoning at 5..45s, instead of a 5s model rolled out step by step (whose
+    // error compounds across a signal-loss gap). Two full-scale dry runs on real
+    // next observations (2026-09-26, seeds 0 and 7): 0.177/0.178km vs dead
+    // reckoning 0.189/0.190km and the live delta-model champion 0.299km, ahead
+    // in every scenario (turning -17%, long gaps -4%). Each model is scored
+    // through its own kind, so this is still compared fairly to any champion.
+    execFile(pythonBin, ['-u', 'retrain_and_promote.py', '--use-prediction-log', '--direct-horizons', '9'], {
         cwd: trajectoryDir,
         timeout: 30 * 60_000, // generous cap — a slow night shouldn't overlap tomorrow's run
         maxBuffer: 10 * 1024 * 1024,

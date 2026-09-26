@@ -7,7 +7,7 @@ import torch
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-from dataset import Scaler, resample_window_at
+from dataset import KIND_DIRECT, Scaler, resample_window_at
 from model import WINDOW_SIZE, FlightTrajectoryLSTM
 from rollout import MAX_ROLLOUT_STEPS, rollout_absolute
 
@@ -39,13 +39,14 @@ def _load_artifacts_into_globals():
     # so a concurrent /predict_batch request always sees either the fully
     # old or fully new model, never weights half-loaded from an in-place
     # load_state_dict() on the model currently serving traffic.
-    model = FlightTrajectoryLSTM().to(_device)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=_device))
-    model.eval()
     with open(SCALER_PATH) as f:
         scaler = Scaler.from_json(json.load(f))
     with open(Y_SCALER_PATH) as f:
         y_scaler = Scaler.from_json(json.load(f))
+    # A KIND_DIRECT model has horizons*3 outputs, so the scalers say how big to build it.
+    model = FlightTrajectoryLSTM(output_size=3 * (y_scaler.horizons if y_scaler.kind == KIND_DIRECT else 1)).to(_device)
+    model.load_state_dict(torch.load(MODEL_PATH, map_location=_device))
+    model.eval()
     _model, _scaler, _y_scaler = model, scaler, y_scaler
     _model_mtime = os.path.getmtime(MODEL_PATH)
 

@@ -220,6 +220,8 @@ def resample_session(pts, dt_s=RESAMPLE_DT_S, max_gap_s=MAX_INTERP_GAP_S):
 
 KIND_DELTA = "delta"                    # model output = next-step delta from the last position
 KIND_RESIDUAL = "physics_residual"      # model output = correction on top of physics_step_delta
+KIND_DIRECT = "direct_residual"         # model output = corrections at horizons 1..H (H*3 values), each on top of
+                                        # dead reckoning at that horizon — one forward pass, no autoregressive rollout
 
 
 def physics_step_delta(last_rows):
@@ -243,6 +245,36 @@ def physics_step_delta(last_rows):
         dist_m * (h_sin / norm) / (M_PER_DEG * cos_lat),
         np.zeros(len(last)),
     ])
+
+
+def physics_horizon_delta(last_rows, horizons):
+    """(N, horizons*3): dead-reckoning displacement at each horizon h=1..H
+    (h * RESAMPLE_DT_S seconds), flattened [h1: dlat,dlng,dalt, h2: ...]. Constant
+    velocity and heading, so it is the one-step delta times h."""
+    step = physics_step_delta(last_rows)
+    return np.concatenate([step * h for h in range(1, horizons + 1)], axis=1)
+
+
+def build_windows_multi(sessions, horizons):
+    """sessions: list of (T, 6) arrays -> (X, Y) for KIND_DIRECT. Y is (N, horizons*3):
+    for each horizon h the (dlat, dlng, dalt) from the window's last point to
+    the point h grid steps later, MINUS dead reckoning at that horizon."""
+    from numpy.lib.stride_tricks import sliding_window_view
+    xs, ys = [], []
+    for arr in sessions:
+        n = len(arr) - WINDOW_SIZE - horizons + 1
+        if n <= 0:
+            continue
+        x = sliding_window_view(arr, (WINDOW_SIZE, arr.shape[1]))[:, 0][:n]
+        last = arr[WINDOW_SIZE - 1:WINDOW_SIZE - 1 + n, :3]
+        y = np.concatenate([arr[WINDOW_SIZE - 1 + h:WINDOW_SIZE - 1 + h + n, :3] - last
+                            for h in range(1, horizons + 1)], axis=1)
+        xs.append(x)
+        ys.append(y)
+    if not xs:
+        return np.empty((0, WINDOW_SIZE, 6)), np.empty((0, horizons * 3))
+    x, y = np.concatenate(xs), np.concatenate(ys)
+    return x, y - physics_horizon_delta(x[:, -1, :], horizons)
 
 
 def build_windows(sessions, residual=False):
@@ -378,9 +410,10 @@ def resample_sessions(grouped, icao24s, boost_icao24s=None, oversample_factor=1)
 class Scaler:
     """Per-feature min-max scaler with JSON-serializable state."""
 
-    def __init__(self, mins=None, maxs=None, kind=KIND_DELTA):
+    def __init__(self, mins=None, maxs=None, kind=KIND_DELTA, horizons=1):
         self.mins = mins
         self.maxs = maxs
+        self.horizons = horizons  # KIND_DIRECT: number of grid steps the model outputs
         # Only meaningful on the TARGET scaler (y_scaler.json): tells rollout.py
         # how to turn the model's output back into a position.
         self.kind = kind
@@ -403,15 +436,17 @@ class Scaler:
         # (delta lat/lng/altitude — see build_windows), so mins/maxs are
         # already exactly length 3; the [:3] slice is a no-op safety net,
         # not a reference back into a 6-feature X scaler.
-        span = np.where(self.maxs[:3] - self.mins[:3] == 0, 1.0, self.maxs[:3] - self.mins[:3])
-        return y * span + self.mins[:3]
+        n = y.shape[-1]  # 3 for delta/residual kinds, horizons*3 for KIND_DIRECT
+        span = np.where(self.maxs[:n] - self.mins[:n] == 0, 1.0, self.maxs[:n] - self.mins[:n])
+        return y * span + self.mins[:n]
 
     def to_json(self):
         return {"mins": self.mins.tolist(), "maxs": self.maxs.tolist(), "features": FEATURES}
 
     @classmethod
     def from_json(cls, d):
-        return cls(mins=np.array(d["mins"]), maxs=np.array(d["maxs"]), kind=d.get("kind", KIND_DELTA))
+        return cls(mins=np.array(d["mins"]), maxs=np.array(d["maxs"]), kind=d.get("kind", KIND_DELTA),
+                   horizons=d.get("horizons", 1))
 
 
 if __name__ == "__main__":
