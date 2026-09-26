@@ -8,7 +8,7 @@ velocity/heading reconstructed from the last two positions."""
 import numpy as np
 import torch
 
-from dataset import RESAMPLE_DT_S, bearing_deg, haversine_km
+from dataset import KIND_RESIDUAL, RESAMPLE_DT_S, bearing_deg, haversine_km, physics_step_delta
 
 MAX_ROLLOUT_STEPS = 18  # PLANE_TTL_MS (90s) / RESAMPLE_DT_S — broadcastEngine.js prunes past that
 FORWARD_BATCH = 4096
@@ -23,6 +23,8 @@ def _forward(model, scaler, y_scaler, windows, device):
             chunk = torch.tensor(x_scaled[start:start + FORWARD_BATCH], dtype=torch.float32).to(device)
             outs.append(model(chunk).cpu().numpy())
     delta = y_scaler.inverse_transform_targets(np.concatenate(outs, axis=0))
+    if y_scaler.kind == KIND_RESIDUAL:
+        delta = delta + physics_step_delta(windows[:, -1, :])
     return windows[:, -1, :3] + delta
 
 

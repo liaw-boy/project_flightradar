@@ -10,8 +10,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from dataset import (ROW_SCAN_DEFAULT, RESAMPLE_DT_S, Scaler, build_realpoint_eval, build_windows, haversine_km,
-                     load_hard_icao24s, load_raw_sessions, physics_extrapolate, resample_sessions)
+from dataset import (KIND_DELTA, KIND_RESIDUAL, M_PER_DEG, ROW_SCAN_DEFAULT, RESAMPLE_DT_S, Scaler, build_realpoint_eval,
+                     build_windows, haversine_km, load_hard_icao24s, load_raw_sessions, physics_extrapolate,
+                     resample_sessions)
 from model import FlightTrajectoryLSTM
 from rollout import rollout_absolute
 
@@ -42,7 +43,7 @@ def physics_km_error(val):
 
 
 def train_candidate(x_train_s, y_train_s, device, max_epochs, batch_size, lr,
-                    score_fn, patience, min_delta, budget_s):
+                    score_fn, patience, min_delta, budget_s, criterion=None, lr_decay=1.0):
     """Trains until the real-point validation error stops improving by more
     than min_delta (relative) for `patience` epochs, max_epochs is hit, or the
     wall-clock budget runs out — whichever comes first — and returns the
@@ -51,8 +52,9 @@ def train_candidate(x_train_s, y_train_s, device, max_epochs, batch_size, lr,
 
     Returns (model, epochs_run, stop_reason)."""
     model = FlightTrajectoryLSTM().to(device)
-    criterion = nn.MSELoss()
+    criterion = criterion or nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=lr_decay)
     loader = DataLoader(
         TensorDataset(torch.tensor(x_train_s, dtype=torch.float32), torch.tensor(y_train_s, dtype=torch.float32)),
         batch_size=batch_size, shuffle=True,
@@ -72,6 +74,7 @@ def train_candidate(x_train_s, y_train_s, device, max_epochs, batch_size, lr,
             loss.backward()
             optimizer.step()
             total_loss += loss.item() * xb.size(0)
+        scheduler.step()
         score = score_fn(model)
         epoch_s = time.perf_counter() - epoch_start
         improved = score < best_score * (1 - min_delta)
@@ -145,7 +148,8 @@ def promote(candidate, scaler, y_scaler):
     _atomic_write_bytes(CHAMPION_SCALER_PATH, lambda p: json.dump(scaler.to_json(), open(p, "w")))
     _atomic_write_bytes(
         CHAMPION_Y_SCALER_PATH,
-        lambda p: json.dump({"mins": y_scaler.mins.tolist(), "maxs": y_scaler.maxs.tolist(), "targets": ["dlat", "dlng", "daltitude"]}, open(p, "w")),
+        lambda p: json.dump({"mins": y_scaler.mins.tolist(), "maxs": y_scaler.maxs.tolist(),
+                             "targets": ["dlat", "dlng", "daltitude"], "kind": y_scaler.kind}, open(p, "w")),
     )
     _atomic_write_bytes(CHAMPION_MODEL_PATH, lambda p: torch.save(candidate.state_dict(), p))
 
@@ -183,7 +187,18 @@ def main(args):
     # land on both sides and validation isn't skewed toward oversampled ones.
     split = max(1, int(len(raw_sessions) * 0.85))
     train_segments = resample_sessions(raw_sessions[:split], icao24s[:split], boost_icao24s, args.oversample_factor)
-    x_train, y_train = build_windows(train_segments)
+    kind = KIND_RESIDUAL if args.physics_residual else KIND_DELTA
+    x_train, y_train = build_windows(train_segments, residual=args.physics_residual)
+    if args.physics_residual:
+        # A 5s residual beyond max_resid_m is a position glitch, not flying (the
+        # worst was 18km): with min-max target scaling those few windows set the
+        # whole scale, so typical residuals sat at ~0.08% of the range and the
+        # MSE was dominated by the tail. Training only — validation stays on
+        # real observations, unfiltered.
+        keep = np.hypot(y_train[:, 0], y_train[:, 1]) * M_PER_DEG <= args.max_resid_m
+        print(f"dropping {int((~keep).sum())}/{len(keep)} training windows with a 5s residual > {args.max_resid_m:.0f} m")
+        x_train, y_train = x_train[keep], y_train[keep]
+        del keep
     val = build_realpoint_eval(raw_sessions[split:], max_samples=args.max_val_samples, seed=args.seed)
     lap("build_windows")
     if x_train.shape[0] == 0 or val is None:
@@ -205,8 +220,19 @@ def main(args):
     x_train_s = scaler.transform(x_train)
     # y_train is a delta (see build_windows) — dedicated scaler, not a slice
     # of X's lat/lng/altitude scale.
-    y_scaler = Scaler().fit(y_train)
+    y_scaler = Scaler(kind=kind).fit(y_train)
     y_train_s = y_scaler.transform(y_train)
+    criterion, lr_decay = None, args.lr_decay if args.lr_decay is not None else 1.0
+    if args.physics_residual:
+        # Huber, with the knee at the 90th percentile of the scaled residual
+        # size, so the tail is L1 instead of dominating the gradient.
+        zero = (0.0 - y_scaler.mins) / (y_scaler.maxs - y_scaler.mins)
+        sample = y_train_s[np.random.default_rng(args.seed).choice(len(y_train_s), min(len(y_train_s), 500_000), replace=False)]
+        huber_delta = float(np.percentile(np.abs(sample[:, :2] - zero[:2]), 90))
+        criterion = nn.HuberLoss(delta=huber_delta)
+        lr_decay = args.lr_decay if args.lr_decay is not None else 0.75
+        print(f"physics-residual: Huber delta {huber_delta:.5f} (scaled), lr decay {lr_decay}/epoch, "
+              f"scaler span lat/lng {(y_scaler.maxs - y_scaler.mins)[:2]}")
 
     physics_km = physics_km_error(val)
     print(f"physics (dead-reckoning) baseline: {physics_km:.3f} km on {n_val} real-point samples")
@@ -220,6 +246,7 @@ def main(args):
         x_train_s, y_train_s, device, args.epochs, args.batch_size, args.lr,
         score_fn=lambda m: evaluate_km_error(m, scaler, y_scaler, es_val, device),
         patience=args.patience, min_delta=args.min_delta, budget_s=train_budget_s,
+        criterion=criterion, lr_decay=lr_decay,
     )
     print(f"stopped after {epochs_run} epochs ({stop_reason})")
     lap("train_candidate")
@@ -234,6 +261,7 @@ def main(args):
         "metric": "realpoint_rollout",
         "sessions": len(raw_sessions),
         "windows": int(x_train.shape[0]),
+        "model_kind": kind,
         "val_samples": n_val,
         "epochs_run": epochs_run,
         "stop_reason": stop_reason,
@@ -351,6 +379,13 @@ if __name__ == "__main__":
                     help="time held back from training for final candidate/champion scoring")
     p.add_argument("--max-val-samples", type=int, default=200_000)
     p.add_argument("--es-val-samples", type=int, default=50_000, help="subset scored after every epoch")
+    p.add_argument("--physics-residual", action="store_true",
+                    help="train the model to predict a correction on top of dead reckoning instead of the "
+                         "whole displacement (opt-in: the nightly cron does not pass it yet)")
+    p.add_argument("--max-resid-m", type=float, default=2000.0,
+                    help="physics-residual only: drop training windows whose 5s residual exceeds this (glitches)")
+    p.add_argument("--lr-decay", type=float, default=None,
+                    help="per-epoch learning-rate decay; default 0.75 with --physics-residual, else 1.0 (none)")
     p.add_argument("--no-promote", action="store_true",
                     help="dry run: never touch artifacts/ or retrain_log.jsonl")
     p.add_argument("--batch-size", type=int, default=512)

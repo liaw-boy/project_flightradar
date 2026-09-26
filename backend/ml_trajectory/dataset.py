@@ -105,6 +105,9 @@ def load_hard_icao24s(db_path, error_threshold_km=100.0, limit=2000, row_scan=HA
 
 
 EARTH_RADIUS_KM = 6371.0
+# Same sphere haversine_km() uses, so dead reckoning and the rollout's
+# reconstructed velocity (haversine / dt) agree instead of drifting 0.11%/step.
+M_PER_DEG = EARTH_RADIUS_KM * 1000.0 * np.pi / 180.0
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
@@ -196,8 +199,8 @@ def physics_extrapolate(lat, lng, velocity_mps, heading_deg, seconds):
     running at all. Vectorized; returns (lat, lng)."""
     dist_m = velocity_mps * seconds
     h = np.deg2rad(heading_deg)
-    dlat = dist_m * np.cos(h) / 111_320.0
-    dlng = dist_m * np.sin(h) / (111_320.0 * np.cos(np.deg2rad(lat)))
+    dlat = dist_m * np.cos(h) / M_PER_DEG
+    dlng = dist_m * np.sin(h) / (M_PER_DEG * np.cos(np.deg2rad(lat)))
     return lat + dlat, lng + dlng
 
 
@@ -215,8 +218,36 @@ def resample_session(pts, dt_s=RESAMPLE_DT_S, max_gap_s=MAX_INTERP_GAP_S):
     return out
 
 
-def build_windows(sessions):
+KIND_DELTA = "delta"                    # model output = next-step delta from the last position
+KIND_RESIDUAL = "physics_residual"      # model output = correction on top of physics_step_delta
+
+
+def physics_step_delta(last_rows):
+    """Dead-reckoning displacement over one RESAMPLE_DT_S step from window
+    rows (N, 6) [lat, lng, altitude, velocity, heading_sin, heading_cos] (or a
+    single row) -> (N, 3) [dlat, dlng, 0]. Constant velocity and heading,
+    flat-earth — the same math as physics_extrapolate, in the feature space
+    the model already sees. Altitude has no vertical-rate feature, so it is
+    left to the model. A KIND_RESIDUAL model learns the correction to this
+    instead of the whole displacement, so its worst case is dead reckoning
+    rather than nothing (2026-09-24: plain-delta LSTM 0.23-0.38km vs 0.18-0.24km
+    for dead reckoning on real next observations)."""
+    last = np.atleast_2d(last_rows)
+    lat, vel, h_sin, h_cos = last[:, 0], last[:, 3], last[:, 4], last[:, 5]
+    norm = np.hypot(h_sin, h_cos)
+    norm = np.where(norm == 0, 1.0, norm)
+    dist_m = vel * RESAMPLE_DT_S
+    cos_lat = np.maximum(np.cos(np.deg2rad(lat)), 1e-3)
+    return np.column_stack([
+        dist_m * (h_cos / norm) / M_PER_DEG,
+        dist_m * (h_sin / norm) / (M_PER_DEG * cos_lat),
+        np.zeros(len(last)),
+    ])
+
+
+def build_windows(sessions, residual=False):
     """sessions: list of (T, 6) float64 arrays -> (X, Y) sliding windows.
+    residual=True subtracts physics_step_delta from Y (see KIND_RESIDUAL).
 
     Y is the DELTA (lat, lng, altitude) from the window's last point to the
     target point, not the absolute position. Root-cause fix (2026-08-31):
@@ -241,7 +272,10 @@ def build_windows(sessions):
             ys.append(target_pos - last_pos)  # delta lat, lng, altitude
     if not xs:
         return np.empty((0, WINDOW_SIZE, 6)), np.empty((0, 3))
-    return np.stack(xs), np.stack(ys)
+    x, y = np.stack(xs), np.stack(ys)
+    if residual:
+        y = y - physics_step_delta(x[:, -1, :])
+    return x, y
 
 
 def load_raw_sessions(db_path, min_points=WINDOW_SIZE + HORIZON, max_sessions=2000, seed=0,
@@ -336,9 +370,12 @@ def resample_sessions(grouped, icao24s, boost_icao24s=None, oversample_factor=1)
 class Scaler:
     """Per-feature min-max scaler with JSON-serializable state."""
 
-    def __init__(self, mins=None, maxs=None):
+    def __init__(self, mins=None, maxs=None, kind=KIND_DELTA):
         self.mins = mins
         self.maxs = maxs
+        # Only meaningful on the TARGET scaler (y_scaler.json): tells rollout.py
+        # how to turn the model's output back into a position.
+        self.kind = kind
 
     def fit(self, x):
         flat = x.reshape(-1, x.shape[-1])
@@ -366,7 +403,7 @@ class Scaler:
 
     @classmethod
     def from_json(cls, d):
-        return cls(mins=np.array(d["mins"]), maxs=np.array(d["maxs"]))
+        return cls(mins=np.array(d["mins"]), maxs=np.array(d["maxs"]), kind=d.get("kind", KIND_DELTA))
 
 
 if __name__ == "__main__":
