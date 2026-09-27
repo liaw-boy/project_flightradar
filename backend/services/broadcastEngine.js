@@ -22,6 +22,7 @@ const { predictBatch } = require('./trajectoryPredictor');
 const { getDistance } = require('../utils/planeGuards');
 const predictionLogStore = require('../db/predictionLogStore');
 const { notifyDiscord } = require('./discordNotifier');
+const { createStuckGuard } = require('../utils/stuckGuard');
 const SPECIAL_LIVERIES = require('../data/specialLiveries.json');
 
 const EMERGENCY_SQUAWK_LABELS = { '7500': '劫機 (Hijack)', '7600': '通訊失效 (Radio Failure)', '7700': '一般緊急 (General Emergency)' };
@@ -104,15 +105,21 @@ let _broadcastDirty = false;
 // guard (matching the style already used for the pollers themselves) means
 // a rare overlap just skips one cycle rather than risking a stale
 // overwrite — the next 2-5s tick catches up regardless.
-let _pruneAndBroadcastRunning = false;
+//
+// createStuckGuard (see utils/stuckGuard.js) adds a watchdog on top: a plain
+// boolean here has no recovery if the awaited work inside truly hangs rather
+// than just running slow — see the 2026-09-27 incident, where the sibling
+// fetchGlobalBaseline guard in pollers.js stuck this way for 45 minutes with
+// zero log trace after a database stall.
+const _pruneAndBroadcastGuard = createStuckGuard('pruneAndBroadcast', notifyDiscord);
 
 async function pruneAndBroadcast() {
-    if (_pruneAndBroadcastRunning) return;
-    _pruneAndBroadcastRunning = true;
+    if (_pruneAndBroadcastGuard.shouldSkip()) return;
+    _pruneAndBroadcastGuard.enter();
     try {
         await _pruneAndBroadcastImpl();
     } finally {
-        _pruneAndBroadcastRunning = false;
+        _pruneAndBroadcastGuard.exit();
     }
 }
 

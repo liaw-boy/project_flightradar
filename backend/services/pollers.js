@@ -24,6 +24,7 @@ const { getActiveViewports, getClientCount } = require('../socketEngine');
 const Aircraft = require('../db/aircraftStore');
 const MictronicsDb = require('../db/mictronicsDb');
 const { notifyDiscord } = require('./discordNotifier');
+const { createStuckGuard } = require('../utils/stuckGuard');
 
 function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackgroundResolution }) {
 
@@ -31,7 +32,6 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
     // Primary: adsb.lol (no quota, 15s interval — see server.js's
     // setInterval(fetchGlobalBaseline, ...) for the current value and why)
     // Fallback: adsb.fi snapshot (if adsb.lol fails)
-    let _baselineRunning = false;
 
     // A single failed cycle (one source hiccup) is normal and already handled by
     // the per-source circuit breakers. This tracks the harder failure: adsb.lol
@@ -71,9 +71,10 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
     let _recoverySuccessStreak = 0;
     const RECOVERY_CONFIRM_CYCLES = 3; // ~15s of sustained data before declaring recovered
 
+    const _baselineGuard = createStuckGuard('fetchGlobalBaseline', notifyDiscord);
     async function fetchGlobalBaseline() {
-        if (_baselineRunning) return;
-        _baselineRunning = true;
+        if (_baselineGuard.shouldSkip()) return;
+        _baselineGuard.enter();
         const t0 = performance.now();
 
         try {
@@ -192,15 +193,15 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
             logger.error('SYNC', `Global baseline error: ${e.message}`);
             getGlobalPlanesCache().stale = true;
         } finally {
-            _baselineRunning = false;
+            _baselineGuard.exit();
         }
     }
 
     // ── Tier 2: Viewport Overlay ───────────────────────────────────────────────
-    let _viewportRunning = false;
+    const _viewportGuard = createStuckGuard('fetchViewportOverlay', notifyDiscord);
     async function fetchViewportOverlay() {
-        if (_viewportRunning) return;
-        _viewportRunning = true;
+        if (_viewportGuard.shouldSkip()) return;
+        _viewportGuard.enter();
         const t0 = performance.now();
 
         try {
@@ -289,15 +290,15 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
         } catch (e) {
             logger.error('SYNC', `Viewport overlay error: ${e.message}`);
         } finally {
-            _viewportRunning = false;
+            _viewportGuard.exit();
         }
     }
 
     // ── Tier 3: Special Categories ─────────────────────────────────────────────
-    let _specialRunning = false;
+    const _specialGuard = createStuckGuard('fetchSpecialCategories', notifyDiscord);
     async function fetchSpecialCategories() {
-        if (_specialRunning) return;
-        _specialRunning = true;
+        if (_specialGuard.shouldSkip()) return;
+        _specialGuard.enter();
         const t0 = performance.now();
 
         try {
@@ -341,12 +342,11 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
         } catch (e) {
             logger.error('SYNC', `Special categories error: ${e.message}`);
         } finally {
-            _specialRunning = false;
+            _specialGuard.exit();
         }
     }
 
     // ── Enrichment + TrackPoint ingestion (called after global baseline) ───────
-    let _enrichRunning = false;
     // [perf] Per-icao24 cooldown: skip Aircraft upsert if written < 5 min ago and no clients
     const _aircraftWriteCooldown = new Map(); // icao24 → last write timestamp (ms)
     // [MEM-LEAK] Never had its own cleanup — an icao24 that leaves masterStateMap
@@ -355,23 +355,16 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
     let _lastCooldownSweepAt = 0;
     const COOLDOWN_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
     // [2026-09-06 incident] Track-point ingestion silently stopped for ~27h
-    // with zero errors logged — the leading hypothesis is this guard tripping
-    // forever (a stuck _enrichRunning=true from some earlier hang never
-    // reaching its finally). Logging every skip (throttled) turns a silent
-    // freeze back into a visible one if it recurs.
-    let _enrichSkipCount = 0;
-    let _lastEnrichSkipLogAt = 0;
+    // with zero errors logged — was a plain boolean guard with no watchdog,
+    // so a stuck lock (never reaching its own finally) skipped every later
+    // call forever with zero trace. createStuckGuard replaces the ad-hoc
+    // skip-counter this used to have with the same alert+force-clear
+    // mechanism the other three pollers now use — see utils/stuckGuard.js
+    // and the 2026-09-27 incident (fetchGlobalBaseline stuck 45 minutes).
+    const _enrichGuard = createStuckGuard('enrichAndIngest', notifyDiscord);
     async function enrichAndIngest() {
-        if (_enrichRunning) {
-            _enrichSkipCount++;
-            const now = Date.now();
-            if (now - _lastEnrichSkipLogAt > 60_000) {
-                _lastEnrichSkipLogAt = now;
-                logger.warn('INGEST', `enrichAndIngest guard tripped — skipped ${_enrichSkipCount} call(s) since last log (stuck lock?)`);
-            }
-            return;
-        }
-        _enrichRunning = true;
+        if (_enrichGuard.shouldSkip()) return;
+        _enrichGuard.enter();
         const finalStates = Array.from(masterStateMap.values());
 
         try {
@@ -482,7 +475,7 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
         } catch (e) {
             logger.warn('SYNC', `enrichAndIngest error: ${e.message}`);
         } finally {
-            _enrichRunning = false;
+            _enrichGuard.exit();
         }
     }
 
