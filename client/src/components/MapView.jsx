@@ -25,7 +25,6 @@ import {
     RENDER_MODE_SIMPLE,
     getAircraftVectorKey,
 } from './mapViewUtils';
-import { buildGreatCircleSegments } from '../utils/greatCircle';
 import {
     FOCUS_DIM_OPACITY,
     SELECTION_GLOW,
@@ -829,59 +828,6 @@ export default function MapView({
     const shouldShowPlaneRef = useRef(shouldShowPlane);
     useEffect(() => { shouldShowPlaneRef.current = shouldShowPlane; }, [shouldShowPlane]);
 
-    // ── [Task C] Historical trace replay (GET /api/flight-trace/:hex) ────────
-    // Purely additive: a separate Leaflet vector layer (L.polyline), created
-    // lazily on first use, drawn on top of the existing PlaneCanvasLayer.
-    // Never touches the live-position Canvas rendering above.
-    const traceLayerRef = useRef(null);
-    const [traceIcao24, setTraceIcao24] = useState(null);
-    const [traceLoading, setTraceLoading] = useState(false);
-
-    const clearTrace = useCallback(() => {
-        traceLayerRef.current?.clearLayers();
-        setTraceIcao24(null);
-    }, []);
-
-    // Auto-clear the trace whenever the selection changes to a different
-    // plane (or is cleared) — the trace is scoped to "the plane you had
-    // selected when you asked for it", not a persistent overlay.
-    useEffect(() => {
-        if (traceIcao24 && traceIcao24 !== selectedIcao24) clearTrace();
-    }, [selectedIcao24, traceIcao24, clearTrace]);
-
-    const toggleTrace = useCallback(async () => {
-        const map = mapRef.current;
-        const icao = selectedIcao24;
-        if (!map || !icao) return;
-
-        if (traceIcao24 === icao) {
-            clearTrace();
-            return;
-        }
-
-        setTraceLoading(true);
-        try {
-            const res = await fetch(`/api/flight-trace/${icao}`);
-            const data = await res.json();
-            const segments = buildGreatCircleSegments(data.trace || []);
-
-            if (!traceLayerRef.current) traceLayerRef.current = L.layerGroup().addTo(map);
-            traceLayerRef.current.clearLayers();
-            segments.forEach(seg => {
-                L.polyline(seg, {
-                    color: '#4da3ff',
-                    weight: 3,
-                    opacity: 0.55,
-                    interactive: false,
-                }).addTo(traceLayerRef.current);
-            });
-            setTraceIcao24(icao);
-        } catch (e) {
-            logger.warn('TRACE', `Flight trace fetch failed for ${icao}: ${e.message}`);
-        } finally {
-            setTraceLoading(false);
-        }
-    }, [selectedIcao24, traceIcao24, clearTrace]);
 
 
     // [v4.1.2] Unified Selection & Camera Focus Effect
@@ -1961,12 +1907,6 @@ export default function MapView({
         <div ref={mapContainerRef} className="map-container">
             {hoveredPlane && hoveredPlane.icao24 !== selectedIcao24 && <HoverCard plane={hoveredPlane} pos={hoverPos} />}
             {/* ClickCard disabled — sidebar opens automatically on plane select */}
-            {/* [2026-09-01] "顯示歷史軌跡" button removed at user's request — the
-                manual API-fetch trace toggle isn't what's wanted here; the user
-                asked for the current flight's own path instead. toggleTrace/
-                buildGreatCircleSegments/traceLayerRef are left in place
-                (unused-but-harmless) pending that follow-up, not deleted, so
-                this can be re-wired without redoing the great-circle work. */}
             <AltitudeLegend colorScheme={colorScheme} />
         </div>
     );
