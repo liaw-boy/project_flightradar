@@ -6,15 +6,29 @@
 // predictions, and callers fall back to their existing behavior.
 
 const PREDICTOR_URL = process.env.TRAJECTORY_PREDICTOR_URL || 'http://127.0.0.1:8801';
-// Measured: a 5000-item batch (realistic full-fleet size) takes ~290ms of pure
-// inference time alone; Node-side JSON (de)serialization adds more on top.
-// This must scale with fleet size, not stay fixed at the old "handful of
-// stale planes" figure — a too-tight timeout here reads as "service is down"
-// and trips the circuit breaker below on every single cycle.
-const REQUEST_TIMEOUT_MS = 2000;
+// [2026-09-28] Re-measured against the current sampled batch size (~1/5 of
+// fleet, typically ~1900-2200 items — see broadcastEngine.js's
+// PREDICTION_SAMPLE_SLICES): a solo call takes ~150-220ms; three overlapping
+// calls (this shared, multi-tenant host's other load, or a slow GPU moment)
+// serialize to ~550-650ms each. The 2s timeout this replaces was tripping
+// every ~15-25 min on nothing worse than that — real stalls, not a batch-size
+// problem, but nowhere near 2s of genuine compute. Generous on purpose:
+// predictions are background-only right now (prediction_log accuracy
+// tracking; MapView's Phase 2 display blend is disabled), so a slower
+// response has no user-facing cost, while a spurious timeout still trips the
+// circuit breaker below for a full UNAVAILABLE_BACKOFF_MS.
+const REQUEST_TIMEOUT_MS = 5000;
 
 let _unavailableUntil = 0; // brief circuit breaker so a dead service doesn't add latency every cycle
 const UNAVAILABLE_BACKOFF_MS = 15_000;
+
+// [2026-09-28] Nothing previously stopped broadcastEngine's ~2s cycle from
+// firing a new call while the last one was still in flight — measured 3x
+// overlap alone triples per-call latency (serialized on the predictor's
+// single worker), which is exactly the kind of self-inflicted pile-up that
+// pushes an otherwise-fine call over the timeout. Skip a cycle instead of
+// stacking another concurrent request on top.
+let _inFlight = false;
 
 // Rolling call-outcome stats — the only visibility into predictBatch's health
 // without tailing logs; exposed via getStats() for a future /api/debug route.
@@ -30,7 +44,9 @@ async function predictBatch(items) {
     const results = new Map();
     if (!items || items.length === 0) return results;
     if (Date.now() < _unavailableUntil) return results;
+    if (_inFlight) return results; // a previous call hasn't returned yet — don't stack another on top
 
+    _inFlight = true;
     stats.calls++;
     const startMs = Date.now();
     try {
@@ -52,6 +68,8 @@ async function predictBatch(items) {
         stats.lastError = err.message;
         console.error(`[trajectoryPredictor] predict_batch failed (${items.length} items): ${err.message} — backing off ${UNAVAILABLE_BACKOFF_MS}ms`);
         _unavailableUntil = Date.now() + UNAVAILABLE_BACKOFF_MS;
+    } finally {
+        _inFlight = false;
     }
     stats.lastLatencyMs = Date.now() - startMs;
     stats.lastAt = Date.now();
@@ -59,7 +77,7 @@ async function predictBatch(items) {
 }
 
 function getStats() {
-    return { ...stats, circuitOpenUntil: _unavailableUntil };
+    return { ...stats, circuitOpenUntil: _unavailableUntil, inFlight: _inFlight };
 }
 
 module.exports = { predictBatch, getStats };
