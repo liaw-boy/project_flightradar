@@ -1119,6 +1119,7 @@ registerHealthRoutes(app, {
     getGlobalPlanesCache,
     getCpuUsage: () => _currentCpuUsage,
     backendDir: __dirname,
+    getClientCount,
 });
 
 const { createTrackIngest } = require('./services/trackIngest');

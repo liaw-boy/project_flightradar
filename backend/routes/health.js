@@ -2,6 +2,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 
 // Shared with the startup catch-up checks in server.js — a single definition
 // so the freshness badge and the "should I resync on boot" decision can't drift.
@@ -18,11 +19,35 @@ const DATA_FRESHNESS_THRESHOLDS = {
 // server.js — a captured reference would go stale after the first
 // reassignment, unlike the Maps/objects below which are only ever
 // mutated in place.
+// Constant-time compare against METRICS_TOKEN, same pattern as
+// isMonitorPasswordValid in middleware/monitorAuth.js.
+function isMetricsTokenValid(token) {
+    const expected = process.env.METRICS_TOKEN;
+    if (!expected || typeof token !== 'string') return false;
+    const expectedBuf = Buffer.from(expected);
+    const givenBuf = Buffer.from(token);
+    if (givenBuf.length !== expectedBuf.length) {
+        crypto.timingSafeEqual(expectedBuf, Buffer.alloc(expectedBuf.length));
+        return false;
+    }
+    return crypto.timingSafeEqual(expectedBuf, givenBuf);
+}
+
+// The process binds to 0.0.0.0 (see server.listen in server.js), so this
+// isn't just a formality — without it, anything reachable on the LAN could
+// try the token. Loopback-only + token is defense in depth, matching how
+// /monitor is session+password gated rather than password-only.
+function isLoopback(req) {
+    const ip = req.ip || req.socket?.remoteAddress || '';
+    return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
 function registerHealthRoutes(app, deps) {
     const {
         requireAdminAccess, syncLog, activeSessions,
         ingestionStats, sourceHealth, apiStats, TrackPoint, FlightSession,
         getMasterStateMap, getGlobalPlanesCache, getCpuUsage, backendDir,
+        getClientCount,
     } = deps;
 
     app.get('/api/ping', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
@@ -102,6 +127,42 @@ function registerHealthRoutes(app, deps) {
                 dbPath: 'backend/data/aerostrat.db'
             },
             timestamp: new Date().toISOString()
+        });
+    });
+
+    // Local-only metrics for the host's Zabbix agent (UserParameter script)
+    // to scrape. Deliberately separate from /api/health's MONITOR_PASSWORD
+    // session auth — a system-level polling script shouldn't need the human
+    // admin password, so it gets its own token (METRICS_TOKEN) instead.
+    app.get('/internal/metrics', (req, res) => {
+        if (!isLoopback(req) || !isMetricsTokenValid(req.get('x-metrics-token'))) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        const masterStateMap = getMasterStateMap();
+        const globalPlanesCache = getGlobalPlanesCache();
+        const freshness = syncLog.getAll();
+        const staleJobs = Object.entries(DATA_FRESHNESS_THRESHOLDS)
+            .filter(([job, threshold]) => {
+                const entry = freshness[job] || {};
+                const lastOk = entry.lastSuccess ? new Date(entry.lastSuccess).getTime() : null;
+                return lastOk === null || (Date.now() - lastOk) > threshold;
+            })
+            .map(([job]) => job);
+        const mem = process.memoryUsage();
+
+        res.json({
+            timestamp: new Date().toISOString(),
+            uptime_s: Math.round(process.uptime()),
+            memory_rss_mb: Math.round(mem.rss / 1024 / 1024),
+            memory_heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024),
+            planes_tracked: masterStateMap?.size ?? globalPlanesCache.states?.length ?? 0,
+            active_sessions: activeSessions.size,
+            ws_clients: getClientCount ? getClientCount() : null,
+            data_freshness_stale_jobs: staleJobs,
+            api_errors_total: apiStats.errors,
+            api_last_error_time: apiStats.lastErrorTime || null,
+            source_health: sourceHealth,
         });
     });
 
