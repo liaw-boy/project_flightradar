@@ -233,22 +233,27 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
             const lat = ((vp.lamin + vp.lamax) / 2).toFixed(4);
             const lon = ((vp.lomin + vp.lomax) / 2).toFixed(4);
 
-            // Parallel: airplanes.live /point + re-api
-            const [alR, reR] = await Promise.allSettled([
-                cbOpen('al-point')
-                    ? Promise.reject(new Error('CB open'))
-                    : fetch(`https://api.airplanes.live/v2/point/${lat}/${lon}/250`, {
+            // [2026-09-29] re-api.adsb.lol removed from this tier. Their own
+            // docs: RE-API "is only accessible from the same IP address as
+            // active adsb.lol feeders" — confirmed via direct test that this
+            // host (which doesn't run a feeder) gets a flat 403 from it,
+            // structurally, not as a temporary block. Unlike al-point/adsb.fi
+            // (fixable via an access request or already working), no retry
+            // or backoff schedule ever makes this succeed short of actually
+            // running a feeder here. Kept as a single call instead of a
+            // parallel-then-merge pair; adsb.fi-v3 below is still the real
+            // fallback for when al-point itself is unavailable.
+            let alR;
+            try {
+                alR = cbOpen('al-point')
+                    ? { status: 'rejected', reason: new Error('CB open') }
+                    : { status: 'fulfilled', value: await fetch(`https://api.airplanes.live/v2/point/${lat}/${lon}/250`, {
                           headers: { 'User-Agent': 'AEROSTRAT/11.0' },
                           signal: AbortSignal.timeout(8000),
-                      }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
-
-                cbOpen('re-api')
-                    ? Promise.reject(new Error('CB open'))
-                    : fetch(`https://re-api.adsb.lol?circle=${lat},${lon},500`, {
-                          headers: { 'User-Agent': 'AEROSTRAT/11.0' },
-                          signal: AbortSignal.timeout(8000),
-                      }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
-            ]);
+                      }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))) };
+            } catch (e) {
+                alR = { status: 'rejected', reason: e };
+            }
 
             let vpStates = [];
             let vpSources = [];
@@ -264,19 +269,7 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
                 if (msg !== 'CB open') cbTrip('al-point', msg);
             }
 
-            if (reR.status === 'fulfilled') {
-                // re-api uses "aircraft" key (readsb native)
-                const states = (reR.value.aircraft || []).map(p => normalizeAcRecord(p, reR.value.now))
-                    .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
-                vpStates = vpStates.concat(states);
-                vpSources.push('re-api');
-                cbReset('re-api', states.length, Math.round(performance.now() - t0));
-            } else {
-                const msg = reR.reason?.message || '';
-                if (msg !== 'CB open') cbTrip('re-api', msg);
-            }
-
-            // Fallback: adsb.fi v3 if both AL and re-api failed
+            // Fallback: adsb.fi v3 if al-point failed
             if (vpStates.length === 0 && !cbOpen('adsb.fi-v3')) {
                 try {
                     const r = await fetch(
