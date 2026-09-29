@@ -316,7 +316,15 @@ export default function MapView({
         // the wrong style before that effect runs.
         tileLayerRef.current = L.tileLayer(
             'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-            { maxZoom: 19, attribution: '' }
+            {
+                maxZoom: 19,
+                // adsb.fi's terms require citing them with a link to their
+                // homepage wherever their data is used (it's a fallback
+                // source here — see services/pollers.js) — this is the one
+                // persistent UI element for it (the mapLayer effect below
+                // only ever swaps the tile URL, never this attribution).
+                attribution: 'Data: <a href="https://adsb.fi" target="_blank" rel="noopener">adsb.fi</a>',
+            }
         ).addTo(map);
 
         // 初始 bounds
