@@ -34,10 +34,13 @@ async function getAccessToken() {
     client_secret: clientSecret,
   });
 
+  // [2026-09] No fetch in this service had a timeout — see tdxFids.js's
+  // REQUEST_TIMEOUT_MS comment for why that matters here too.
   const res = await fetch(AUTH_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!res.ok) {

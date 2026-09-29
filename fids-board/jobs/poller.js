@@ -35,10 +35,30 @@ async function pollAirport(airport) {
   }
 }
 
+// [2026-09] A full cycle (8 airports x 2 directions x 13s gap) takes ~3.3
+// min, under the 5-min POLL_CRON interval, so cycles shouldn't overlap in
+// the normal case. But nothing enforced that: every fetch() in this service
+// used to have no timeout, so a single hung TDX response could stall a
+// cycle well past 5 minutes, and cron.schedule() would then fire pollOnce()
+// again on top of the still-running one with nothing to stop it — twice
+// the request rate against TDX's 5/min limit. This guard is the second half
+// of that fix (see tdxFids.js/tdxAuth.js's new REQUEST_TIMEOUT_MS): even if
+// a cycle does run long, a new one is skipped rather than piled on top.
+let _pollRunning = false;
+
 async function pollOnce() {
-  for (const airport of AIRPORT_CODES) {
-    await pollAirport(airport);
-    await sleep(REQUEST_GAP_MS);
+  if (_pollRunning) {
+    console.warn("[poller] previous cycle still running — skipping this tick instead of overlapping it");
+    return;
+  }
+  _pollRunning = true;
+  try {
+    for (const airport of AIRPORT_CODES) {
+      await pollAirport(airport);
+      await sleep(REQUEST_GAP_MS);
+    }
+  } finally {
+    _pollRunning = false;
   }
 }
 
