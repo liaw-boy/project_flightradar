@@ -17,7 +17,8 @@ function registerFrontendStatic(app, __dirname_backend) {
         app.get('/{*path}', (req, res, next) => {
             const p = req.path;
             if (p.startsWith('/api') || p.startsWith('/ws') || p.startsWith('/monitor')
-                || p.startsWith('/airline-logos') || p.startsWith('/airline-banners')) return next();
+                || p.startsWith('/internal') || p.startsWith('/airline-logos')
+                || p.startsWith('/airline-banners')) return next();
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             res.sendFile(path.join(publicReactPath, 'index.html'));
         });
