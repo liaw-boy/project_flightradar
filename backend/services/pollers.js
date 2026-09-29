@@ -78,24 +78,31 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
         const t0 = performance.now();
 
         try {
-            // Both sources fire in parallel every cycle — hot standby.
-            // adsb.lol is preferred; adsb.fi data is ready immediately if lol fails,
-            // with zero additional delay (no sequential fallback gap).
-            const [lolR, fiR] = await Promise.allSettled([
-                cbOpen('adsb.lol')
-                    ? Promise.reject(new Error('CB open'))
-                    : fetch('https://api.adsb.lol/v2/lat/0/lon/0/dist/99999', {
+            // [2026-09-29] adsb.fi-snap used to fire in parallel every single
+            // cycle as a "hot standby", even though its data was thrown away
+            // on the (overwhelming majority of) cycles where adsb.lol
+            // succeeded — ~5,760 calls/day to a free community API for a
+            // fallback that's almost never actually used. adsb.fi's own
+            // policy counts 403/429 responses toward its abuse threshold, so
+            // hitting it every 15s while blocked also kept re-arming its own
+            // restriction (see circuitBreaker.js's FAILURE_TIERS comment —
+            // this is the same "we kept refreshing our own block" pattern
+            // that caused the 2.9-day outage there). Now sequential and
+            // on-demand: adsb.fi is only called at all when adsb.lol's own
+            // request for this cycle actually failed. Costs a few hundred ms
+            // of extra latency on a genuine adsb.lol failure; adsb.lol has
+            // otherwise been reliable, so that's the right trade.
+            let lolR;
+            try {
+                lolR = cbOpen('adsb.lol')
+                    ? { status: 'rejected', reason: new Error('CB open') }
+                    : { status: 'fulfilled', value: await fetch('https://api.adsb.lol/v2/lat/0/lon/0/dist/99999', {
                           headers: { 'User-Agent': 'AEROSTRAT/12.0' },
                           signal: AbortSignal.timeout(8000),
-                      }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
-
-                cbOpen('adsb.fi-snap')
-                    ? Promise.reject(new Error('CB open'))
-                    : fetch('https://opendata.adsb.fi/api/v2/snapshot', {
-                          headers: { 'User-Agent': 'AEROSTRAT/12.0' },
-                          signal: AbortSignal.timeout(10000),
-                      }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
-            ]);
+                      }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))) };
+            } catch (e) {
+                lolR = { status: 'rejected', reason: e };
+            }
 
             let lolStates = [];
             let fiStates  = [];
@@ -121,20 +128,35 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
                 }
             }
 
-            if (fiR.status === 'fulfilled') {
-                fiStates = (fiR.value.ac || []).map(p => normalizeAcRecord(p, fiR.value.now))
-                    .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
-                cbReset('adsb.fi-snap', fiStates.length, Math.round(performance.now() - t0));
-            } else {
-                const msg = fiR.reason?.message || '';
-                if (msg === 'CB open') logSuppressedSource('adsb.fi-snap');
-                else {
-                    cbTrip('adsb.fi-snap', msg);
-                    logger.warn('SYNC', `adsb.fi-snap failed: ${msg}`);
+            // Only reached for the minority of cycles where adsb.lol didn't
+            // already produce usable states — see comment above.
+            if (lolStates.length === 0) {
+                let fiR;
+                try {
+                    fiR = cbOpen('adsb.fi-snap')
+                        ? { status: 'rejected', reason: new Error('CB open') }
+                        : { status: 'fulfilled', value: await fetch('https://opendata.adsb.fi/api/v2/snapshot', {
+                              headers: { 'User-Agent': 'AEROSTRAT/12.0' },
+                              signal: AbortSignal.timeout(10000),
+                          }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))) };
+                } catch (e) {
+                    fiR = { status: 'rejected', reason: e };
+                }
+
+                if (fiR.status === 'fulfilled') {
+                    fiStates = (fiR.value.ac || []).map(p => normalizeAcRecord(p, fiR.value.now))
+                        .filter(p => typeof p.lat === 'number' && typeof p.lng === 'number');
+                    cbReset('adsb.fi-snap', fiStates.length, Math.round(performance.now() - t0));
+                } else {
+                    const msg = fiR.reason?.message || '';
+                    if (msg === 'CB open') logSuppressedSource('adsb.fi-snap');
+                    else {
+                        cbTrip('adsb.fi-snap', msg);
+                        logger.warn('SYNC', `adsb.fi-snap failed: ${msg}`);
+                    }
                 }
             }
 
-            // Prefer adsb.lol; fall back to adsb.fi instantly (data already fetched)
             const states = lolStates.length > 0 ? lolStates : fiStates;
             const source = lolStates.length > 0 ? 'adsb.lol' : (fiStates.length > 0 ? 'adsb.fi-snap' : '');
 
