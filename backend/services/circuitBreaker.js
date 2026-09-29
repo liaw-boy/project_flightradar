@@ -4,6 +4,7 @@
 // (open/tripped/reset) is visible to every consumer that imports it.
 const logger = require('../logger');
 const { sourceHealth } = require('../state/appState');
+const { notifyDiscord } = require('./discordNotifier');
 
 const SOURCE_CB_MS = 5 * 60_000;      // legacy fixed-ms default, kept for explicit-ms callers
 const SOURCE_CB_MAX_MS = 30 * 60_000; // legacy cap
@@ -63,6 +64,9 @@ const cbTrip = (k, reasonOrMs) => {
     const backoffMs = explicitMs
         ? reasonOrMs
         : Math.min(tier.baseMs * (2 ** (consecutiveFails - 1)), tier.maxMs);
+    // Capture before overwriting sourceHealth[k] below — used for the
+    // enter/already-in-blocked distinction right after.
+    const enteringBlocked = tierKey === 'blocked' && prev?.tier !== 'blocked';
     sourceHealth[k] = {
         ...prev,
         cbUntil: Date.now() + backoffMs,
@@ -71,10 +75,36 @@ const cbTrip = (k, reasonOrMs) => {
         lastFailReason: typeof reasonOrMs === 'string' ? reasonOrMs : (prev?.lastFailReason ?? null),
     };
     logger.warn('CB', `${k} tripped — ${tierKey ? `tier=${tierKey} (${reasonOrMs})` : 'explicit-ms'}, cooldown=${Math.round(backoffMs / 1000)}s, fail #${consecutiveFails}`);
+
+    // [2026-09-29] A source sitting in the "blocked" tier (confirmed
+    // 403/429 access-denial, up to a 24h cooldown) used to produce zero
+    // external signal — this is exactly how adsb.fi-snap, re-api.adsb.lol
+    // and all three airplanes.live endpoints sat silently 403'd for an
+    // unknown stretch, only noticed once /internal/metrics happened to
+    // surface sourceHealth. Alert once on the transition into "blocked"
+    // (not on every re-trip while already there, which would just repeat
+    // hourly) so a real access-denial is visible without having to go
+    // looking for it.
+    if (enteringBlocked) {
+        notifyDiscord({
+            icon: 'outageDown', color: 'orange',
+            title: `AEROSTRAT 資料來源遭封鎖: ${k}`,
+            description: `**${k}** 收到確認性封鎖回應（${reasonOrMs}），已進入長冷卻（最長 24 小時，逐次翻倍）。這類封鎖通常是存取被拒絕或超出用量限制，不會短時間內自己恢復——可能需要重新申請授權、調整請求方式，或該來源本身有其他規則變動。`,
+        }, 'DISCORD_OUTAGE_WEBHOOK_URL');
+    }
 };
 
 const cbReset = (k, count, latency) => {
+    const prev = sourceHealth[k];
+    const recoveringFromBlock = prev?.tier === 'blocked' && (prev.cbUntil || 0) > 0;
     sourceHealth[k] = { cbUntil: 0, consecutiveFails: 0, lastOk: Date.now(), lastCount: count, lastLatency: latency };
+    if (recoveringFromBlock) {
+        notifyDiscord({
+            icon: 'outageUp', color: 'green',
+            title: `AEROSTRAT 資料來源已恢復: ${k}`,
+            description: `**${k}** 從封鎖狀態恢復，目前請求正常回應。`,
+        }, 'DISCORD_OUTAGE_WEBHOOK_URL');
+    }
 };
 
 // A source held open by its circuit breaker used to fail silently — the skip
