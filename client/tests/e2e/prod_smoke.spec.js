@@ -9,8 +9,10 @@
  *  3. Aircraft icons appear on canvas within 15 s
  *  4. WebSocket connects and plane count updates
  *  5. Clicking an aircraft opens the sidebar with flight info
- *  6. API health endpoint /api/health
- *  7. Monitor page /monitor?token=dev
+ *  6. Public health check /api/planes/bbox-ping; /api/health correctly
+ *     requires admin auth (401 without a session)
+ *  7. Monitor login is gated when unauthenticated, and a real login with
+ *     MONITOR_PASSWORD (env var, never hardcoded) reaches the dashboard
  *  8. BBox API /api/planes/bbox returns aircraft data
  */
 
@@ -375,62 +377,71 @@ test('5 - clicking an aircraft opens sidebar with flight info', async ({ page })
 });
 
 // ---------------------------------------------------------------------------
-// 6. API health endpoint
+// 6. Public health check + admin health endpoint is correctly gated
 // ---------------------------------------------------------------------------
-test('6 - API health endpoint returns healthy status', async ({ request }) => {
-    const response = await request.get(`${PROD_URL}/api/health`, { timeout: 10_000 });
+test('6 - public health check is up; /api/health requires auth', async ({ request }) => {
+    // /api/planes/bbox-ping is the actual public, unauthenticated health
+    // check used elsewhere (e.g. docker-compose healthcheck) — this is what
+    // "is the site up" should mean.
+    const ping = await request.get(`${PROD_URL}/api/planes/bbox-ping`, { timeout: 10_000 });
+    expect(ping.ok(), `bbox-ping returned ${ping.status()}`).toBe(true);
 
-    expect(response.ok(), `Health endpoint returned ${response.status()}`).toBe(true);
-
-    const body = await response.json().catch(() => null);
-    console.log(`  [info] /api/health response: ${JSON.stringify(body)}`);
-
-    if (body) {
-        // Accept various health response shapes
-        const isHealthy =
-            body.status === 'ok' ||
-            body.status === 'healthy' ||
-            body.healthy === true ||
-            body.ok === true ||
-            body.alive === true ||
-            (typeof body === 'object' && Object.keys(body).length > 0);
-        expect(isHealthy, `Health response does not indicate healthy state: ${JSON.stringify(body)}`).toBe(true);
-    }
+    // /api/health is an admin-only diagnostics endpoint. Without a monitor
+    // session it MUST return 401 — that's correct, secure behavior, not a
+    // failure. Asserting this catches an accidental future auth regression
+    // (e.g. someone removing the guard) rather than papering over it.
+    const health = await request.get(`${PROD_URL}/api/health`, { timeout: 10_000 });
+    expect(health.status(), '/api/health should require auth when no session is sent').toBe(401);
 });
 
 // ---------------------------------------------------------------------------
-// 7. Monitor page accessible
+// 7. Monitor auth: unauthenticated access is gated; a real login works
 // ---------------------------------------------------------------------------
-test('7 - monitor page accessible at /monitor?token=dev', async ({ page }) => {
-    const jsErrors = [];
-    page.on('pageerror', err => jsErrors.push(err.message));
-
-    const response = await page.goto(`${PROD_URL}/monitor?token=dev`, {
+test('7 - monitor page requires login; real login reaches the dashboard', async ({ page, request }) => {
+    // (a) Unauthenticated: must show the login page, not the dashboard.
+    const unauthed = await page.goto(`${PROD_URL}/monitor`, {
         waitUntil: 'domcontentloaded',
         timeout: 20_000,
     });
+    expect(unauthed.status(), 'Unauthenticated /monitor should return 401').toBe(401);
+    const loginBodyText = await page.evaluate(() => document.body?.innerText ?? '');
+    expect(loginBodyText.trim().length, 'Login page body is empty').toBeGreaterThan(0);
+    await shot(page, '07-monitor-login-page');
 
-    await shot(page, '07-monitor-page');
+    // (b) Authenticated: log in with the real password (env var only, never
+    // hardcoded — see CLAUDE.md). Skip gracefully if it isn't provided to
+    // the test runner's environment, rather than failing or faking success.
+    const password = process.env.MONITOR_PASSWORD;
+    test.skip(!password, 'MONITOR_PASSWORD not set in test environment; skipping authenticated check');
 
-    expect(
-        [200, 201, 202].includes(response.status()),
-        `Monitor page returned HTTP ${response.status()}`
-    ).toBe(true);
+    const loginResp = await request.post(`${PROD_URL}/monitor/login`, {
+        form: { password },
+        timeout: 10_000,
+        maxRedirects: 0,
+    }).catch(err => err); // Playwright throws on a non-2xx/3xx by default in some configs; handled below
 
-    // Page should not be blank or just show an error
-    const bodyText = await page.evaluate(() => document.body?.innerText ?? '');
-    console.log(`  [info] Monitor page body preview: "${bodyText.trim().slice(0, 200)}"`);
-    expect(bodyText.trim().length, 'Monitor page body is empty').toBeGreaterThan(0);
+    const setCookie = loginResp?.headers?.()['set-cookie'] ?? '';
+    const sessionMatch = /monitor_session=([^;]+)/.exec(setCookie);
+    expect(sessionMatch, 'Login did not return a monitor_session cookie').not.toBeNull();
 
-    // Should not show a generic 403/401 forbidden page
-    const isForbidden = /forbidden|unauthorized|access denied|401|403/i.test(bodyText);
-    expect(isForbidden, `Monitor page shows forbidden/auth error: "${bodyText.slice(0, 100)}"`).toBe(false);
+    await page.context().addCookies([{
+        name: 'monitor_session',
+        value: sessionMatch[1],
+        url: PROD_URL,
+    }]);
 
-    const fatal = jsErrors.filter(e => /uncaught|cannot read|is not a function/i.test(e));
-    if (fatal.length > 0) {
-        await shot(page, '07-monitor-js-errors');
-        console.log(`  [warn] Fatal JS errors on monitor page: ${fatal.join('; ')}`);
-    }
+    const dashboard = await page.goto(`${PROD_URL}/monitor`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 20_000,
+    });
+    expect(dashboard.status(), 'Authenticated /monitor should return 200').toBe(200);
+
+    const dashboardBodyText = await page.evaluate(() => document.body?.innerText ?? '');
+    console.log(`  [info] Monitor dashboard body preview: "${dashboardBodyText.trim().slice(0, 200)}"`);
+    expect(dashboardBodyText.trim().length, 'Monitor dashboard body is empty').toBeGreaterThan(0);
+    const isForbidden = /forbidden|unauthorized|access denied|login/i.test(dashboardBodyText);
+    expect(isForbidden, `Authenticated dashboard still shows login/auth error: "${dashboardBodyText.slice(0, 100)}"`).toBe(false);
+    await shot(page, '07-monitor-dashboard');
 });
 
 // ---------------------------------------------------------------------------
