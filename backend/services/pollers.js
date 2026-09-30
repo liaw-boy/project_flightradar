@@ -98,7 +98,16 @@ function createPollers({ normalizeAcRecord, ingestTrackPoints, triggerBackground
                     ? { status: 'rejected', reason: new Error('CB open') }
                     : { status: 'fulfilled', value: await fetch('https://api.adsb.lol/v2/lat/0/lon/0/dist/99999', {
                           headers: { 'User-Agent': 'AEROSTRAT/12.0' },
-                          signal: AbortSignal.timeout(8000),
+                          // [2026-09-30] Was 8s. This one signal covers the whole
+                          // ~5MB global download, not just time-to-first-byte. Log
+                          // data showed successful fetches taking ~1.8s off-peak but
+                          // 2.5-4.5s (p90) at UTC 13-21, with the slow tail clipped
+                          // at exactly the 8s cap: ~430 timeouts on 2026-09-29 (vs 3
+                          // on 2026-09-26), plus JSON-truncation errors from bodies
+                          // cut off mid-download. Must stay under the 15s poll
+                          // interval (GLOBAL_BASELINE_INTERVAL_SEC) so a slow fetch
+                          // finishes before the next tick.
+                          signal: AbortSignal.timeout(14000),
                       }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))) };
             } catch (e) {
                 lolR = { status: 'rejected', reason: e };
