@@ -7,20 +7,22 @@
 //
 // Field names/behavior (status classification, codeshare grouping, search,
 // terminal/airline/cargo filters, freshness buffer) are ported from the
-// author's standalone tpe_flight_board project — this keeps that project's
-// preferred UX/data shape while staying a single AEROSTRAT service rather
-// than a second deployment.
+// author's former standalone flight-board project (since folded into this repo
+// as fids-board/) — this keeps that project's preferred UX/data shape.
 const logger = require('../logger');
 const { AIRLINES } = require('../data/tpeAirlines');
 
-// [2026-08-31] Was calling TDX directly here. Root-caused: this project and
-// the separately-run tpe_flight_board project (same machine, port 3800) both
+// [2026-08-31] Was calling TDX directly here. Root-caused: this service and a
+// separately-run flight-board project (same machine, port 3800) both
 // independently polled the exact same 4 airports under the SAME TDX member
 // account — combined usage exceeded TDX's account-level quota and got BOTH
-// registered clients suspended ("超量使用停權"), not just this one. Fix:
-// tpe_flight_board already crawls TDX and exposes the result over HTTP —
-// read that instead of hitting TDX a second time for identical data.
-const TPE_FLIGHT_BOARD_URL = process.env.TPE_FLIGHT_BOARD_URL || 'http://127.0.0.1:3800';
+// registered clients suspended ("超量使用停權"). Fix: only fids-board/ (this
+// repo's own service, 127.0.0.1:3800) talks to TDX; read its already-crawled
+// data over HTTP instead of hitting TDX a second time for identical data.
+// [2026-09-30] The old standalone project is gone; fids-board/ is the only
+// thing that answers on this port now. FIDS_BOARD_URL replaces the old
+// TPE_FLIGHT_BOARD_URL name (was never set in any .env, default unchanged).
+const FIDS_BOARD_URL = process.env.FIDS_BOARD_URL || 'http://127.0.0.1:3800';
 const REFRESH_MS = 5 * 60 * 1000; // 5 minutes — FIDS remarks/times update continuously
 const BUFFER_MINUTES = 10; // live view hides flights more than this far in the past
 
@@ -40,13 +42,13 @@ function clean(value) {
     return trimmed;
 }
 
-// tpe_flight_board's /api/flights already serializes+groups codeshares
+// fids-board's /api/flights already serializes+groups codeshares
 // server-side, but its field names line up with this module's own "raw"
 // shape closely enough to feed straight into the serialize()/groupCodeshares()
 // pipeline below unchanged — the only fields it doesn't carry (flightDate,
 // isCargo) aren't load-bearing here (isCargo defaults false since we always
 // request cargo=1 below, so nothing downstream would need to filter it out).
-function fromTpeFlightBoardRecord(item, direction) {
+function fromFidsBoardRecord(item, direction) {
     return {
         direction,
         flightDate: (item.scheduledTime || '').slice(0, 10) || null,
@@ -71,21 +73,21 @@ function fromTpeFlightBoardRecord(item, direction) {
 async function fetchBoardForAirport(code) {
     // all=1 + cargo=1: ask for the full unfiltered day's data — this
     // module's own queryFlights() below re-applies the buffer/cargo/terminal
-    // filters, so we want tpe_flight_board's raw superset here, not its
+    // filters, so we want fids-board's raw superset here, not its
     // already-buffer-filtered live view.
     const qs = `airport=${code}&all=1&cargo=1`;
     const [arrRes, depRes] = await Promise.allSettled([
-        fetch(`${TPE_FLIGHT_BOARD_URL}/api/flights?direction=arrival&${qs}`, { signal: AbortSignal.timeout(8000) }),
-        fetch(`${TPE_FLIGHT_BOARD_URL}/api/flights?direction=departure&${qs}`, { signal: AbortSignal.timeout(8000) }),
+        fetch(`${FIDS_BOARD_URL}/api/flights?direction=arrival&${qs}`, { signal: AbortSignal.timeout(8000) }),
+        fetch(`${FIDS_BOARD_URL}/api/flights?direction=departure&${qs}`, { signal: AbortSignal.timeout(8000) }),
     ]);
 
     const arrJson = arrRes.status === 'fulfilled' && arrRes.value.ok ? await arrRes.value.json() : null;
     const depJson = depRes.status === 'fulfilled' && depRes.value.ok ? await depRes.value.json() : null;
-    if (!arrJson && !depJson) throw new Error('tpe_flight_board unreachable for both directions');
+    if (!arrJson && !depJson) throw new Error('fids-board unreachable for both directions');
 
     return {
-        arrivals: (arrJson?.flights || []).map(f => fromTpeFlightBoardRecord(f, 'arrival')),
-        departures: (depJson?.flights || []).map(f => fromTpeFlightBoardRecord(f, 'departure')),
+        arrivals: (arrJson?.flights || []).map(f => fromFidsBoardRecord(f, 'arrival')),
+        departures: (depJson?.flights || []).map(f => fromFidsBoardRecord(f, 'departure')),
         updatedAt: new Date().toISOString(),
     };
 }
@@ -102,7 +104,7 @@ async function refreshFidsBoard() {
     }
 }
 
-// ── Status classification (ported from tpe_flight_board/routes/api.js) ─────
+// ── Status classification (ported from fids-board/routes/api.js) ─────
 function computeStatus(f) {
     const remark = f.remark || '';
     if (remark.includes('取消')) return 'cancelled';

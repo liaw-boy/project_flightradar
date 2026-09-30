@@ -20,7 +20,7 @@ function headingDir(h) {
 }
 
 // Scheduled/estimated departure-arrival timestamps (ISO strings from
-// flightController.js's route waterfall — AeroDataBox globally, tpe_flight_board
+// flightController.js's route waterfall — AeroDataBox globally, fids-board
 // for TPE/TSA/KHH/RMQ domestic legs). Shown alongside the existing distance-based
 // FlightProgressInline arc, which needs no schedule data at all.
 function fmtSchedTime(iso) {

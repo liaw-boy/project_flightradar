@@ -1,6 +1,6 @@
 'use strict';
 // 常見航班航空公司代碼對照(涵蓋 TPE 主要航線),非窮舉。
-// Ported from the author's tpe_flight_board project.
+// Ported from the author's former standalone flight-board project (now fids-board/).
 const AIRLINES = {
     CI: '中華航空', BR: '長榮航空', JX: '星宇航空', IT: '台灣虎航', B7: '立榮航空',
     CX: '國泰航空', KA: '國泰港龍', KE: '大韓航空', OZ: '韓亞航空', ZE: '易斯達航空',

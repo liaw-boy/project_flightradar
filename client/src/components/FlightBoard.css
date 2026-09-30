@@ -1,6 +1,6 @@
 /* Editorial/print-inspired board style — deliberately distinct from
-   AEROSTRAT's dark radar theme; ported from the author's standalone
-   tpe_flight_board project. */
+   AEROSTRAT's dark radar theme; ported from the author's former standalone
+   flight-board project (now fids-board/). */
 .fb-overlay {
     --fb-bg: #fcfaf7;
     --fb-surface: #ffffff;

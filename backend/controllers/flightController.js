@@ -9,14 +9,14 @@ const logger = require('../logger');
 const _boardAirportCodes = new Set(listBoardAirports().map(a => a.code));
 
 // Taiwan domestic-board timing enrichment (TPE/TSA/KHH/RMQ only — see
-// fidsBoard.js). This is tpe_flight_board's own official scheduled/estimated/
+// fidsBoard.js). This is fids-board's own official scheduled/estimated/
 // actual triple, more precise for these 4 airports than AeroDataBox's
 // generic schedule inference. Runs AFTER the main route waterfall has
 // already resolved flightNumber/origin_iata/destination_iata — searches the
 // board by flight-number text match, then sanity-checks the matched record's
 // origin/destination actually agree with the already-resolved route before
 // trusting its times (guards against a false substring match).
-// tpe_flight_board keys its own records by IATA-style flight number (e.g.
+// fids-board keys its own records by IATA-style flight number (e.g.
 // "AE1275"), but `flightNumber` here is often still the raw ICAO callsign
 // (e.g. "MDA1275", Mandarin Airlines' ICAO prefix) when AeroDataBox hasn't
 // resolved it to IATA form — so a plain text match misses real matches.
@@ -79,7 +79,7 @@ function fetchFidsBoardTiming(flightNumber, originIata, destinationIata) {
         // (departure status can still read "ontime" hours after an
         // enroute delay that the arrival record already reflects).
         boardStatus: (arrMatch || depMatch)?.status || null,
-        source: 'tpe_flight_board',
+        source: 'fids-board',
     };
 }
 
@@ -683,7 +683,7 @@ exports.getCompleteDetailsInternal = async (hex, callsign) => {
 
         // Taiwan domestic board (TPE/TSA/KHH/RMQ) timing enrichment — more
         // precise than AeroDataBox for these 4 airports since it's the
-        // official tpe_flight_board data. Overrides AeroDataBox's schedule
+        // official fids-board data. Overrides AeroDataBox's schedule
         // fields when a confident match is found; leaves them untouched
         // otherwise (graceful no-op for non-Taiwan routes/no match).
         const boardTiming = fetchFidsBoardTiming(routeInfo.flightNumber, routeInfo.origin_iata, routeInfo.destination_iata);

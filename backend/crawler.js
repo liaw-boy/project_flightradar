@@ -4,14 +4,16 @@ const logger    = require('./logger');
 const syncLog   = require('./db/syncLogger');
 
 // [2026-08-31] Was calling TDX directly here (own getTDXAccessToken/
-// fetchAirportFIDS). Root-caused: this project and the separately-run
-// tpe_flight_board project (same machine, port 3800) both independently
-// polled the exact same 4 airports under the SAME TDX member account —
-// combined usage exceeded TDX's account-level quota and got BOTH registered
-// clients suspended ("超量使用停權"). Fix: read tpe_flight_board's
-// already-crawled data over HTTP instead of hitting TDX a second time here
-// (services/fidsBoard.js got the same fix for its own separate TDX caller).
-const TPE_FLIGHT_BOARD_URL = process.env.TPE_FLIGHT_BOARD_URL || 'http://127.0.0.1:3800';
+// fetchAirportFIDS). Root-caused: this service and a separately-run
+// flight-board project (same machine, port 3800) both independently polled
+// the exact same 4 airports under the SAME TDX member account — combined
+// usage exceeded TDX's account-level quota and got BOTH registered clients
+// suspended ("超量使用停權"). Fix: read fids-board's (this repo's own
+// service) already-crawled data over HTTP instead of hitting TDX a second
+// time here (services/fidsBoard.js got the same fix for its own caller).
+// [2026-09-30] The old standalone project is gone; FIDS_BOARD_URL replaces
+// the old TPE_FLIGHT_BOARD_URL name (never set in any .env, same default).
+const FIDS_BOARD_URL = process.env.FIDS_BOARD_URL || 'http://127.0.0.1:3800';
 
 // 台灣主要機場 — 只爬有大量國際航班的機場以節省 TDX 點數
 // 離島/小機場的班次極少，adsbdb.com 已能覆蓋，不需要 TDX
@@ -25,8 +27,8 @@ const TW_AIRPORTS = [
 async function fetchAirportFIDS(iata) {
     const qs = `airport=${iata}&all=1&cargo=1`;
     const [arrRes, depRes] = await Promise.allSettled([
-        fetch(`${TPE_FLIGHT_BOARD_URL}/api/flights?direction=arrival&${qs}`, { signal: AbortSignal.timeout(8000) }),
-        fetch(`${TPE_FLIGHT_BOARD_URL}/api/flights?direction=departure&${qs}`, { signal: AbortSignal.timeout(8000) }),
+        fetch(`${FIDS_BOARD_URL}/api/flights?direction=arrival&${qs}`, { signal: AbortSignal.timeout(8000) }),
+        fetch(`${FIDS_BOARD_URL}/api/flights?direction=departure&${qs}`, { signal: AbortSignal.timeout(8000) }),
     ]);
 
     const arrJson = arrRes.status === 'fulfilled' && arrRes.value.ok ? await arrRes.value.json() : null;
@@ -35,11 +37,11 @@ async function fetchAirportFIDS(iata) {
 }
 
 async function crawlFlightSchedules() {
-    logger.info('CRAWLER', `Starting TDX-derived schedule sync via tpe_flight_board (${TW_AIRPORTS.length} airports)`);
+    logger.info('CRAWLER', `Starting TDX-derived schedule sync via fids-board (${TW_AIRPORTS.length} airports)`);
     syncLog.start('tdx');
 
     // Sequential with a short gap is no longer about respecting TDX's own
-    // rate limit (tpe_flight_board owns that now) — just gentle pacing
+    // rate limit (fids-board owns that now) — just gentle pacing
     // against a local service that's also serving live traffic.
     const results = [];
     for (const ap of TW_AIRPORTS) {
@@ -107,7 +109,7 @@ async function crawlFlightSchedules() {
 
 function buildCallsign(f) {
     // f.flightNumber already comes pre-combined (airlineId + number) from
-    // tpe_flight_board's /api/flights.
+    // fids-board's /api/flights.
     const raw = (f.flightNumber || '').trim().toUpperCase();
     return raw.replace(/[^A-Z0-9]/g, '') || null;
 }
