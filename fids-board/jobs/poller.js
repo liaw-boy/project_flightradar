@@ -63,7 +63,12 @@ async function pollOnce() {
 }
 
 function startPoller() {
-  const schedule = process.env.POLL_CRON || "*/2 * * * *";
+  // [2026-10-01] Default was every 2 minutes — if POLL_CRON was ever missing
+  // (fresh deploy, lost .env) this would burn TDX's whole monthly quota
+  // (3 points, ~3,000-4,100 calls) in under a day, which is exactly how the
+  // account got suspended in 2026-09. 6h = 64 calls/day, ~1,984/month; see
+  // .env.example for the budget math.
+  const schedule = process.env.POLL_CRON || "0 */6 * * *";
   console.log(`[poller] 排程啟動: ${schedule} (機場: ${AIRPORT_CODES.join(", ")})`);
   pollOnce(); // 啟動時先跑一次,不用等第一個 cron tick
   cron.schedule(schedule, pollOnce);
